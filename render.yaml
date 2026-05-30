@@ -26,7 +26,7 @@ services:
     # build crashes with "Cannot find package 'esbuild'".
     buildCommand: |
       npx --yes pnpm@9.15.0 install --frozen-lockfile=false --prod=false
-      npx --yes pnpm@9.15.0 --filter @workspace/api-server run build
+      npx --yes pnpm@9.15.0 run build:all
     startCommand: npx --yes pnpm@9.15.0 --filter @workspace/api-server run start:prod
     healthCheckPath: /api/health
     envVars:

@@ -74,23 +74,55 @@ for (const env of [process.env.REPLIT_DOMAINS, process.env.REPLIT_DEV_DOMAIN]) {
   }
 }
 
+// Support Render external URL if available
+if (process.env.RENDER_EXTERNAL_URL) {
+  try {
+    const renderHostname = new URL(process.env.RENDER_EXTERNAL_URL).hostname.toLowerCase();
+    trustedHostnames.add(renderHostname);
+  } catch (err) {
+    logger.error({ err, url: process.env.RENDER_EXTERNAL_URL }, "Failed to parse RENDER_EXTERNAL_URL");
+  }
+}
+
 app.use(
-  cors({
-    credentials: true,
-    origin(origin, cb) {
-      // Same-origin / curl / server-to-server requests have no Origin header.
-      if (!origin) return cb(null, true);
-      if (explicitOrigins.has(origin)) return cb(null, true);
-      let hostname = "";
-      try { hostname = new URL(origin).hostname.toLowerCase(); }
-      catch { return cb(new Error(`CORS: invalid origin ${origin}`)); }
-      if (trustedHostnames.has(hostname)) return cb(null, true);
-      // Dev convenience — local hosts only outside production.
-      if (process.env.NODE_ENV !== "production") {
-        if (/^(localhost|127\.0\.0\.1)$/.test(hostname)) return cb(null, true);
-      }
-      return cb(new Error(`CORS: origin ${origin} is not allowed`));
-    },
+  cors((req, cb) => {
+    const origin = req.header("Origin");
+    const corsOptions = { credentials: true, origin: false as boolean | string | string[] };
+
+    if (!origin) {
+      corsOptions.origin = true;
+      return cb(null, corsOptions);
+    }
+
+    if (explicitOrigins.has(origin)) {
+      corsOptions.origin = origin;
+      return cb(null, corsOptions);
+    }
+
+    let hostname = "";
+    try {
+      hostname = new URL(origin).hostname.toLowerCase();
+    } catch {
+      return cb(new Error(`CORS: invalid origin ${origin}`));
+    }
+
+    // Dynamic same-origin check (compare Origin host with Request Host)
+    const hostHeader = req.header("Host");
+    let hostHostname = "";
+    if (hostHeader) {
+      hostHostname = hostHeader.split(":")[0].toLowerCase();
+    }
+
+    if (
+      trustedHostnames.has(hostname) ||
+      (hostHostname && hostname === hostHostname) ||
+      (process.env.NODE_ENV !== "production" && /^(localhost|127\.0\.0\.1)$/.test(hostname))
+    ) {
+      corsOptions.origin = origin;
+      return cb(null, corsOptions);
+    }
+
+    return cb(new Error(`CORS: origin ${origin} is not allowed`));
   })
 );
 

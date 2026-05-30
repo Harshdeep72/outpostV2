@@ -1,0 +1,38 @@
+# Render Blueprint for Outpost Bot API server.
+#
+# If you already have a Render service for this app, you do NOT need to
+# adopt this blueprint — but you DO need to update the existing service's
+# Build Command in the Render dashboard to match `buildCommand` below.
+# Render's older auto-detected command (`npm install -g pnpm ...`) fails
+# with EROFS on Render's read-only /usr/lib. Corepack is the fix and
+# ships with Node 20.
+
+services:
+  - type: web
+    name: outpost-api
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeploy: true
+    nodeVersion: 20
+    # We deliberately AVOID `npm install -g pnpm` and `corepack enable`
+    # because both try to write to /usr/lib or /usr/bin which are read-only
+    # on Render (EROFS). `npx --yes pnpm@9.15.0 ...` downloads pnpm into
+    # the user-writable npm cache instead and works on every Render plan.
+    # `--prod=false` is REQUIRED here. Render sets NODE_ENV=production which
+    # makes pnpm skip devDependencies — but `esbuild` (used by build.mjs to
+    # bundle the API server) lives in devDependencies. Without this flag the
+    # build crashes with "Cannot find package 'esbuild'".
+    buildCommand: |
+      npx --yes pnpm@9.15.0 install --frozen-lockfile=false --prod=false
+      npx --yes pnpm@9.15.0 --filter @workspace/api-server run build
+    startCommand: npx --yes pnpm@9.15.0 --filter @workspace/api-server run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # The following must be set manually in the Render dashboard
+      # (Settings → Environment) — they are NOT committed here:
+      #   DATABASE_URL, SESSION_SECRET, DISCORD_TOKEN, DISCORD_CLIENT_ID,
+      #   DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID, ADMIN_*, etc.

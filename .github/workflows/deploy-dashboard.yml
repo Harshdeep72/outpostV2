@@ -1,0 +1,84 @@
+name: Deploy Dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: VITE_API_BASE_URL
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build dashboard
+        env:
+          # Render API URL — set this in GitHub repo Settings → Secrets → Actions
+          # Example value: https://outpost-sucks1.onrender.com
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          # GitHub Pages serves at /<repo-name>/ unless a custom domain is set.
+          # Override with secret BASE_PATH=/ if you add a custom domain.
+          BASE_PATH: ${{ secrets.BASE_PATH || '/Outpost-sucks1/' }}
+          PORT: "3000"
+          NODE_ENV: production
+        run: pnpm --filter @workspace/dashboard run build
+
+      - name: Add SPA 404 fallback
+        # GitHub Pages serves 404.html for unknown routes. Copying index.html
+        # there lets the SPA router handle deep links like /admin/users.
+        run: cp artifacts/dashboard/dist/public/index.html artifacts/dashboard/dist/public/404.html
+
+      - name: Add custom domain CNAME (optional)
+        # Set repo secret CUSTOM_DOMAIN to your domain (e.g. dash.example.com)
+        # to enable a custom domain. Leave unset to use the default
+        # username.github.io/Outpost-sucks1 URL.
+        env:
+          CUSTOM_DOMAIN: ${{ secrets.CUSTOM_DOMAIN }}
+        run: |
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            echo "$CUSTOM_DOMAIN" > artifacts/dashboard/dist/public/CNAME
+            echo "Wrote CNAME: $CUSTOM_DOMAIN"
+          else
+            echo "No custom domain configured, skipping CNAME"
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: artifacts/dashboard/dist/public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

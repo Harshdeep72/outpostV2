@@ -1,0 +1,22 @@
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "preinstall": "echo 'Installing workspace dependencies with pnpm...'",
+    "build": "pnpm --filter @workspace/api-server run build",
+    "build:all": "pnpm --filter @workspace/dashboard run build && pnpm --filter @workspace/api-server run build",
+    "start": "pnpm --filter @workspace/api-server run start:prod",
+    "start:vps": "DASHBOARD_DIST_PATH=\"$PWD/artifacts/dashboard/dist/public\" pnpm --filter @workspace/api-server run start:prod",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm --filter @workspace/api-server run typecheck"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "prettier": "^3.8.1"
+  }
+}

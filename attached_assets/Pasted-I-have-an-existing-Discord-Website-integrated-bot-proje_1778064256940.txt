@@ -1,0 +1,153 @@
+I have an existing Discord + Website integrated bot project (hosted on Render) and I want you to carefully UPDATE, FIX, and UPGRADE it WITHOUT breaking any existing features, logic, database, payout history, or task history.
+
+IMPORTANT RULES:
+
+* Do NOT remove or rewrite core logic
+* Do NOT break existing commands or features
+* Only fix issues and extend functionality cleanly
+* Maintain current database structure unless absolutely necessary (if needed, migrate safely)
+
+Now implement the following fixes and upgrades:
+
+1. VERIFICATION SYSTEM FIX
+
+* Current issue: Verification shows "your verification was revoked" incorrectly
+* Fix verification flow while keeping same logic
+* Ensure proper success/fail states
+* Admins/Devs currently can only UNVERIFY users → change so they can VERIFY and UNVERIFY both
+
+2. DISCORD ↔ REDDIT ACCOUNT LINKING
+
+* Each Discord user can connect MAXIMUM 3 Reddit accounts
+* Show UI like:
+
+  * If 1 connected → show 2 empty slots
+  * If 2 connected → show 1 empty slot
+  * If 3 connected → no empty slot
+* Reflect this properly on website (verified users section)
+
+3. EARNINGS DISPLAY FIX
+
+* Currently showing INR (₹)
+* Convert and display ALL earnings in USD ($)
+
+4. TASK REWARD BUG
+
+* Issue: Users sometimes receive wrong rewards
+* Fix so user ONLY gets reward for:
+
+  * The specific task they claimed
+  * The correct linked Reddit account
+* Ensure reward mapping is accurate and safe
+
+5. ADMIN PERMISSIONS FIX
+
+* Admin-created accounts (dev/admin) cannot see submissions
+* Fix so ADMINS can view ALL submissions regardless of creator
+
+6. TASK NOTIFICATION (PING) FIX
+
+* Current issue:
+
+  * Bot pings when task CLOSED or LOCKED (wrong)
+* Required:
+
+  * ONLY ping when task is OPENED
+  * Example: Task created → after X minutes → bot sends ping
+* LOCK = no one can claim
+* CLOSED = task completed/submitted
+* If LOCK expires and task not completed → re-send to task channel
+
+7. TASK DISPLAY CLEANUP
+   When showing tasks in channel, ONLY show:
+
+* Subreddit
+* Reward
+* Type
+* Verify Time
+
+REMOVE:
+
+* Post title
+* Comment content
+* Extra details
+* "View Details" button (if possible without breaking system)
+
+8. TASK HISTORY & PAYOUT HISTORY FIX
+
+* Commands not working → fix them fully
+* Ensure accurate tracking and retrieval
+
+9. MULTI-ADMIN TASK TRACKING SYSTEM
+   We have multiple admins (currently 4, more in future)
+
+Add system to track:
+
+* Which admin created which task
+* Which user completed whose task
+
+Example:
+
+* Admin A creates 8 tasks
+* Admin B creates 3 tasks
+* User completes 8 tasks from Admin A
+
+→ Payment responsibility should be correctly mapped to Admin A only
+
+Design a clean tracking system for:
+
+* task_creator_id
+* user_completion_mapping
+
+10. TASK CANCEL SYSTEM
+    Add cancel feature:
+
+* Cancel single task
+* Cancel multiple tasks
+* Cancel full campaign/bulk tasks
+
+Should work for:
+
+* create task command
+* bulk task
+* website-created tasks
+
+11. CLAIM LIMIT SYSTEM (IMPORTANT)
+    Add option to control:
+
+* How many tasks a user can claim per campaign
+
+Example:
+
+* Only 1 task per user
+* Or allow multiple (admin selectable)
+
+Add configurable option while creating:
+
+* task
+* bulk task
+* campaign
+
+12. SAFETY + STABILITY
+
+* Do NOT break:
+
+  * Existing bot commands
+  * Existing payout history
+  * Existing task history
+* Ensure backward compatibility
+* Add logs where useful
+
+13. OPTIONAL IMPROVEMENTS (ONLY IF SAFE)
+
+* Improve task lifecycle handling
+* Add better status transitions (open → locked → closed)
+* Optimize database queries
+
+Before writing code:
+
+1. First explain EXACTLY what changes you will make
+2. Then implement step-by-step clean code
+3. Ensure no breaking changes
+
+This is a production bot, so stability is CRITICAL.

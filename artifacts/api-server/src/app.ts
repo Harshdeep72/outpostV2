@@ -106,16 +106,14 @@ app.use(
       return cb(new Error(`CORS: invalid origin ${origin}`));
     }
 
-    // Dynamic same-origin check (compare Origin host with Request Host)
-    const hostHeader = req.header("Host");
-    let hostHostname = "";
-    if (hostHeader) {
-      hostHostname = hostHeader.split(":")[0].toLowerCase();
-    }
+    // Dynamic same-origin check:
+    // Compare Origin hostname with req.hostname. Under "trust proxy",
+    // Express automatically parses X-Forwarded-Host to get the correct external host.
+    const requestHostname = req.hostname?.toLowerCase();
 
     if (
       trustedHostnames.has(hostname) ||
-      (hostHostname && hostname === hostHostname) ||
+      (requestHostname && hostname === requestHostname) ||
       (process.env.NODE_ENV !== "production" && /^(localhost|127\.0\.0\.1)$/.test(hostname))
     ) {
       corsOptions.origin = origin;

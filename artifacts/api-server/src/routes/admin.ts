@@ -2287,6 +2287,16 @@ router.post("/sweep/run-now", requireAuth, async (req, res) => {
   res.json(result);
 });
 
+// Slow sweep — 5 submissions at a time, 3s gap between each.
+// Safe for clearing a backlog without hammering Reddit proxies.
+// Returns { decided, skipped } so the UI can show progress.
+router.post("/sweep/run-slow", requireAuth, async (req, res) => {
+  const { runPendingSlowSweepNow } = await import("../bot/pendingReviewSweeper.js");
+  const result = await runPendingSlowSweepNow();
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
+});
+
 
 router.post("/reddit-test", requireAuth, async (req, res) => {
   const { url, expectedAuthor, expectedSubreddit } = req.body as {

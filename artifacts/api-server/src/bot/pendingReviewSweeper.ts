@@ -13,6 +13,10 @@ const TICK_MS = 30 * 60 * 1000;
 const AUTO_DECIDE_AFTER_MS = 24 * 60 * 60 * 1000; // 24h pending → re-check + decide
 const STOP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;    // safety: never auto-touch rows older than 7d
 const BATCH_SIZE = 100;
+// Slow sweep: small batch + long delay between submissions so proxies don't get
+// hammered and Reddit doesn't rate-limit mid-sweep. Safe for backlog clearance.
+const SLOW_BATCH_SIZE = 5;
+const SLOW_DELAY_MS = 3_000; // 3s between each submission check
 const AUTO_REVIEWER_SENTINEL = "auto-sweeper";
 
 let started = false;
@@ -235,7 +239,7 @@ async function autoReject(client: Client, row: PendingRow, reason: string): Prom
   return true;
 }
 
-async function tick(client: Client) {
+async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500) {
   if (isRunning) {
     logger.info("pending-sweeper: previous tick still running, skipping");
     return;
@@ -271,7 +275,7 @@ async function tick(client: Client) {
              AND s.submitted_at <= ${decideCutoff}
              AND s.submitted_at >= ${stopCutoff}
            ORDER BY s.submitted_at ASC
-           LIMIT ${BATCH_SIZE}`,
+           LIMIT ${batchSize}`,
     );
 
     if (rows.rows.length === 0) return;
@@ -329,8 +333,8 @@ async function tick(client: Client) {
         await autoReject(client, row, reason);
       }
 
-      // Polite gap between Reddit calls.
-      await new Promise((r) => setTimeout(r, 500));
+      // Polite gap between Reddit calls — configurable so slow sweep can use longer delay.
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   } catch (err) {
     logger.error({ err }, "pending-sweeper: tick failed");
@@ -352,9 +356,108 @@ export function startPendingReviewSweeper(client: Client) {
   setInterval(() => void tick(client), TICK_MS).unref();
 }
 
-/** Run a single pass on demand (admin debug endpoint). */
+/** Run a single fast pass on demand (100 submissions, 500ms gap). */
 export async function runPendingSweepNow(): Promise<{ ok: boolean; reason?: string }> {
   if (!cachedClient) return { ok: false, reason: "Pending-review sweeper not started yet" };
-  await tick(cachedClient);
+  await tick(cachedClient, BATCH_SIZE, 500);
   return { ok: true };
+}
+
+/**
+ * Slow sweep — processes a small batch (5) with a 3-second delay between each
+ * submission. Safe to call repeatedly to drain a backlog without hammering
+ * Reddit and triggering proxy rate-limits.
+ *
+ * Returns how many submissions were decided (accepted + rejected) in this pass.
+ */
+export async function runPendingSlowSweepNow(): Promise<{ ok: boolean; decided: number; skipped: number; reason?: string }> {
+  if (!cachedClient) return { ok: false, decided: 0, skipped: 0, reason: "Pending-review sweeper not started yet" };
+  // We need to count decided/skipped — run a mini tick manually.
+  if (isRunning) return { ok: false, decided: 0, skipped: 0, reason: "A sweep is already running — wait a moment and try again" };
+  isRunning = true;
+  let decided = 0;
+  let skipped = 0;
+  try {
+    const decideCutoff = new Date(Date.now() - AUTO_DECIDE_AFTER_MS);
+    const stopCutoff   = new Date(Date.now() - STOP_AFTER_MS);
+    const rows = await db.execute<PendingRow>(
+      sql`SELECT s.id::text                          AS id,
+                 s.claim_id::text                    AS claim_id,
+                 s.task_id::text                     AS task_id,
+                 s.discord_id                        AS discord_id,
+                 s.proof_link                        AS proof_link,
+                 s.reward::text                      AS reward,
+                 s.log_message_id                    AS log_message_id,
+                 s.user_id::text                     AS user_id,
+                 t.pending_delay_hours               AS pending_delay_hours,
+                 t.title                             AS task_title,
+                 t.channel_message_id                AS task_channel_message_id,
+                 t.status                            AS task_status,
+                 t.slots_filled                      AS task_slots_filled,
+                 t.max_slots                         AS task_max_slots,
+                 t.reddit_link                       AS task_reddit_link,
+                 t.created_at                        AS task_created_at,
+                 u.workspace_channel_id              AS workspace_channel_id,
+                 u.reddit_username                   AS user_reddit_username
+            FROM submissions s
+            JOIN tasks t ON t.id = s.task_id
+            LEFT JOIN users u ON u.id = s.user_id
+           WHERE s.review_status = 'pending'
+             AND s.submitted_at <= ${decideCutoff}
+             AND s.submitted_at >= ${stopCutoff}
+           ORDER BY s.submitted_at ASC
+           LIMIT ${SLOW_BATCH_SIZE}`,
+    );
+    if (rows.rows.length === 0) return { ok: true, decided: 0, skipped: 0 };
+    logger.info({ count: rows.rows.length }, "pending-sweeper(slow): processing batch");
+
+    for (const row of rows.rows) {
+      if (!isRedditUrl(row.proof_link)) {
+        skipped++;
+        continue;
+      }
+      let expectedAuthors: string[] = [];
+      if (row.user_reddit_username) expectedAuthors.push(row.user_reddit_username.toLowerCase());
+      try {
+        const extra = await db.execute<{ reddit_username: string }>(
+          sql`SELECT reddit_username FROM reddit_accounts WHERE discord_id = ${row.discord_id}`
+        );
+        for (const acct of extra.rows) {
+          const n = (acct.reddit_username ?? "").toLowerCase().trim();
+          if (n && !expectedAuthors.includes(n)) expectedAuthors.push(n);
+        }
+      } catch { /* non-fatal */ }
+
+      const result = await validateRedditProof(
+        row.proof_link,
+        expectedAuthors,
+        row.task_reddit_link ?? "",
+        { taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined },
+      ).catch((err) => {
+        logger.warn({ err, subId: row.id }, "pending-sweeper(slow): validateRedditProof threw");
+        return null;
+      });
+
+      if (!result || result.status === "api_unreachable") {
+        skipped++;
+        logger.info({ subId: row.id }, "pending-sweeper(slow): inconclusive, skipped");
+      } else if (result.passed) {
+        await autoAccept(cachedClient!, row);
+        decided++;
+      } else {
+        const reason = result.failures[0] ?? result.statusLabel ?? `post ${result.status}`;
+        await autoReject(cachedClient!, row, reason);
+        decided++;
+      }
+
+      // Long gap — lets proxies cool down before hitting Reddit again.
+      await new Promise((r) => setTimeout(r, SLOW_DELAY_MS));
+    }
+    return { ok: true, decided, skipped };
+  } catch (err) {
+    logger.error({ err }, "pending-sweeper(slow): failed");
+    return { ok: false, decided, skipped, reason: String(err) };
+  } finally {
+    isRunning = false;
+  }
 }

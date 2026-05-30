@@ -69,6 +69,58 @@ function ActionButton({ label, endpoint, description, color = "indigo" }: {
   );
 }
 
+/** Slow Sweep button — shows decided/skipped counts from each 5-submission batch. */
+function SlowSweepButton() {
+  const [state, setState] = useState<"idle" | "loading" | "ok" | "err">("idle");
+  const [lastResult, setLastResult] = useState<{ decided: number; skipped: number } | null>(null);
+
+  async function run() {
+    setState("loading");
+    setLastResult(null);
+    try {
+      const res = await post<{ decided: number; skipped: number }>("/admin/sweep/run-slow", {});
+      setLastResult(res);
+      setState("ok");
+      setTimeout(() => setState("idle"), 8000);
+    } catch {
+      setState("err");
+      setTimeout(() => setState("idle"), 4000);
+    }
+  }
+
+  const btnLabel = state === "loading"
+    ? "Checking 5…"
+    : state === "ok" && lastResult
+      ? `✓ ${lastResult.decided} decided, ${lastResult.skipped} skipped`
+      : state === "err"
+        ? "✗ Failed"
+        : "Run (5 at a time)";
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-secondary/20">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-foreground">🐢 Slow Sweep — Safe Backlog Mode</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Processes <strong>5 submissions</strong> with a <strong>3s gap</strong> between each so proxies don’t get rate-limited.
+          Keep clicking until it shows <em>0 decided, 0 skipped</em>.
+        </p>
+      </div>
+      <button
+        onClick={run}
+        disabled={state === "loading"}
+        className={cn(
+          "shrink-0 px-3 py-1.5 rounded-md border text-xs font-semibold transition-colors disabled:opacity-50",
+          "border-green-500/40 text-green-300 hover:bg-green-500/10",
+          state === "ok"  && "border-green-500/40 text-green-400 bg-green-500/10",
+          state === "err" && "border-red-500/40 text-red-400 bg-red-500/10",
+        )}
+      >
+        {btnLabel}
+      </button>
+    </div>
+  );
+}
+
 export default function Console() {
   const { data, isLoading, dataUpdatedAt } = useQuery<ConsoleLogsResponse>({
     queryKey: ["admin-console-logs"],
@@ -97,10 +149,11 @@ export default function Console() {
       {/* Manual triggers */}
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">Manual Triggers</p>
+        <SlowSweepButton />
         <ActionButton
-          label="⚡ Force Sweep Pending Submissions"
+          label="⚡ Force Sweep Pending Submissions (fast — 100 batch)"
           endpoint="/admin/sweep/run-now"
-          description="Re-checks ALL pending submissions older than 24h right now. Use this to instantly clear a backlog instead of waiting for the next 30-min auto-tick."
+          description="Re-checks ALL pending submissions older than 24h at once. Only use when no proxy rate-limiting concern — otherwise use Slow Sweep above."
           color="amber"
         />
         <ActionButton

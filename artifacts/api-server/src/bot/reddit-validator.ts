@@ -30,6 +30,47 @@ async function fetchDirectText(url: string, timeoutMs = 6000): Promise<string | 
 }
 
 /**
+ * Resolves a Reddit share short-link (reddit.com/r/sub/s/XXXX) by following
+ * its 301 redirect and returning the canonical post/comment URL.
+ *
+ * Reddit's share links are mobile-app-generated and always redirect to the
+ * full browser URL. We follow the redirect with a HEAD request so we don't
+ * download the full page body.
+ *
+ * Returns the resolved URL string, or null on failure.
+ */
+async function resolveShareLink(shareUrl: string, timeoutMs = 5000): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await undiciFetch(shareUrl, {
+      method: "HEAD",
+      headers: { "User-Agent": DEFAULT_UA },
+      signal: controller.signal,
+      // Do NOT auto-follow — we want the Location header from the first redirect.
+      redirect: "manual",
+    });
+    // 301/302/307/308 all carry a Location header with the real URL.
+    const location = res.headers.get("location");
+    if (location && location.includes("/comments/")) {
+      // Normalise to https://www.reddit.com/...
+      const resolved = location.startsWith("/")
+        ? `https://www.reddit.com${location}`
+        : location;
+      logger.info({ shareUrl, resolved }, "Share link resolved");
+      return resolved;
+    }
+    logger.warn({ shareUrl, status: res.status, location }, "Share link redirect did not contain /comments/ path");
+    return null;
+  } catch (err) {
+    logger.warn({ shareUrl, err }, "Share link resolution failed");
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fetches the old.reddit.com HTML for a specific comment permalink and returns
  * whether the comment container is present (= publicly visible) in the page.
  *
@@ -181,7 +222,8 @@ export function detectAppUrl(url: string): string | null {
     // These redirect to the real post URL in a browser but we can't resolve them here.
     if (host.endsWith("reddit.com")) {
       const parts = u.pathname.replace(/^\//, "").split("/").filter(Boolean);
-      if (parts[0] === "r" && parts[2] === "s") return "share_link";
+      // New-style share links: /r/sub/s/XXXX — server-side resolvable via HEAD redirect
+      if (parts[0] === "r" && parts[2] === "s") return "share_link_resolvable";
       // Also catch /r/sub/comments/id (no slug) on redd.it style
     }
 
@@ -381,7 +423,32 @@ export async function validateRedditProof(
     })
     .filter((u) => u.length > 0);
 
-  const parsed = parseRedditProofUrl(proofUrl);
+  // ── Share-link resolution ──────────────────────────────────────────────────
+  // Reddit's /r/sub/s/XXXX share links are 301-redirected to the real URL.
+  // We can resolve them server-side by following the HEAD redirect.
+  let resolvedProofUrl = proofUrl;
+  const appKind = detectAppUrl(proofUrl);
+  if (appKind === "share_link_resolvable") {
+    logger.info({ proofUrl }, "Resolving share link via HEAD redirect");
+    const resolved = await resolveShareLink(proofUrl);
+    if (resolved) {
+      resolvedProofUrl = resolved;
+      logger.info({ proofUrl, resolved }, "Share link resolved to canonical URL");
+    } else {
+      // Could not resolve — tell the user to get the full URL from a browser.
+      return {
+        passed: false, autoApproved: false, status: "url_invalid",
+        failures: [
+          "Your proof link is a Reddit share short-link that could not be resolved automatically. " +
+          "Please open it in a browser, copy the full URL from the address bar (it should look like " +
+          "`https://www.reddit.com/r/SubName/comments/XXXXXX/...`), and resubmit."
+        ],
+        ...meta("url_invalid"),
+      };
+    }
+  }
+
+  const parsed = parseRedditProofUrl(resolvedProofUrl);
   if (!parsed) {
     return {
       passed: false, autoApproved: false, status: "url_invalid",
@@ -395,7 +462,19 @@ export async function validateRedditProof(
   // only care about extracting the target subreddit for cross-checking.
   const taskSubreddit = extractTaskSubreddit(taskRedditLink);
 
-  const urls = parsed.isUserPost
+  // ── Parallel fetch strategy ────────────────────────────────────────────────
+  // Reddit's public JSON API (reddit.com/r/sub/comments/postId.json) has been
+  // permanently rate-limited / blocked for server IPs. Waiting 6 seconds for
+  // it to 403 before falling back to RSS wastes time on every check.
+  //
+  // New strategy: fire JSON (via proxies, short 3s timeout), RSS, and
+  // old.reddit HTML all at the same time. JSON wins if proxies bypass the
+  // block; otherwise RSS + old.reddit HTML answer within ~2s regardless.
+  const rssUrl = parsed.isUserPost
+    ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
+    : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
+
+  const jsonUrls = parsed.isUserPost
     ? [
         `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
         `https://old.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
@@ -405,28 +484,16 @@ export async function validateRedditProof(
         `https://old.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
       ];
 
-  let result = await proxyFetchJson(urls, { timeoutMs: 6_000 });
+  // Start all fetches simultaneously.
+  const [result, rssBody] = await Promise.all([
+    proxyFetchJson(jsonUrls, { timeoutMs: 3_000 }),   // short timeout — if proxies work, great
+    fetchDirectText(rssUrl, 7_000),                    // RSS almost always returns 200
+  ]);
+
   let data = result.body;
   let isRss = false;
 
-  if (!result.ok && result.status !== 404) {
-    logger.info({ proofUrl }, "JSON verification failed — attempting RSS fallback");
-    try {
-      const rssUrl = parsed.isUserPost
-        ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
-        : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
-      const rssBody = await fetchDirectText(rssUrl, 6000);
-      if (rssBody && rssBody.includes("<feed")) {
-        isRss = true;
-        data = rssBody;
-        logger.info({ proofUrl }, "RSS fallback successful");
-      }
-    } catch (rssErr) {
-      logger.warn({ rssErr, proofUrl }, "RSS fallback failed");
-    }
-  }
-
-  if (!result.ok && !isRss) {
+  if (!result.ok) {
     if (result.status === 404) {
       return {
         passed: false, autoApproved: false, status: "not_found",
@@ -435,12 +502,19 @@ export async function validateRedditProof(
         ...meta("not_found"),
       };
     }
-    logger.warn({ status: result.status, proofUrl, via: result.via }, "Reddit proof fetch failed — falling back to manual review");
-    return {
-      passed: false, autoApproved: false, status: "api_unreachable",
-      failures: ["Reddit API unreachable — queued for manual review."],
-      ...meta("api_unreachable"),
-    };
+    // JSON failed (most likely 403). Fall back to RSS which we already fetched.
+    if (rssBody && rssBody.includes("<feed")) {
+      isRss = true;
+      data = rssBody;
+      logger.info({ proofUrl }, "JSON blocked — using RSS + old.reddit HTML path");
+    } else {
+      logger.warn({ status: result.status, proofUrl }, "Both JSON and RSS failed — manual review");
+      return {
+        passed: false, autoApproved: false, status: "api_unreachable",
+        failures: ["Reddit API unreachable — queued for manual review."],
+        ...meta("api_unreachable"),
+      };
+    }
   }
 
   if (isRss) {
@@ -790,8 +864,56 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
         `https://old.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
       ];
 
-  const result = await proxyFetchJson(urls, { timeoutMs: 6_000 });
+  // Run JSON (proxies, short timeout) and old.reddit HTML check in parallel.
+  // JSON is often 403'd from server IPs; old.reddit HTML is ground truth.
+  const [result, htmlVisible] = await Promise.all([
+    proxyFetchJson(urls, { timeoutMs: 3_000 }),
+    parsed.commentId
+      ? isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
+      : Promise.resolve<boolean | null>(null),  // post-only checks use JSON path
+  ]);
 
+  // ── Comment liveness via old.reddit HTML (most reliable path) ─────────────
+  if (parsed.commentId && htmlVisible !== null) {
+    if (htmlVisible === false) {
+      return {
+        liveStatus: "removed",
+        detailedStatus: "comment_missing",
+        statusLabel: "Comment removed",
+        reason: "Comment is no longer visible on Reddit (removed or spam-filtered).",
+      };
+    }
+    // htmlVisible === true — comment is live. If JSON also succeeded, do a
+    // deeper check for removal markers on the comment body.
+    if (result.ok) {
+      const data = result.body;
+      const commentsListing = Array.isArray(data) ? data[1] : null;
+      const allComments: any[] = [];
+      function flattenComments(children: any[]) {
+        for (const child of children ?? []) {
+          if (child.kind === "t1") {
+            allComments.push(child.data);
+            if (child.data.replies?.data?.children) {
+              flattenComments(child.data.replies.data.children);
+            }
+          }
+        }
+      }
+      flattenComments(commentsListing?.data?.children ?? []);
+      const target = allComments.find((c) => c.id === parsed.commentId);
+      if (target) {
+        const cstate = classifyComment(target);
+        if (cstate) {
+          const m = STATUS_META[cstate];
+          const live: LiveStatus = cstate === "deleted_by_author" ? "deleted" : "removed";
+          return { liveStatus: live, detailedStatus: cstate, statusLabel: m.label, reason: m.label };
+        }
+      }
+    }
+    return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+  }
+
+  // ── Post-only or HTML check inconclusive: use JSON path ───────────────────
   if (!result.ok) {
     if (result.status === 404) {
       return {
@@ -801,7 +923,7 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
         reason: "Reddit returned 404 — the post is gone.",
       };
     }
-    // Transient — don't flip status, just leave as unknown so we'll retry next tick.
+    // Transient — don't flip status, retry next tick.
     return {
       liveStatus: "unknown",
       detailedStatus: "api_unreachable",
@@ -814,10 +936,6 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   const postData = postListing?.data?.children?.[0]?.data;
 
   if (!postData) {
-    // Reddit returned 200 but no children. Real deletions normally come back
-    // either as a 404 (handled above) or with an explicit [deleted]/removed_by_category
-    // marker on the post body. An empty listing is more likely a flaky proxy returning
-    // junk JSON, so treat it as transient rather than flipping the row to "deleted".
     return {
       liveStatus: "unknown",
       detailedStatus: null,
@@ -835,17 +953,17 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   if (parsed.commentId) {
     const commentsListing = Array.isArray(data) ? data[1] : null;
     const allComments: any[] = [];
-    function flattenComments(children: any[]) {
+    function flattenComments2(children: any[]) {
       for (const child of children ?? []) {
         if (child.kind === "t1") {
           allComments.push(child.data);
           if (child.data.replies?.data?.children) {
-            flattenComments(child.data.replies.data.children);
+            flattenComments2(child.data.replies.data.children);
           }
         }
       }
     }
-    flattenComments(commentsListing?.data?.children ?? []);
+    flattenComments2(commentsListing?.data?.children ?? []);
     const target = allComments.find((c) => c.id === parsed.commentId);
     if (!target) {
       return {

@@ -528,6 +528,14 @@ export async function validateRedditProof(
     };
   }
 
+  if (parsed.commentId) {
+    const { deepCheckComment } = await import("./deepRedditCommentChecker.js");
+    return deepCheckComment(resolvedProofUrl, expectedAuthor, taskRedditLink, {
+      minCommentChars: options?.minCommentChars,
+      taskCreatedAt: options?.taskCreatedAt,
+    });
+  }
+
   // Task link may be a full post URL (for comment/upvote/share/join tasks)
   // OR a subreddit URL / r/name shorthand (for post tasks). Extract both
   // the subreddit AND the specific postId (if the task targets a single post).
@@ -1020,6 +1028,35 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   const parsed = parseRedditProofUrl(proofUrl);
   if (!parsed) {
     return { liveStatus: "unknown", detailedStatus: null, statusLabel: "Invalid URL" };
+  }
+
+  if (parsed.commentId) {
+    const { deepCheckComment } = await import("./deepRedditCommentChecker.js");
+    const validation = await deepCheckComment(proofUrl, [], "");
+    let liveStatus: LiveStatus = "unknown";
+    if (validation.passed) {
+      liveStatus = "live";
+    } else if (validation.status === "api_unreachable") {
+      liveStatus = "unknown";
+    } else if (
+      validation.status === "deleted_by_author" ||
+      validation.status === "comment_deleted"
+    ) {
+      liveStatus = "deleted";
+    } else if (
+      validation.status === "comment_missing" ||
+      validation.status === "removed_by_mod" ||
+      validation.status === "removed_by_reddit" ||
+      validation.status === "removed_by_automod"
+    ) {
+      liveStatus = "removed";
+    }
+    return {
+      liveStatus,
+      detailedStatus: validation.status,
+      statusLabel: validation.statusLabel,
+      reason: validation.failures.join("; ") || undefined,
+    };
   }
 
   const urls = parsed.isUserPost

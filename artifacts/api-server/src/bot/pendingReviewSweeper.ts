@@ -12,7 +12,7 @@ import { tryCompleteReferral } from "./db.js";
 const TICK_MS = 30 * 60 * 1000;
 const AUTO_DECIDE_AFTER_MS = 24 * 60 * 60 * 1000; // 24h pending → re-check + decide
 const STOP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;    // safety: never auto-touch rows older than 7d
-const BATCH_SIZE = 25;
+const BATCH_SIZE = 100;
 const AUTO_REVIEWER_SENTINEL = "auto-sweeper";
 
 let started = false;

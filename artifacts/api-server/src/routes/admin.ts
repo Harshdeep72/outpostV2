@@ -2280,6 +2280,14 @@ router.post("/liveness/run-now", requireAuth, async (req, res) => {
   res.json(result);
 });
 
+router.post("/sweep/run-now", requireAuth, async (req, res) => {
+  const { runPendingSweepNow } = await import("../bot/pendingReviewSweeper.js");
+  const result = await runPendingSweepNow();
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
+});
+
+
 router.post("/reddit-test", requireAuth, async (req, res) => {
   const { url, expectedAuthor, expectedSubreddit } = req.body as {
     url: string;

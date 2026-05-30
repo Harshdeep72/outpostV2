@@ -343,6 +343,24 @@ export function checkResponseValidity(status: number, body: any, acceptHeader: s
 
   const lowerHtml = body.toLowerCase();
 
+  // If the body contains clear indicators of a valid Reddit page structure (comments, RSS feed, etc.),
+  // we can immediately declare it valid and skip any false-positive checks for text inside the page
+  // (like login buttons/captchas in sidebars or headers).
+  const validRedditSignals = [
+    'class="comment"', 'class="commentarea"', 'id="siteTable"',
+    'data-reddit-', 'thing_t1_', 'shreddit-comment',
+    'entry.unvoted', 'usertext-body', '<feed',
+    'xmlns="http://www.w3.org/2005/atom"'
+  ];
+  const hasRedditSignal = validRedditSignals.some(signal => lowerHtml.includes(signal));
+  const hasCommentStructure = lowerHtml.includes('class="comment"') || 
+                              lowerHtml.includes('shreddit-comment') ||
+                              (lowerHtml.includes('data-author') && lowerHtml.includes('data-subreddit'));
+
+  if (hasRedditSignal || hasCommentStructure) {
+    return { isValid: true };
+  }
+
   // CHECK 1: Cloudflare
   const cloudflareSignals = [
     'attention required!', 'cloudflare', 'cf-challenge', 'challenge platform',
@@ -402,16 +420,6 @@ export function checkResponseValidity(status: number, body: any, acceptHeader: s
   // CHECK 7: Real Reddit Page Validation
   const isHtml = lowerHtml.includes('<html') || lowerHtml.includes('<!doctype') || lowerHtml.includes('<body');
   if (isHtml) {
-    const validRedditSignals = [
-      'class="comment"', 'class="commentarea"', 'id="siteTable"',
-      'data-reddit-', 'thing_t1_', 'shreddit-comment',
-      'entry.unvoted', 'usertext-body', 'class="md"', '<feed'
-    ];
-    const hasRedditSignal = validRedditSignals.some(signal => lowerHtml.includes(signal));
-    const hasCommentStructure = lowerHtml.includes('class="comment"') || 
-                                lowerHtml.includes('shreddit-comment') ||
-                                (lowerHtml.includes('data-author') && lowerHtml.includes('data-subreddit'));
-    
     if (!hasRedditSignal && !hasCommentStructure) {
       return { isValid: false, blockType: 'generic_block' };
     }
@@ -492,7 +500,7 @@ export function getRandomBrowserHeaders(acceptHeader: string): { ua: string; hea
       "Accept-Encoding": "gzip, deflate, br",
       "Connection": "keep-alive",
       "Cache-Control": "max-age=0"
-    }
+    } as Record<string, string>
   };
 }
 

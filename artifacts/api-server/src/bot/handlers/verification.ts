@@ -246,13 +246,63 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
 
   if (result.ok) {
     const p = result.profile;
-    const karmaOk = p.totalKarma >= MIN_KARMA;
+    const karmaOk = p.karmaVerified && p.totalKarma >= MIN_KARMA;
     const ageOk = p.accountAgeDays >= MIN_AGE_DAYS;
+
+    // If we couldn't verify karma (RSS fallback — JSON API blocked), we don't
+    // know if they meet the ≥100 karma requirement. Queue for manual review
+    // rather than blindly auto-verifying a potentially low-karma account.
+    if (!p.karmaVerified) {
+      const networkEmbed = makeEmbed(COLORS.WARNING)
+        .setTitle("Verification Request — Karma Unverifiable")
+        .setDescription(
+          `⚠️ Reddit's JSON API is blocked — karma could not be fetched.\n\n` +
+          `Account **[u/${p.name}](https://reddit.com/user/${p.name})** exists and is ~${p.accountAgeDays} days old.\n\n` +
+          `A mod must manually verify karma ≥ ${MIN_KARMA} before approving.`
+        )
+        .addFields(
+          { name: "Discord User", value: `<@${discordId}> (${discordUsername})`, inline: true },
+          { name: "Reddit Profile", value: `[u/${p.name}](https://reddit.com/user/${p.name})`, inline: true },
+          { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
+          { name: "Post Karma", value: "N/A (API blocked)", inline: true },
+          { name: "Comment Karma", value: "N/A (API blocked)", inline: true },
+          { name: "Total Karma", value: "N/A (API blocked)", inline: true },
+        )
+        .setFooter({ text: "Check karma on reddit.com/user/" + p.name + " before accepting" });
+
+      await db.update(users).set({ redditUsername: nameLower }).where(eq(users.discordId, discordId));
+      invalidateUser(discordId);
+
+      const manualRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`verify:accept:${discordId}:${nameLower}`)
+          .setLabel("Accept (karma OK)")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`verify:reject:${discordId}`)
+          .setLabel("Reject")
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      await verificationLogChannel.send({ embeds: [networkEmbed], components: [manualRow] });
+      await interaction.editReply({
+        embeds: [makeEmbed(COLORS.WARNING).setDescription(
+          `⏳ Reddit's karma API is temporarily blocked. A moderator will check your karma and verify you shortly.\n\n` +
+          `Your account **u/${p.name}** (${p.accountAgeDays} days old) has been submitted for review.`
+        )],
+      });
+      logger.info({ discordId, parsed, ageDays: p.accountAgeDays }, "Verification queued — karma unverifiable (RSS fallback)");
+      return;
+    }
 
     if (!karmaOk || !ageOk) {
       const reasons: string[] = [];
       if (!karmaOk) reasons.push(`❌ Karma too low: **${p.totalKarma.toLocaleString()}** / ${MIN_KARMA} required`);
       if (!ageOk) reasons.push(`❌ Account too new: **${p.accountAgeDays}** / ${MIN_AGE_DAYS} days required`);
+
+      const karmaDisplay = p.karmaVerified ? p.totalKarma.toLocaleString() : "N/A (API blocked)";
+      const postKarmaDisplay = p.karmaVerified ? p.linkKarma.toLocaleString() : "N/A";
+      const commentKarmaDisplay = p.karmaVerified ? p.commentKarma.toLocaleString() : "N/A";
 
       const failEmbed = makeEmbed(COLORS.DANGER)
         .setTitle("Verification Failed")
@@ -261,8 +311,8 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
           `Your Reddit account **u/${p.name}** doesn't meet the minimum requirements:\n\n${reasons.join("\n")}\n\nGrow your Reddit account and try again.`
         )
         .addFields(
-          { name: "Post Karma", value: p.linkKarma.toLocaleString(), inline: true },
-          { name: "Comment Karma", value: p.commentKarma.toLocaleString(), inline: true },
+          { name: "Post Karma", value: postKarmaDisplay, inline: true },
+          { name: "Comment Karma", value: commentKarmaDisplay, inline: true },
           { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
         );
 
@@ -272,9 +322,9 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
           { name: "Discord User", value: `<@${discordId}> (${discordUsername})`, inline: true },
           { name: "Reddit Account", value: `u/${p.name}`, inline: true },
           { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
-          { name: "Post Karma", value: p.linkKarma.toLocaleString(), inline: true },
-          { name: "Comment Karma", value: p.commentKarma.toLocaleString(), inline: true },
-          { name: "Total Karma", value: p.totalKarma.toLocaleString(), inline: true },
+          { name: "Post Karma", value: postKarmaDisplay, inline: true },
+          { name: "Comment Karma", value: commentKarmaDisplay, inline: true },
+          { name: "Total Karma", value: karmaDisplay, inline: true },
           { name: "Reason", value: reasons.join("\n") },
         )
         .setFooter({ text: "Click 'Accept Anyway' to override and verify manually" });
@@ -537,11 +587,11 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
         { name: "Discord User", value: `<@${discordId}> (${discordUsername})`, inline: true },
         { name: "Reddit Account", value: `u/${p.name}`, inline: true },
         { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
-        { name: "Post Karma", value: p.linkKarma.toLocaleString(), inline: true },
-        { name: "Comment Karma", value: p.commentKarma.toLocaleString(), inline: true },
-        { name: "Total Karma", value: p.totalKarma.toLocaleString(), inline: true },
+        { name: "Post Karma", value: p.karmaVerified ? p.linkKarma.toLocaleString() : "N/A (API blocked)", inline: true },
+        { name: "Comment Karma", value: p.karmaVerified ? p.commentKarma.toLocaleString() : "N/A (API blocked)", inline: true },
+        { name: "Total Karma", value: p.karmaVerified ? p.totalKarma.toLocaleString() : "N/A (API blocked)", inline: true },
       )
-      .setFooter({ text: "Auto-verified — use 'Take Action' to revoke if needed" });
+      .setFooter({ text: p.karmaVerified ? "Auto-verified — use 'Take Action' to revoke if needed" : "Auto-verified via RSS (karma unverifiable — Reddit API blocked). Revoke if account looks suspicious." });
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()

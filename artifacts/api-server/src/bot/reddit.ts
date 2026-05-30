@@ -9,6 +9,8 @@ export interface RedditProfile {
   totalKarma: number;
   iconImg: string | undefined;
   accountAgeDays: number;
+  /** true = karma from live JSON API; false = RSS fallback (karma unverifiable) */
+  karmaVerified: boolean;
 }
 
 export type RedditFetchResult =
@@ -43,8 +45,104 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const profileCache = new Map<string, { result: RedditFetchResult; expires: number }>();
 const inFlight = new Map<string, Promise<RedditFetchResult>>();
 
+// ── Reddit OAuth (app-only) ───────────────────────────────────────────────────
+// When REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET are set, use the official OAuth
+// API (oauth.reddit.com) which is NOT IP-blocked. Token is cached 55 min.
+let oauthToken: { token: string; expires: number } | null = null;
+
+async function getOAuthToken(): Promise<string | null> {
+  const clientId = process.env.REDDIT_CLIENT_ID;
+  const secret   = process.env.REDDIT_CLIENT_SECRET;
+  if (!clientId || !secret) return null;
+
+  if (oauthToken && oauthToken.expires > Date.now()) return oauthToken.token;
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 5_000 }, bodyTimeout: 8_000, headersTimeout: 8_000 });
+    const res = await undiciFetch("https://www.reddit.com/api/v1/access_token", {
+      dispatcher: agent,
+      method: "POST",
+      headers: {
+        "User-Agent": "OutpostBot/1.0",
+        "Authorization": "Basic " + Buffer.from(`${clientId}:${secret}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+    if (!res.ok) { logger.warn({ status: res.status }, "Reddit OAuth token request failed"); return null; }
+    const json = await res.json() as any;
+    if (!json.access_token) { logger.warn({ json }, "Reddit OAuth: no access_token in response"); return null; }
+    // Cache for 55 min (Reddit tokens expire in 60 min)
+    oauthToken = { token: json.access_token as string, expires: Date.now() + 55 * 60 * 1000 };
+    logger.info("Reddit OAuth token acquired");
+    return oauthToken.token;
+  } catch (err) {
+    logger.warn({ err }, "Reddit OAuth token fetch failed");
+    return null;
+  }
+}
+
+async function fetchViaOAuth(name: string): Promise<RedditFetchResult | null> {
+  const token = await getOAuthToken();
+  if (!token) return null;
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 5_000 }, bodyTimeout: 8_000, headersTimeout: 8_000 });
+    const res = await undiciFetch(`https://oauth.reddit.com/user/${name}/about?raw_json=1`, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": "OutpostBot/1.0",
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json",
+      },
+    });
+
+    if (res.status === 404) return { ok: false, notFound: true };
+    if (!res.ok) {
+      // Token might be expired — invalidate and let caller fall through
+      if (res.status === 401) oauthToken = null;
+      logger.warn({ status: res.status, name }, "Reddit OAuth profile fetch failed");
+      return null;
+    }
+
+    const body = await res.json() as any;
+    const d = body?.data ?? {};
+    if (d.is_suspended || d.is_banned) return { ok: false, notFound: true, suspended: true };
+    if (!d.name) return null;
+
+    const createdUtc: number = d.created_utc ?? 0;
+    const ageDays = Math.floor((Date.now() / 1000 - createdUtc) / 86400);
+    return {
+      ok: true,
+      profile: {
+        name: d.name as string,
+        createdUtc,
+        linkKarma: (d.link_karma as number) ?? 0,
+        commentKarma: (d.comment_karma as number) ?? 0,
+        totalKarma: (d.total_karma as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
+        iconImg: stripQuery(d.icon_img as string | undefined),
+        accountAgeDays: ageDays,
+        karmaVerified: true,
+      },
+    };
+  } catch (err) {
+    logger.warn({ err, name }, "Reddit OAuth profile fetch error");
+    return null;
+  }
+}
+
+
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  // ── 1. Try JSON via proxies (bypasses Reddit's server-IP block) ───────────
+  // ── 1. Try OAuth first (real karma, no IP block, no proxy needed) ──────────
+  const oauthResult = await fetchViaOAuth(name);
+  if (oauthResult !== null) {
+    logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth");
+    return oauthResult;
+  }
+
+  // ── 2. Try JSON via proxies (bypasses Reddit's server-IP block) ───────────
   const jsonUrls = [
     `https://www.reddit.com/user/${name}/about.json?raw_json=1`,
     `https://old.reddit.com/user/${name}/about.json?raw_json=1`,
@@ -75,6 +173,7 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
         totalKarma: (d.total_karma as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
         iconImg: stripQuery(d.icon_img as string | undefined),
         accountAgeDays: ageDays,
+        karmaVerified: true,
       },
     };
   }
@@ -153,12 +252,14 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     profile: {
       name: resolvedName,
       createdUtc,
-      // Karma unavailable from RSS — conservative defaults that pass the 100-karma gate.
-      linkKarma: 500,
-      commentKarma: 500,
-      totalKarma: 1000,
+      // Karma is not available in RSS — return 0 with karmaVerified=false.
+      // verification.ts will skip the karma gate and show "N/A" in the embed.
+      linkKarma: 0,
+      commentKarma: 0,
+      totalKarma: 0,
       iconImg: undefined,
       accountAgeDays: ageDays,
+      karmaVerified: false,
     },
   };
 }

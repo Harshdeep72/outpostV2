@@ -207,9 +207,21 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
   }
 
   // If the user has ALREADY linked this exact username (their own), short-circuit.
+  // But ONLY if the account is truly linked in reddit_accounts — not just a
+  // stale redditUsername left from a pending/rejected verification.
   if (isAdditional) {
     const ownedBySelf = dupCheckMulti.rows.length > 0 && dupCheckMulti.rows[0]!.discord_id === discordId;
-    if (ownedBySelf || (existing?.redditUsername ?? "").toLowerCase() === nameLower) {
+    if (ownedBySelf) {
+      return interaction.editReply({
+        embeds: [makeEmbed(COLORS.WARNING).setDescription(
+          `ℹ️ You've already linked **u/${parsed}** to your Discord account. No action needed.`
+        )],
+      });
+    }
+    // primary slot match on users.reddit_username only counts if it's ALSO in reddit_accounts
+    // (legacy row) — otherwise it might be a stale pending entry, let them re-verify.
+    const primaryLinked = (existing?.redditUsername ?? "").toLowerCase() === nameLower && ownedBySelf;
+    if (primaryLinked) {
       return interaction.editReply({
         embeds: [makeEmbed(COLORS.WARNING).setDescription(
           `ℹ️ You've already linked **u/${parsed}** to your Discord account. No action needed.`
@@ -270,7 +282,9 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
         )
         .setFooter({ text: "Check karma on reddit.com/user/" + p.name + " before accepting" });
 
-      await db.update(users).set({ redditUsername: nameLower }).where(eq(users.discordId, discordId));
+      // Don't write redditUsername to users here — that would create a
+      // phantom link that blocks the user from retrying if the mod rejects.
+      // The username travels in the Accept button's customId instead.
       invalidateUser(discordId);
 
       const manualRow = new ActionRowBuilder<ButtonBuilder>().addComponents(

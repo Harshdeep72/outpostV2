@@ -29,6 +29,73 @@ async function fetchDirectText(url: string, timeoutMs = 6000): Promise<string | 
   }
 }
 
+/**
+ * Fetches the old.reddit.com HTML for a specific comment permalink and returns
+ * whether the comment container is present (= publicly visible) in the page.
+ *
+ * old.reddit is significantly more resistant to IP-based rate limiting than the
+ * JSON API, and its HTML accurately reflects a comment's removal state:
+ *   - Comment present with noncollapsed class → live and publicly visible
+ *   - Comment present with collapsed class → collapsed/removed
+ *   - Comment container absent entirely → fully removed / shadow-banned
+ *
+ * Returns:
+ *   true  — comment is visible in old.reddit HTML
+ *   false — comment is absent or collapsed (removed/deleted/spam-filtered)
+ *   null  — could not fetch HTML (network error / rate-limited)
+ */
+async function isCommentVisibleOnOldReddit(
+  subreddit: string,
+  postId: string,
+  commentId: string,
+  isUserPost = false,
+  timeoutMs = 7000
+): Promise<boolean | null> {
+  const sub = isUserPost ? `user/${subreddit.slice(2)}` : `r/${subreddit}`;
+  const url = `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}/`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await undiciFetch(url, {
+      headers: {
+        "User-Agent": DEFAULT_UA,
+        "Accept": "text/html, */*",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      logger.warn({ url, status: res.status }, "old.reddit HTML fetch failed");
+      return null;
+    }
+    const html = await res.text();
+    // Look for the comment's container div by its id attribute.
+    // old.reddit uses id="thing_t1_<commentId>" for each comment div.
+    const containerPresent = html.includes(`id="thing_t1_${commentId}"`);
+    if (!containerPresent) {
+      logger.info({ commentId, subreddit }, "Comment NOT found in old.reddit HTML — treated as removed");
+      return false;
+    }
+    // Check if the container is in a collapsed (removed/deleted) state.
+    // old.reddit adds class "collapsed" to hidden/removed comments.
+    const idx = html.indexOf(`id="thing_t1_${commentId}"`);
+    // Grab the opening tag of the container (which is always a few chars before the id attr)
+    const fragmentStart = Math.max(0, idx - 300);
+    const fragment = html.substring(fragmentStart, idx + 200);
+    // Collapsed pattern: class="... collapsed ..."
+    const isCollapsed = /class="[^"]*\bcollapsed\b[^"]*"/.test(fragment);
+    if (isCollapsed) {
+      logger.info({ commentId, subreddit }, "Comment is collapsed in old.reddit HTML — treated as removed");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.warn({ url, err }, "old.reddit HTML liveness check failed");
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 export type SubmissionStatus =
   | "live"
@@ -439,6 +506,36 @@ export async function validateRedditProof(
           failures, subredditFound, postLive: true,
           ...meta("comment_missing"),
         };
+      }
+
+      // ── RSS False-Positive Guard ──────────────────────────────────────────────
+      // Reddit's RSS feeds cache removed comments and continue serving their XML
+      // entries even after mods delete or spam-filter them. We must cross-verify
+      // with old.reddit.com HTML, which is highly rate-limit-resistant and
+      // accurately reflects the real public visibility of the comment.
+      //
+      // Behaviour:
+      //   - visible (returns true)  → proceed normally
+      //   - not visible (false)     → comment was removed, reject
+      //   - network failure (null)  → old.reddit down/blocked; treat as inconclusive
+      //     and continue (the RSS finding is the best we have — this is a very
+      //     rare edge case that would require both JSON AND old.reddit to fail).
+      const htmlVisible = await isCommentVisibleOnOldReddit(
+        parsed.subreddit,
+        parsed.postId,
+        parsed.commentId,
+        parsed.isUserPost
+      );
+      if (htmlVisible === false) {
+        failures.push(`Comment "${parsed.commentId}" is no longer visible on Reddit — it was likely removed by a moderator or Reddit's spam filter.`);
+        return {
+          passed: false, autoApproved: false, status: "comment_missing",
+          failures, subredditFound, postLive: true,
+          ...meta("comment_missing"),
+        };
+      }
+      if (htmlVisible === null) {
+        logger.warn({ proofUrl }, "old.reddit HTML check inconclusive — proceeding with RSS result");
       }
     } else {
       // 1. Try to extract the post author directly from the post's RSS feed (data).

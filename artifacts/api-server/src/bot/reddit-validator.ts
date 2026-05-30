@@ -147,9 +147,12 @@ export type SubmissionStatus =
   | "locked"
   | "not_found"
   | "wrong_subreddit"
+  | "wrong_post"
   | "author_mismatch"
   | "comment_missing"
   | "comment_deleted"
+  | "comment_too_short"
+  | "stale_proof"
   | "url_invalid"
   | "api_unreachable";
 
@@ -170,6 +173,15 @@ export interface ValidationResult {
   createdAt?: string;
 }
 
+// Minimum chars a comment body must contain (after stripping HTML tags).
+// Stops trivial one-word comments like "Nice!" from passing.
+// 0 = disabled. Can be raised per-deployment via env var.
+const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
+
+// How many milliseconds BEFORE the task was created a comment is still
+// allowed to be (grace period for admins who create tasks retroactively).
+const TASK_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 const STATUS_META: Record<SubmissionStatus, { emoji: string; label: string }> = {
   live: { emoji: "✅", label: "Live" },
   deleted_by_author: { emoji: "🗑️", label: "Deleted by author" },
@@ -179,9 +191,12 @@ const STATUS_META: Record<SubmissionStatus, { emoji: string; label: string }> = 
   locked: { emoji: "🔒", label: "Post is locked" },
   not_found: { emoji: "❌", label: "Post not found / 404" },
   wrong_subreddit: { emoji: "🚷", label: "Wrong subreddit" },
+  wrong_post: { emoji: "🎯", label: "Comment on wrong post" },
   author_mismatch: { emoji: "👤", label: "Author mismatch" },
   comment_missing: { emoji: "❓", label: "Comment not found on post" },
   comment_deleted: { emoji: "🗑️", label: "Comment deleted/removed" },
+  comment_too_short: { emoji: "✏️", label: "Comment too short" },
+  stale_proof: { emoji: "🕰️", label: "Comment predates task" },
   url_invalid: { emoji: "⚠️", label: "Invalid Reddit URL" },
   api_unreachable: { emoji: "📡", label: "Reddit API unreachable" },
 };
@@ -365,6 +380,50 @@ export function extractTaskSubreddit(taskRedditLink: string): string | null {
 }
 
 /**
+ * Extract the specific post ID from a task's Reddit link when the task
+ * requires engagement on ONE particular post (not just any post in a sub).
+ *
+ * Returns the postId string (e.g. "1tmpysc") if the link is a full post URL,
+ * or null if the link is a subreddit-only URL / r/name shorthand.
+ *
+ * Examples:
+ *   https://reddit.com/r/jawsurgery/comments/1tmpysc/recessed/ → "1tmpysc"
+ *   https://reddit.com/r/jawsurgery/                           → null
+ *   r/jawsurgery                                               → null
+ */
+export function extractTaskPostId(taskRedditLink: string): string | null {
+  const trimmed = taskRedditLink.trim();
+  try {
+    const u = new URL(trimmed);
+    const host = u.hostname.toLowerCase();
+    if (!host.endsWith("reddit.com")) return null;
+    const parts = u.pathname.replace(/^\//, "").split("/").filter(Boolean);
+    // /r/sub/comments/POSTID/...
+    if ((parts[0] === "r" || parts[0] === "user" || parts[0] === "u") &&
+        parts[2] === "comments" && parts[3]) {
+      return parts[3].toLowerCase();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Strip HTML tags and decode common HTML entities from an RSS <content> value.
+ * Returns the plain text, collapsed whitespace, trimmed.
+ */
+function decodeRssContent(raw: string): string {
+  return raw
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/<[^>]+>/g, " ")   // strip all HTML tags
+    .replace(/\s+/g, " ").trim();
+}
+
+/**
  * Classify a Reddit post's removal/visibility state from the JSON `data` blob.
  * Reddit signals:
  *   - removed_by_category: "deleted" | "moderator" | "anti_evil_ops" | "automod_filtered" | "reddit" | "author"
@@ -405,13 +464,21 @@ function classifyComment(c: any): SubmissionStatus | null {
   return null;
 }
 
+export interface ValidateOptions {
+  /** Task creation date — comments posted before this (minus TASK_GRACE_MS) are rejected. */
+  taskCreatedAt?: Date;
+  /** Minimum comment body length in characters after stripping HTML. 0 = disabled. */
+  minCommentChars?: number;
+}
+
 export async function validateRedditProof(
   proofUrl: string,
   // Backwards compatible: accept a single username (legacy single-account
   // path) OR an array (multi-account: any of the user's verified Reddit
   // accounts is acceptable as the proof author).
   expectedAuthor: string | string[],
-  taskRedditLink: string
+  taskRedditLink: string,
+  options?: ValidateOptions
 ): Promise<ValidationResult> {
   const failures: string[] = [];
 
@@ -458,9 +525,31 @@ export async function validateRedditProof(
   }
 
   // Task link may be a full post URL (for comment/upvote/share/join tasks)
-  // OR a subreddit URL / r/name shorthand (for post tasks). Either way we
-  // only care about extracting the target subreddit for cross-checking.
+  // OR a subreddit URL / r/name shorthand (for post tasks). Extract both
+  // the subreddit AND the specific postId (if the task targets a single post).
   const taskSubreddit = extractTaskSubreddit(taskRedditLink);
+  const taskPostId    = extractTaskPostId(taskRedditLink);
+
+  // ── Post ID check (pure URL — no network needed) ───────────────────────────
+  // If the task specifies a SPECIFIC post, the proof comment MUST be on that
+  // exact post. Without this, users can comment on ANY post in the subreddit.
+  // This is the most impactful anti-fraud check: prevents submitting a comment
+  // on r/jawsurgery/comments/OTHER_POST as proof for a task targeting
+  // r/jawsurgery/comments/1tmpysc.
+  if (taskPostId && parsed.commentId) {
+    // parsed.postId is the postId embedded in the proof URL itself — no API needed.
+    if (parsed.postId.toLowerCase() !== taskPostId.toLowerCase()) {
+      failures.push(
+        `Your comment is on the wrong post. This task requires a comment specifically on post \`${taskPostId}\`, ` +
+        `but your proof link points to post \`${parsed.postId}\`.`
+      );
+      return {
+        passed: false, autoApproved: false, status: "wrong_post",
+        failures,
+        ...meta("wrong_post"),
+      };
+    }
+  }
 
   // ── Parallel fetch strategy ────────────────────────────────────────────────
   // Reddit's public JSON API (reddit.com/r/sub/comments/postId.json) has been
@@ -582,18 +671,11 @@ export async function validateRedditProof(
         };
       }
 
-      // ── RSS False-Positive Guard ──────────────────────────────────────────────
+      // ── RSS False-Positive Guard (old.reddit HTML cross-check) ────────────────
       // Reddit's RSS feeds cache removed comments and continue serving their XML
       // entries even after mods delete or spam-filter them. We must cross-verify
       // with old.reddit.com HTML, which is highly rate-limit-resistant and
       // accurately reflects the real public visibility of the comment.
-      //
-      // Behaviour:
-      //   - visible (returns true)  → proceed normally
-      //   - not visible (false)     → comment was removed, reject
-      //   - network failure (null)  → old.reddit down/blocked; treat as inconclusive
-      //     and continue (the RSS finding is the best we have — this is a very
-      //     rare edge case that would require both JSON AND old.reddit to fail).
       const htmlVisible = await isCommentVisibleOnOldReddit(
         parsed.subreddit,
         parsed.postId,
@@ -610,6 +692,54 @@ export async function validateRedditProof(
       }
       if (htmlVisible === null) {
         logger.warn({ proofUrl }, "old.reddit HTML check inconclusive — proceeding with RSS result");
+      }
+
+      // ── Freshness check (RSS <published>) ─────────────────────────────────────
+      // A comment must have been posted AFTER the task was created (with a
+      // grace period). This blocks users from recycling old comments they
+      // left on the right post months ago.
+      // We extract the <published> date from the specific comment's RSS <entry>.
+      if (options?.taskCreatedAt && targetCommentText) {
+        const pubMatch = /<(?:published|updated)>([\s\S]*?)<\/(?:published|updated)>/i.exec(targetCommentText);
+        if (pubMatch) {
+          const commentDate = new Date(pubMatch[1].trim());
+          if (isFinite(commentDate.getTime())) {
+            const earliest = options.taskCreatedAt.getTime() - TASK_GRACE_MS;
+            if (commentDate.getTime() < earliest) {
+              failures.push(
+                `Your comment was posted before this task was created — recycled old comments are not accepted. ` +
+                `Comment date: ${commentDate.toUTCString()}. Task created: ${options.taskCreatedAt.toUTCString()}.`
+              );
+              return {
+                passed: false, autoApproved: false, status: "stale_proof",
+                failures, authorFound, subredditFound, postLive: true,
+                ...meta("stale_proof"),
+              };
+            }
+          }
+        }
+      }
+
+      // ── Minimum comment length (RSS <content>) ────────────────────────────────
+      // Blocks trivial spam comments ("Nice!", "👍", single words).
+      // We decode HTML entities and strip tags from the RSS <content> field.
+      const minChars = options?.minCommentChars ?? MIN_COMMENT_CHARS;
+      if (minChars > 0 && targetCommentText) {
+        const contentMatch = /<content[^>]*>([\s\S]*?)<\/content>/i.exec(targetCommentText);
+        if (contentMatch) {
+          const plain = decodeRssContent(contentMatch[1]);
+          if (plain.length < minChars) {
+            failures.push(
+              `Comment is too short (${plain.length} characters). ` +
+              `This task requires a genuine comment of at least ${minChars} characters.`
+            );
+            return {
+              passed: false, autoApproved: false, status: "comment_too_short",
+              failures, authorFound, subredditFound, postLive: true,
+              ...meta("comment_too_short"),
+            };
+          }
+        }
       }
     } else {
       // 1. Try to extract the post author directly from the post's RSS feed (data).
@@ -787,6 +917,40 @@ export async function validateRedditProof(
     commentUpvotes = typeof targetComment.ups === "number" ? targetComment.ups : (targetComment.score ?? 0);
     if (targetComment.created_utc) {
       commentAgeMinutes = Math.floor((Date.now() / 1000 - targetComment.created_utc) / 60);
+    }
+
+    // ── JSON path: freshness check ────────────────────────────────────────────
+    if (options?.taskCreatedAt && targetComment.created_utc) {
+      const commentMs = targetComment.created_utc * 1000;
+      const earliest = options.taskCreatedAt.getTime() - TASK_GRACE_MS;
+      if (commentMs < earliest) {
+        failures.push(
+          `Your comment was posted before this task was created — recycled old comments are not accepted. ` +
+          `Comment date: ${new Date(commentMs).toUTCString()}. Task created: ${options.taskCreatedAt.toUTCString()}.`
+        );
+        return {
+          passed: false, autoApproved: false, status: "stale_proof",
+          failures, authorFound, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
+          ...meta("stale_proof"),
+        };
+      }
+    }
+
+    // ── JSON path: minimum comment length ────────────────────────────────────
+    const minCharsJson = options?.minCommentChars ?? MIN_COMMENT_CHARS;
+    if (minCharsJson > 0) {
+      const body = (targetComment.body ?? "").replace(/\s+/g, " ").trim();
+      if (body.length < minCharsJson) {
+        failures.push(
+          `Comment is too short (${body.length} characters). ` +
+          `This task requires a genuine comment of at least ${minCharsJson} characters.`
+        );
+        return {
+          passed: false, autoApproved: false, status: "comment_too_short",
+          failures, authorFound, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
+          ...meta("comment_too_short"),
+        };
+      }
     }
   } else {
     authorFound = (postData.author ?? "").toLowerCase();

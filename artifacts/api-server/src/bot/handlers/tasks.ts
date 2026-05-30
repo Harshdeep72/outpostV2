@@ -10,7 +10,7 @@ import {
   TextInputStyle,
   EmbedBuilder,
 } from "discord.js";
-import { eq, sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { tasks, claims, submissions, users, trustLogs } from "@workspace/db";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
@@ -1105,9 +1105,11 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
   }
 
   // Detect Reddit app links / share links that can't be validated by the API.
-  // Reject them immediately with clear instructions on how to get a browser URL.
+  // share_link_resolvable (/r/sub/s/XXXX) is now handled server-side by the
+  // validator (HEAD redirect → canonical URL), so we let those through.
+  // All other app-link kinds (app_scheme, app_link, short_link) must be rejected.
   const appUrlKind = detectAppUrl(proofLink);
-  if (appUrlKind) {
+  if (appUrlKind && appUrlKind !== "share_link_resolvable") {
     return interaction.editReply({
       embeds: [
         makeEmbed(COLORS.WARNING)
@@ -1119,8 +1121,28 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
   }
 
   // Fan-out independent reads in parallel for fast first-byte response.
+  // Normalise the proof URL first: strip query params (UTM tracking, etc.) so
+  // the same comment submitted with ?utm_source=share vs no params is still
+  // caught as a duplicate. The original URL is kept for display / storage.
+  const normalisedProofLink = (() => {
+    try {
+      const u = new URL(proofLink);
+      u.search = "";
+      u.hash = "";
+      return u.toString().replace(/\/$/, "");
+    } catch {
+      return proofLink;
+    }
+  })();
+
   const [dupProof, claim, user, dupUserOnTaskRes] = await Promise.all([
-    db.select({ id: submissions.id }).from(submissions).where(eq(submissions.proofLink, proofLink)).limit(1),
+    // Check BOTH exact URL and normalised URL so neither variant slips through.
+    db.select({ id: submissions.id }).from(submissions).where(
+      or(
+        eq(submissions.proofLink, proofLink),
+        eq(submissions.proofLink, normalisedProofLink),
+      )
+    ).limit(1),
     getClaimByIdCached(claimId),
     getUserByDiscordId(interaction.user.id),
     db.execute<{ count: string; allow_multi_claim: boolean | null }>(
@@ -1197,7 +1219,9 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     await interaction.editReply({
       embeds: [makeEmbed(COLORS.PRIMARY).setDescription(`🔍 Verifying proof is in the right subreddit and posted by **${authorDisplay}**…`)],
     });
-    validation = await validateRedditProof(proofLink, expectedAuthors, task.redditLink);
+    validation = await validateRedditProof(proofLink, expectedAuthors, task.redditLink, {
+      taskCreatedAt: task.createdAt ?? undefined,
+    });
   } else {
     const platformName = twitterTask ? "Twitter" : "Quora";
     await interaction.editReply({

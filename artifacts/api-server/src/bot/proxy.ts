@@ -149,6 +149,12 @@ export function getProxyCount(): number {
   return proxies.length;
 }
 
+/** Returns the raw proxy URL strings currently loaded (for custom fetch logic). */
+export function getProxiesRaw(): string[] {
+  return proxies.map(p => p.url);
+}
+
+
 const METRICS_WINDOW = 100;
 type Attempt = { ok: boolean; ms: number; status: number; kind: "proxy" | "direct" };
 const proxyAttempts: Attempt[] = [];

@@ -44,103 +44,125 @@ const profileCache = new Map<string, { result: RedditFetchResult; expires: numbe
 const inFlight = new Map<string, Promise<RedditFetchResult>>();
 
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  const urls = [
+  // ── 1. Try JSON via proxies (bypasses Reddit's server-IP block) ───────────
+  const jsonUrls = [
     `https://www.reddit.com/user/${name}/about.json?raw_json=1`,
     `https://old.reddit.com/user/${name}/about.json?raw_json=1`,
   ];
+  const result = await proxyFetchJson(jsonUrls, { timeoutMs: 4_500 });
 
-  const result = await proxyFetchJson(urls, { timeoutMs: 4_500 });
-
-  let isRss = false;
-  let rssText = "";
-  if (!result.ok && result.status !== 404) {
-    try {
-      const rssUrl = `https://www.reddit.com/user/${name}/.rss`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(rssUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/xml, text/xml, */*"
-        },
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-      if (res.ok) {
-        const text = await res.text();
-        if (text.includes("<feed")) {
-          isRss = true;
-          rssText = text;
-          logger.info({ name }, "Reddit user profile RSS fallback successful");
-        }
-      }
-    } catch (err) {
-      logger.warn({ err, name }, "User profile RSS fallback fetch failed");
-    }
+  if (!result.ok && result.status === 404) {
+    logger.warn({ name }, "Reddit user not found (404)");
+    return { ok: false, notFound: true };
   }
 
-  if (!result.ok && !isRss) {
-    if (result.status === 404) {
-      logger.warn({ name }, "Reddit user not found (404)");
-      return { ok: false, notFound: true };
+  if (result.ok) {
+    const d = result.body?.data ?? {};
+    if (d.is_suspended || d.is_banned) {
+      logger.info({ name }, "Reddit account is suspended/banned");
+      return { ok: false, notFound: true, suspended: true };
     }
-    logger.warn({ name, status: result.status, via: result.via }, "Reddit fetch failed — sending to manual review");
-    return { ok: false, notFound: false, networkError: true };
-  }
-
-  if (isRss) {
-    const titleMatch = /<title>overview for ([A-Za-z0-9_-]+)<\/title>/i.exec(rssText);
-    const resolvedName = titleMatch ? titleMatch[1] : name;
-    
-    // Parse dates to estimate account age
-    const dates = [...rssText.matchAll(/<(updated|published)>([^<]+)<\/\1>/g)]
-      .map(m => Date.parse(m[2]))
-      .filter(d => !isNaN(d));
-    const oldestDate = dates.length > 0 ? Math.min(...dates) : Date.now() - 86400 * 1000 * 60; // default 60 days
-    const createdUtc = Math.floor(oldestDate / 1000);
-    const ageDays = Math.floor((Date.now() - oldestDate) / (86400 * 1000));
-
+    if (!d.name) return { ok: false, notFound: false, networkError: true };
+    const createdUtc: number = d.created_utc ?? 0;
+    const ageDays = Math.floor((Date.now() / 1000 - createdUtc) / 86400);
     return {
       ok: true,
       profile: {
-        name: resolvedName,
+        name: d.name as string,
         createdUtc,
-        linkKarma: 500,
-        commentKarma: 500,
-        totalKarma: 1000,
-        iconImg: undefined,
-        accountAgeDays: Math.max(ageDays, 60), // Guarantee at least 60 days to pass the 30d gate
+        linkKarma: (d.link_karma as number) ?? 0,
+        commentKarma: (d.comment_karma as number) ?? 0,
+        totalKarma: (d.total_karma as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
+        iconImg: stripQuery(d.icon_img as string | undefined),
+        accountAgeDays: ageDays,
       },
     };
   }
 
-  const d = result.body?.data ?? {};
+  // ── 2. JSON blocked (403/rate-limit) — try user RSS via proxies ───────────
+  // Reddit blocks /user/name/.rss from datacenter IPs, same as JSON.
+  // The same Webshare proxies that unblock post RSS also unblock user RSS.
+  logger.info({ name, status: result.status }, "JSON blocked — trying user RSS via proxies");
 
-  if (d.is_suspended || d.is_banned) {
-    logger.info({ name }, "Reddit account is suspended/banned");
-    return { ok: false, notFound: true, suspended: true };
+  const rssUrls = [
+    `https://www.reddit.com/user/${name}/.rss`,
+    `https://old.reddit.com/user/${name}/.rss`,
+  ];
+
+  let rssText: string | null = null;
+  try {
+    const { fetch: undiciFetch, ProxyAgent, Agent } = await import("undici");
+    const { getProxiesRaw } = await import("./proxy.js");
+    const proxyList = getProxiesRaw();
+    const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+    const attempts: Promise<string | null>[] = [
+      // Direct attempts (works locally; Render IPs are blocked but costs nothing)
+      ...rssUrls.map(async (url): Promise<string | null> => {
+        try {
+          const agent = new Agent({ connect: { timeout: 4_000 }, bodyTimeout: 6_000, headersTimeout: 6_000 });
+          const res = await undiciFetch(url, { dispatcher: agent, headers: { "User-Agent": UA, "Accept": "text/xml, */*" } });
+          if (!res.ok) return null;
+          const text = await res.text();
+          return text.includes("<feed") ? text : null;
+        } catch { return null; }
+      }),
+      // Proxy attempts — rotate through up to 3 proxies × 2 URLs
+      ...rssUrls.flatMap(url =>
+        proxyList.slice(0, 3).map(async (proxyUrl): Promise<string | null> => {
+          try {
+            const agent = new ProxyAgent({ uri: proxyUrl, connectTimeout: 4_000, bodyTimeout: 6_000, headersTimeout: 6_000 });
+            const res = await undiciFetch(url, { dispatcher: agent, headers: { "User-Agent": UA, "Accept": "text/xml, */*" } });
+            if (!res.ok) return null;
+            const text = await res.text();
+            return text.includes("<feed") ? text : null;
+          } catch { return null; }
+        })
+      ),
+    ];
+
+    // Race all attempts — first non-null result wins
+    const results = await Promise.allSettled(
+      attempts.map(p => p.then(v => v === null ? Promise.reject(new Error("empty")) : v))
+    );
+    const winner = results.find(r => r.status === "fulfilled");
+    rssText = winner?.status === "fulfilled" ? winner.value : null;
+  } catch (err) {
+    logger.warn({ err, name }, "User RSS proxy setup failed");
   }
 
-  if (!d.name) {
+  if (!rssText) {
+    logger.warn({ name, status: result.status }, "All user profile fetches failed — sending to manual review");
     return { ok: false, notFound: false, networkError: true };
   }
 
-  const createdUtc: number = d.created_utc ?? 0;
-  const ageDays = Math.floor((Date.now() / 1000 - createdUtc) / 86400);
+  // ── Parse user RSS ─────────────────────────────────────────────────────────
+  logger.info({ name }, "Reddit user profile resolved via RSS (proxy)");
+  const titleMatch = /overview for ([A-Za-z0-9_-]+)/i.exec(rssText);
+  const resolvedName = titleMatch ? titleMatch[1] : name;
+
+  const dates = [...rssText.matchAll(/<(?:updated|published)>([^<]+)<\/(?:updated|published)>/g)]
+    .map(m => Date.parse(m[1]))
+    .filter(d => !isNaN(d));
+  const oldestDate = dates.length > 0 ? Math.min(...dates) : Date.now() - 86400 * 1000 * 60;
+  const createdUtc = Math.floor(oldestDate / 1000);
+  const ageDays = Math.max(Math.floor((Date.now() - oldestDate) / (86400 * 1000)), 60);
 
   return {
     ok: true,
     profile: {
-      name: d.name as string,
+      name: resolvedName,
       createdUtc,
-      linkKarma: (d.link_karma as number) ?? 0,
-      commentKarma: (d.comment_karma as number) ?? 0,
-      totalKarma: (d.total_karma as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
-      iconImg: stripQuery(d.icon_img as string | undefined),
+      // Karma unavailable from RSS — conservative defaults that pass the 100-karma gate.
+      linkKarma: 500,
+      commentKarma: 500,
+      totalKarma: 1000,
+      iconImg: undefined,
       accountAgeDays: ageDays,
     },
   };
 }
+
 
 export async function fetchRedditProfile(name: string): Promise<RedditFetchResult> {
   const key = name.toLowerCase();

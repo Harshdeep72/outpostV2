@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, pool } from "@workspace/db";
 import { users, tasks, submissions, campaigns, claims, redditAccounts } from "@workspace/db";
 import { eq, ilike, or, sql, desc, and } from "drizzle-orm";
-import { logger } from "../lib/logger.js";
+import { logger, getInMemoryLogs, pushLog } from "../lib/logger.js";
 import { adjustUserBalance } from "../bot/handlers/admin.js";
 import { getPrimaryGuild } from "../bot/discord-client.js";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../bot/setup.js";
@@ -15,16 +15,6 @@ import { reloadProxiesNow, getProxyMetrics } from "../bot/proxy.js";
 import { validateRedditProof } from "../bot/reddit-validator.js";
 
 const router = Router();
-
-const IN_MEMORY_LOGS: Array<{ level: string; message: string; time: string }> = [];
-const MAX_LOG_ENTRIES = 500;
-
-export function pushLog(level: string, message: string) {
-  IN_MEMORY_LOGS.push({ level, message, time: new Date().toISOString() });
-  if (IN_MEMORY_LOGS.length > MAX_LOG_ENTRIES) {
-    IN_MEMORY_LOGS.splice(0, IN_MEMORY_LOGS.length - MAX_LOG_ENTRIES);
-  }
-}
 
 // Re-check the user against the DB on every protected request so that
 // changes (suspend/demote/delete) take effect immediately, without waiting
@@ -2289,10 +2279,11 @@ router.post("/sweep/run-now", requireAuth, async (req, res) => {
 
 // Slow sweep — 5 submissions at a time, 3s gap between each.
 // Safe for clearing a backlog without hammering Reddit proxies.
-// Returns { decided, skipped } so the UI can show progress.
+// Returns { decided, skipped, pendingTotal, pendingOutsideWindow } so the UI can show progress.
 router.post("/sweep/run-slow", requireAuth, async (req, res) => {
   const { runPendingSlowSweepNow } = await import("../bot/pendingReviewSweeper.js");
-  const result = await runPendingSlowSweepNow();
+  const forceBacklog = req.body?.forceBacklog === true;
+  const result = await runPendingSlowSweepNow(forceBacklog);
   if (!result.ok) return res.status(503).json(result);
   res.json(result);
 });
@@ -2432,7 +2423,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
 router.get("/console-logs", requireAuth, async (req, res) => {
   const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? "100"))));
-  res.json({ logs: IN_MEMORY_LOGS.slice(-limit) });
+  res.json({ logs: getInMemoryLogs().slice(-limit) });
 });
 
 router.post("/set-password", async (req, res) => {

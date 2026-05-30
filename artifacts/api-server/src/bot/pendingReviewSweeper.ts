@@ -368,18 +368,43 @@ export async function runPendingSweepNow(): Promise<{ ok: boolean; reason?: stri
  * submission. Safe to call repeatedly to drain a backlog without hammering
  * Reddit and triggering proxy rate-limits.
  *
- * Returns how many submissions were decided (accepted + rejected) in this pass.
+ * @param forceBacklog - if true, bypasses the 7-day STOP_AFTER_MS safety cutoff
+ *   so very old stuck submissions are also processed. Use when clearing a backlog
+ *   where some entries have been stuck for more than 7 days.
+ *
+ * Returns how many submissions were decided (accepted + rejected) in this pass,
+ * plus diagnostic info for the UI.
  */
-export async function runPendingSlowSweepNow(): Promise<{ ok: boolean; decided: number; skipped: number; reason?: string }> {
-  if (!cachedClient) return { ok: false, decided: 0, skipped: 0, reason: "Pending-review sweeper not started yet" };
-  // We need to count decided/skipped — run a mini tick manually.
-  if (isRunning) return { ok: false, decided: 0, skipped: 0, reason: "A sweep is already running — wait a moment and try again" };
+export async function runPendingSlowSweepNow(forceBacklog = false): Promise<{
+  ok: boolean;
+  decided: number;
+  skipped: number;
+  pendingTotal: number;
+  pendingOutsideWindow: number;
+  reason?: string;
+}> {
+  if (!cachedClient) return { ok: false, decided: 0, skipped: 0, pendingTotal: 0, pendingOutsideWindow: 0, reason: "Pending-review sweeper not started yet" };
+  if (isRunning) return { ok: false, decided: 0, skipped: 0, pendingTotal: 0, pendingOutsideWindow: 0, reason: "A sweep is already running — wait a moment and try again" };
   isRunning = true;
   let decided = 0;
   let skipped = 0;
   try {
     const decideCutoff = new Date(Date.now() - AUTO_DECIDE_AFTER_MS);
-    const stopCutoff   = new Date(Date.now() - STOP_AFTER_MS);
+    const stopCutoff   = forceBacklog ? new Date(0) : new Date(Date.now() - STOP_AFTER_MS);
+
+    // Diagnostic: how many pending exist, and how many are outside this window?
+    const diagResult = await db.execute<{ total: string; outside: string }>(
+      sql`SELECT
+            COUNT(*) FILTER (WHERE review_status = 'pending')::text AS total,
+            COUNT(*) FILTER (
+              WHERE review_status = 'pending'
+                AND (submitted_at > ${decideCutoff} OR submitted_at < ${new Date(Date.now() - STOP_AFTER_MS)})
+            )::text AS outside
+          FROM submissions`
+    );
+    const pendingTotal = parseInt(diagResult.rows[0]?.total ?? "0");
+    const pendingOutsideWindow = parseInt(diagResult.rows[0]?.outside ?? "0");
+
     const rows = await db.execute<PendingRow>(
       sql`SELECT s.id::text                          AS id,
                  s.claim_id::text                    AS claim_id,
@@ -408,8 +433,8 @@ export async function runPendingSlowSweepNow(): Promise<{ ok: boolean; decided: 
            ORDER BY s.submitted_at ASC
            LIMIT ${SLOW_BATCH_SIZE}`,
     );
-    if (rows.rows.length === 0) return { ok: true, decided: 0, skipped: 0 };
-    logger.info({ count: rows.rows.length }, "pending-sweeper(slow): processing batch");
+    if (rows.rows.length === 0) return { ok: true, decided: 0, skipped: 0, pendingTotal, pendingOutsideWindow };
+    logger.info({ count: rows.rows.length, forceBacklog }, "pending-sweeper(slow): processing batch");
 
     for (const row of rows.rows) {
       if (!isRedditUrl(row.proof_link)) {
@@ -453,10 +478,10 @@ export async function runPendingSlowSweepNow(): Promise<{ ok: boolean; decided: 
       // Long gap — lets proxies cool down before hitting Reddit again.
       await new Promise((r) => setTimeout(r, SLOW_DELAY_MS));
     }
-    return { ok: true, decided, skipped };
+    return { ok: true, decided, skipped, pendingTotal, pendingOutsideWindow };
   } catch (err) {
     logger.error({ err }, "pending-sweeper(slow): failed");
-    return { ok: false, decided, skipped, reason: String(err) };
+    return { ok: false, decided, skipped, pendingTotal: 0, pendingOutsideWindow: 0, reason: String(err) };
   } finally {
     isRunning = false;
   }

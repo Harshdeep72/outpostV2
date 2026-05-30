@@ -72,16 +72,27 @@ function ActionButton({ label, endpoint, description, color = "indigo" }: {
 /** Slow Sweep button — shows decided/skipped counts from each 5-submission batch. */
 function SlowSweepButton() {
   const [state, setState] = useState<"idle" | "loading" | "ok" | "err">("idle");
-  const [lastResult, setLastResult] = useState<{ decided: number; skipped: number } | null>(null);
+  const [forceBacklog, setForceBacklog] = useState<boolean>(false);
+  const [lastResult, setLastResult] = useState<{
+    decided: number;
+    skipped: number;
+    pendingTotal: number;
+    pendingOutsideWindow: number;
+  } | null>(null);
 
   async function run() {
     setState("loading");
     setLastResult(null);
     try {
-      const res = await post<{ decided: number; skipped: number }>("/admin/sweep/run-slow", {});
+      const res = await post<{
+        decided: number;
+        skipped: number;
+        pendingTotal: number;
+        pendingOutsideWindow: number;
+      }>("/admin/sweep/run-slow", { forceBacklog });
       setLastResult(res);
       setState("ok");
-      setTimeout(() => setState("idle"), 8000);
+      setTimeout(() => setState("idle"), 12000);
     } catch {
       setState("err");
       setTimeout(() => setState("idle"), 4000);
@@ -97,29 +108,56 @@ function SlowSweepButton() {
         : "Run (5 at a time)";
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border bg-secondary/20">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground">🐢 Slow Sweep — Safe Backlog Mode</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Processes <strong>5 submissions</strong> with a <strong>3s gap</strong> between each so proxies don’t get rate-limited.
-          Keep clicking until it shows <em>0 decided, 0 skipped</em>.
-        </p>
+    <div className="flex flex-col gap-3 px-4 py-3 rounded-lg border border-border bg-secondary/20">
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">🐢 Slow Sweep — Safe Backlog Mode</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Processes <strong>5 submissions</strong> with a <strong>3s gap</strong> between each so proxies don’t get rate-limited.
+            Keep clicking until it shows <em>0 decided, 0 skipped</em>.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceBacklog}
+              onChange={(e) => setForceBacklog(e.target.checked)}
+              className="rounded border-border bg-background text-primary focus:ring-0 cursor-pointer"
+            />
+            Include Backlog (&gt;7 days old)
+          </label>
+          <button
+            onClick={run}
+            disabled={state === "loading"}
+            className={cn(
+              "shrink-0 px-3 py-1.5 rounded-md border text-xs font-semibold transition-colors disabled:opacity-50",
+              "border-green-500/40 text-green-300 hover:bg-green-500/10",
+              state === "ok"  && "border-green-500/40 text-green-400 bg-green-500/10",
+              state === "err" && "border-red-500/40 text-red-400 bg-red-500/10",
+            )}
+          >
+            {btnLabel}
+          </button>
+        </div>
       </div>
-      <button
-        onClick={run}
-        disabled={state === "loading"}
-        className={cn(
-          "shrink-0 px-3 py-1.5 rounded-md border text-xs font-semibold transition-colors disabled:opacity-50",
-          "border-green-500/40 text-green-300 hover:bg-green-500/10",
-          state === "ok"  && "border-green-500/40 text-green-400 bg-green-500/10",
-          state === "err" && "border-red-500/40 text-red-400 bg-red-500/10",
-        )}
-      >
-        {btnLabel}
-      </button>
+      {lastResult && (
+        <div className="text-xs text-muted-foreground border-t border-border/40 pt-2 flex flex-col gap-1">
+          <div className="flex justify-between">
+            <span>Total Pending Submissions: <strong className="text-foreground">{lastResult.pendingTotal}</strong></span>
+            <span>Outside Active Window: <strong className="text-foreground">{lastResult.pendingOutsideWindow}</strong></span>
+          </div>
+          {lastResult.decided === 0 && lastResult.skipped === 0 && lastResult.pendingOutsideWindow > 0 && !forceBacklog && (
+            <div className="text-amber-400 bg-amber-500/5 border border-amber-500/10 rounded p-1.5 mt-1">
+              ⚠️ Zero submissions processed because some are outside the active 24h-7d window. Try checking <strong>"Include Backlog (&gt;7 days old)"</strong> above.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 export default function Console() {
   const { data, isLoading, dataUpdatedAt } = useQuery<ConsoleLogsResponse>({

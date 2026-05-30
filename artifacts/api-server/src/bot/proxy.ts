@@ -191,13 +191,56 @@ export function getProxyMetrics(): {
 
 const proxyBlocklist = new Map<string, { blockType: string; blockedUntil: number }>();
 
+export interface ProxyHealth {
+  successes: number;
+  failures: number;
+  totalAttempts: number;
+  totalMs: number;
+  lastAttempt: number;
+  lastFailure: number;
+}
+
+export const proxyHealthMap = new Map<string, ProxyHealth>();
+
+let onPoolDepletedCallback: ((blockedCount: number, totalCount: number) => void) | null = null;
+let lastPoolLowAlertTime = 0;
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+
+export function setPoolDepletedCallback(cb: (blockedCount: number, totalCount: number) => void): void {
+  onPoolDepletedCallback = cb;
+}
+
+function checkPoolHealth(): void {
+  if (proxies.length === 0) return;
+  
+  let blockedCount = 0;
+  for (const p of proxies) {
+    if (isProxyBlocked(p.url)) {
+      blockedCount++;
+    }
+  }
+
+  const ratio = blockedCount / proxies.length;
+  if (ratio >= 0.5) {
+    const now = Date.now();
+    if (now - lastPoolLowAlertTime >= ALERT_COOLDOWN_MS) {
+      lastPoolLowAlertTime = now;
+      if (onPoolDepletedCallback) {
+        setTimeout(() => {
+          onPoolDepletedCallback?.(blockedCount, proxies.length);
+        }, 0);
+      }
+    }
+  }
+}
+
 export function handleFailedProxy(proxyUrl: string, blockType: string): void {
   const cooldownMinutes: Record<string, number> = {
     'rate_limit': 5,
-    'cloudflare': 30,      // Cloudflare challenges last longer
-    'captcha': 60,         // Captcha means heavy rate limit
-    'ip_ban': 120,         // IP is temporarily banned
-    'outage': 1,           // Reddit-wide outage, retry soon
+    'cloudflare': 30,
+    'captcha': 60,
+    'ip_ban': 120,
+    'outage': 1,
     'login_wall': 10,
     'bad_json': 5,
     'generic_block': 5,
@@ -210,6 +253,7 @@ export function handleFailedProxy(proxyUrl: string, blockType: string): void {
   });
   
   logger.warn({ proxy: maskProxy(proxyUrl), blockType, cooldownMinutes: cooldown }, "Proxy placed on cooldown");
+  checkPoolHealth();
 }
 
 export function isProxyBlocked(proxyUrl: string): boolean {
@@ -220,6 +264,23 @@ export function isProxyBlocked(proxyUrl: string): boolean {
     return false;
   }
   return true;
+}
+
+export function updateProxyHealth(proxyUrl: string, ok: boolean, ms: number): void {
+  let health = proxyHealthMap.get(proxyUrl);
+  if (!health) {
+    health = { successes: 0, failures: 0, totalAttempts: 0, totalMs: 0, lastAttempt: 0, lastFailure: 0 };
+    proxyHealthMap.set(proxyUrl, health);
+  }
+  health.totalAttempts++;
+  health.lastAttempt = Date.now();
+  if (ok) {
+    health.successes++;
+    health.totalMs += ms;
+  } else {
+    health.failures++;
+    health.lastFailure = Date.now();
+  }
 }
 
 export interface HtmlValidityResult {
@@ -359,18 +420,127 @@ export function checkResponseValidity(status: number, body: any, acceptHeader: s
   return { isValid: true };
 }
 
+const BROWSER_PROFILES = [
+  {
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      "Upgrade-Insecure-Requests": "1"
+    }
+  },
+  {
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/119.0.0.0",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.8",
+      "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="119", "Google Chrome";v="119"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"macOS"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Upgrade-Insecure-Requests": "1"
+    }
+  },
+  {
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.5",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Upgrade-Insecure-Requests": "1"
+    }
+  },
+  {
+    ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none"
+    }
+  },
+  {
+    ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/120.0.0.0 Edg/120.0.0.0",
+    headers: {
+      "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
+      "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"',
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Upgrade-Insecure-Requests": "1"
+    }
+  }
+];
+
+export function getRandomBrowserHeaders(acceptHeader: string): { ua: string; headers: Record<string, string> } {
+  const profile = BROWSER_PROFILES[Math.floor(Math.random() * BROWSER_PROFILES.length)]!;
+  return {
+    ua: profile.ua,
+    headers: {
+      ...profile.headers,
+      "Accept": acceptHeader,
+      "Accept-Encoding": "gzip, deflate, br",
+      "Connection": "keep-alive",
+      "Cache-Control": "max-age=0"
+    }
+  };
+}
+
 function nextProxies(n: number): ProxyEntry[] {
   if (proxies.length === 0) return [];
   
-  // Filter out any proxies currently on cooldown
   const active = proxies.filter(p => !isProxyBlocked(p.url));
   const pool = active.length > 0 ? active : proxies;
   
+  const scoredPool = pool.map(p => {
+    const health = proxyHealthMap.get(p.url);
+    let successRate = 1.0;
+    let avgMs = 800;
+    if (health && health.totalAttempts > 0) {
+      successRate = (health.successes + 1) / (health.totalAttempts + 2);
+      avgMs = health.successes > 0 ? health.totalMs / health.successes : 800;
+    }
+    const score = successRate * (1000 / Math.max(100, avgMs));
+    return { entry: p, score };
+  });
+
+  scoredPool.sort((a, b) => b.score - a.score);
+
   const out: ProxyEntry[] = [];
+  const pickedUrls = new Set<string>();
+
   for (let i = 0; i < Math.min(n, pool.length); i++) {
-    out.push(pool[(rotationIndex + i) % pool.length]!);
+    const useExploit = Math.random() < 0.85;
+    let selected: ProxyEntry | null = null;
+    
+    if (useExploit) {
+      const candidate = scoredPool.find(x => !pickedUrls.has(x.entry.url));
+      if (candidate) selected = candidate.entry;
+    }
+
+    if (!selected) {
+      const remaining = pool.filter(p => !pickedUrls.has(p.url));
+      if (remaining.length > 0) {
+        selected = remaining[Math.floor(Math.random() * remaining.length)]!;
+      }
+    }
+
+    if (selected) {
+      out.push(selected);
+      pickedUrls.add(selected.url);
+    }
   }
-  rotationIndex = (rotationIndex + 1) % pool.length;
+
   return out;
 }
 
@@ -381,8 +551,6 @@ export interface ProxyFetchOptions {
   /** Override the Accept header (default: application/json). */
   acceptHeader?: string;
 }
-
-const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 export interface ProxyFetchResult {
   ok: boolean;
@@ -405,9 +573,10 @@ async function fetchOnce(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const start = Date.now();
   try {
+    const browser = getRandomBrowserHeaders(acceptHeader);
     const res = await undiciFetch(url, {
       dispatcher,
-      headers: { "User-Agent": DEFAULT_UA, "Accept": acceptHeader, ...headers },
+      headers: { "User-Agent": browser.ua, ...browser.headers, ...headers },
       signal: controller.signal,
     });
     let body: any = null;
@@ -424,8 +593,13 @@ async function fetchOnce(
 
     const validity = checkResponseValidity(res.status, body, acceptHeader);
     const ok = res.ok && validity.isValid;
+    const ms = Date.now() - start;
 
-    recordAttempt(kind, ok, Date.now() - start, ok ? res.status : (res.status === 200 ? 429 : res.status));
+    if (kind === "proxy" && proxyUrl) {
+      updateProxyHealth(proxyUrl, ok, ms);
+    }
+
+    recordAttempt(kind, ok, ms, ok ? res.status : (res.status === 200 ? 429 : res.status));
 
     if (!ok) {
       if (kind === "proxy" && proxyUrl && validity.blockType) {

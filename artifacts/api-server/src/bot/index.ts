@@ -21,7 +21,7 @@ import { startCampaignQueueProcessor } from "./campaignQueueProcessor.js";
 import { runUpdateNotifierOnBoot } from "./updateNotifier.js";
 import { refreshLeaderboard, checkAndRolloverWeek } from "./handlers/leaderboard.js";
 import { runWeeklyPayouts } from "./handlers/weeklyPayouts.js";
-import { startProxyAutoReload, getProxyCount } from "./proxy.js";
+import { startProxyAutoReload, getProxyCount, setPoolDepletedCallback } from "./proxy.js";
 import { startCacheSweeper } from "./cache.js";
 import { setDiscordClient } from "./discord-client.js";
 import { logger } from "../lib/logger.js";
@@ -46,6 +46,32 @@ export async function startBot() {
   });
 
   setDiscordClient(client);
+
+  setPoolDepletedCallback(async (blockedCount, totalCount) => {
+    logger.warn({ blockedCount, totalCount }, "Proxy pool low callback triggered");
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        const { setupGuild } = await import("./setup.js");
+        const { taskLogsChannel } = await setupGuild(guild);
+        const { EmbedBuilder } = await import("discord.js");
+        const embed = new EmbedBuilder()
+          .setTitle("⚠️ Proxy Pool Running Low")
+          .setColor(0xEB6D2E)
+          .setDescription(
+            `**Warning:** More than 50% of the proxy pool is currently on cooldown.\n\n` +
+            `• **On Cooldown:** ${blockedCount} / ${totalCount} proxies\n` +
+            `• **Available:** ${totalCount - blockedCount} proxies\n\n` +
+            `Consider adding more Webshare proxies to prevent slower validations.`
+          )
+          .setTimestamp();
+        await taskLogsChannel.send({ embeds: [embed] }).catch((err) => {
+          logger.warn({ err, guildId: guild.id }, "Failed to send proxy pool alert");
+        });
+      } catch (err) {
+        logger.warn({ err, guildId: guild.id }, "Failed to set up guild for proxy alert");
+      }
+    }
+  });
 
   client.on("error", (err) => logger.error({ err }, "Discord client error"));
   client.on("warn", (msg) => logger.warn({ msg }, "Discord client warn"));

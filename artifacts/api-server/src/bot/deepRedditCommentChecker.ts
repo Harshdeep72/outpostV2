@@ -1,6 +1,7 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchJson, proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
+import { commentValidationCache } from "./cache.js";
 
 const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
 const TASK_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -200,6 +201,44 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
  * Highly robust against IP rate limits, API blocks, and cached RSS feeds.
  */
 export async function deepCheckComment(
+  proofUrl: string,
+  expectedAuthor: string | string[],
+  taskRedditLink: string,
+  options?: { minCommentChars?: number; taskCreatedAt?: Date }
+): Promise<ValidationResult> {
+  const parsed = parseRedditProofUrl(proofUrl);
+  if (!parsed || !parsed.commentId) {
+    return {
+      passed: false, autoApproved: false, status: "url_invalid",
+      failures: ["Proof URL is not a valid reddit.com comment URL."],
+      ...meta("url_invalid"),
+    };
+  }
+
+  const expectedLowerList = (Array.isArray(expectedAuthor) ? expectedAuthor : [expectedAuthor])
+    .map((u) => {
+      let name = (u ?? "").toLowerCase().trim();
+      name = name.replace(/^\/?u\//, "");
+      return name;
+    })
+    .filter((u) => u.length > 0);
+
+  const cacheKey = `${parsed.commentId}:${expectedLowerList.sort().join(",")}:${taskRedditLink}:${options?.minCommentChars ?? 0}`;
+  const cached = commentValidationCache.get(cacheKey);
+  if (cached) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: cache hit");
+    return cached;
+  }
+
+  const result = await runDeepCheck(proofUrl, expectedAuthor, taskRedditLink, options);
+  
+  if (result.status !== "api_unreachable") {
+    commentValidationCache.set(cacheKey, result);
+  }
+  return result;
+}
+
+async function runDeepCheck(
   proofUrl: string,
   expectedAuthor: string | string[],
   taskRedditLink: string,

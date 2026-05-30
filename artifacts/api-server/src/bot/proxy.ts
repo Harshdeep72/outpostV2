@@ -189,13 +189,188 @@ export function getProxyMetrics(): {
   };
 }
 
+const proxyBlocklist = new Map<string, { blockType: string; blockedUntil: number }>();
+
+export function handleFailedProxy(proxyUrl: string, blockType: string): void {
+  const cooldownMinutes: Record<string, number> = {
+    'rate_limit': 5,
+    'cloudflare': 30,      // Cloudflare challenges last longer
+    'captcha': 60,         // Captcha means heavy rate limit
+    'ip_ban': 120,         // IP is temporarily banned
+    'outage': 1,           // Reddit-wide outage, retry soon
+    'login_wall': 10,
+    'bad_json': 5,
+    'generic_block': 5,
+  };
+  
+  const cooldown = cooldownMinutes[blockType] ?? 5;
+  proxyBlocklist.set(proxyUrl, {
+    blockType,
+    blockedUntil: Date.now() + cooldown * 60 * 1000,
+  });
+  
+  logger.warn({ proxy: maskProxy(proxyUrl), blockType, cooldownMinutes: cooldown }, "Proxy placed on cooldown");
+}
+
+export function isProxyBlocked(proxyUrl: string): boolean {
+  const blocked = proxyBlocklist.get(proxyUrl);
+  if (!blocked) return false;
+  if (blocked.blockedUntil < Date.now()) {
+    proxyBlocklist.delete(proxyUrl);
+    return false;
+  }
+  return true;
+}
+
+export interface HtmlValidityResult {
+  isValid: boolean;
+  blockType?: 'cloudflare' | 'captcha' | 'rate_limit' | 'ip_ban' | 'outage' | 'login_wall' | 'bad_json' | 'generic_block';
+}
+
+export function checkResponseValidity(status: number, body: any, acceptHeader: string): HtmlValidityResult {
+  if (status === 429) {
+    return { isValid: false, blockType: 'rate_limit' };
+  }
+  if (status === 403) {
+    return { isValid: false, blockType: 'ip_ban' };
+  }
+  if (status >= 500) {
+    return { isValid: false, blockType: 'outage' };
+  }
+
+  const isExpectedJson = acceptHeader.includes("json");
+  const isParsedJson = typeof body === "object" && body !== null;
+
+  if (isExpectedJson && !isParsedJson && typeof body === "string") {
+    const lowerHtml = body.toLowerCase();
+    const cloudflareSignals = [
+      'attention required!', 'cloudflare', 'cf-challenge', 'challenge platform',
+      'enable javascript and cookies', 'checking your browser', 'ddos protection',
+      'ray id:', 'cf-ray', 'performance and security', 'just a moment'
+    ];
+    if (cloudflareSignals.some(signal => lowerHtml.includes(signal))) {
+      return { isValid: false, blockType: 'cloudflare' };
+    }
+    const captchaSignals = [
+      'captcha', 'are you a human?', 'verify you are human', 'recaptcha',
+      'hcaptcha', 'complete the verification', "i'm not a robot"
+    ];
+    if (captchaSignals.some(signal => lowerHtml.includes(signal))) {
+      return { isValid: false, blockType: 'captcha' };
+    }
+    const rateLimitSignals = [
+      'too many requests', 'rate limit', 'slow down', 'try again later',
+      'you have been rate limited', 'exceeded rate limit'
+    ];
+    if (rateLimitSignals.some(signal => lowerHtml.includes(signal))) {
+      return { isValid: false, blockType: 'rate_limit' };
+    }
+    const ipBanSignals = [
+      'access denied', 'your ip has been banned', 'you have been blocked',
+      'blocked due to suspicious activity', 'access to this page has been denied'
+    ];
+    if (ipBanSignals.some(signal => lowerHtml.includes(signal))) {
+      return { isValid: false, blockType: 'ip_ban' };
+    }
+
+    return { isValid: false, blockType: 'bad_json' };
+  }
+
+  if (typeof body !== 'string') {
+    return { isValid: true };
+  }
+
+  const lowerHtml = body.toLowerCase();
+
+  // CHECK 1: Cloudflare
+  const cloudflareSignals = [
+    'attention required!', 'cloudflare', 'cf-challenge', 'challenge platform',
+    'enable javascript and cookies', 'checking your browser', 'ddos protection',
+    'ray id:', 'cf-ray', 'performance and security', 'just a moment'
+  ];
+  if (cloudflareSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'cloudflare' };
+  }
+
+  // CHECK 2: Captcha
+  const captchaSignals = [
+    'captcha', 'are you a human?', 'verify you are human', 'recaptcha',
+    'hcaptcha', 'complete the verification', "i'm not a robot"
+  ];
+  if (captchaSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'captcha' };
+  }
+
+  // CHECK 3: Rate limit
+  const rateLimitSignals = [
+    'too many requests', 'rate limit', 'slow down', 'try again later',
+    'you have been rate limited', 'exceeded rate limit'
+  ];
+  if (rateLimitSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'rate_limit' };
+  }
+
+  // CHECK 4: IP Ban / Block
+  const ipBanSignals = [
+    'access denied', 'your ip has been banned', 'you have been blocked',
+    'blocked due to suspicious activity', 'access to this page has been denied'
+  ];
+  if (ipBanSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'ip_ban' };
+  }
+
+  // CHECK 5: Outage
+  const outageSignals = [
+    'reddit is temporarily unavailable', 'site is down for maintenance',
+    'something went wrong', 'internal server error', 'service unavailable',
+    'we\'ll be back soon', 'over capacity', 'please wait a few minutes'
+  ];
+  if (outageSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'outage' };
+  }
+
+  // CHECK 6: Login wall
+  const loginSignals = [
+    'sign in or sign up', 'log in to continue', 'you need to log in',
+    'login required'
+  ];
+  if (loginSignals.some(signal => lowerHtml.includes(signal))) {
+    return { isValid: false, blockType: 'login_wall' };
+  }
+
+  // CHECK 7: Real Reddit Page Validation
+  const isHtml = lowerHtml.includes('<html') || lowerHtml.includes('<!doctype') || lowerHtml.includes('<body');
+  if (isHtml) {
+    const validRedditSignals = [
+      'class="comment"', 'class="commentarea"', 'id="siteTable"',
+      'data-reddit-', 'thing_t1_', 'shreddit-comment',
+      'entry.unvoted', 'usertext-body', 'class="md"', '<feed'
+    ];
+    const hasRedditSignal = validRedditSignals.some(signal => lowerHtml.includes(signal));
+    const hasCommentStructure = lowerHtml.includes('class="comment"') || 
+                                lowerHtml.includes('shreddit-comment') ||
+                                (lowerHtml.includes('data-author') && lowerHtml.includes('data-subreddit'));
+    
+    if (!hasRedditSignal && !hasCommentStructure) {
+      return { isValid: false, blockType: 'generic_block' };
+    }
+  }
+
+  return { isValid: true };
+}
+
 function nextProxies(n: number): ProxyEntry[] {
   if (proxies.length === 0) return [];
+  
+  // Filter out any proxies currently on cooldown
+  const active = proxies.filter(p => !isProxyBlocked(p.url));
+  const pool = active.length > 0 ? active : proxies;
+  
   const out: ProxyEntry[] = [];
-  for (let i = 0; i < Math.min(n, proxies.length); i++) {
-    out.push(proxies[(rotationIndex + i) % proxies.length]!);
+  for (let i = 0; i < Math.min(n, pool.length); i++) {
+    out.push(pool[(rotationIndex + i) % pool.length]!);
   }
-  rotationIndex = (rotationIndex + 1) % proxies.length;
+  rotationIndex = (rotationIndex + 1) % pool.length;
   return out;
 }
 
@@ -223,7 +398,8 @@ async function fetchOnce(
   timeoutMs: number,
   headers: Record<string, string>,
   kind: "proxy" | "direct",
-  acceptHeader = "application/json"
+  acceptHeader = "application/json",
+  proxyUrl?: string
 ): Promise<ProxyFetchResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -245,8 +421,21 @@ async function fetchOnce(
     } catch {
       body = null;
     }
-    recordAttempt(kind, res.ok, Date.now() - start, res.status);
-    return { ok: res.ok, status: res.status, body, via };
+
+    const validity = checkResponseValidity(res.status, body, acceptHeader);
+    const ok = res.ok && validity.isValid;
+
+    recordAttempt(kind, ok, Date.now() - start, ok ? res.status : (res.status === 200 ? 429 : res.status));
+
+    if (!ok) {
+      if (kind === "proxy" && proxyUrl && validity.blockType) {
+        handleFailedProxy(proxyUrl, validity.blockType);
+      }
+      logger.warn({ via, status: res.status, blockType: validity.blockType, url }, "Fetch failed validity check");
+      throw new Error(`Invalid response: ${validity.blockType ?? "unknown"}`);
+    }
+
+    return { ok: true, status: res.status, body, via };
   } catch (err) {
     recordAttempt(kind, false, Date.now() - start, 0);
     throw err;
@@ -275,7 +464,7 @@ async function runProxyRace(
   } else {
     for (const proxy of targets) {
       const url = urls[Math.floor(Math.random() * urls.length)]!;
-      tasks.push(fetchOnce(url, proxy.agent, `proxy:${maskProxy(proxy.url)}`, timeoutMs, headers, "proxy", acceptHeader));
+      tasks.push(fetchOnce(url, proxy.agent, `proxy:${maskProxy(proxy.url)}`, timeoutMs, headers, "proxy", acceptHeader, proxy.url));
     }
     // Always also try direct as a fallback in case proxies are all slow/dead.
     tasks.push(fetchOnce(urls[0]!, directAgent, "direct-fallback", timeoutMs, headers, "direct", acceptHeader));

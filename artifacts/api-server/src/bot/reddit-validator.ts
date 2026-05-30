@@ -95,7 +95,27 @@ async function isCommentVisibleOnOldReddit(
       logger.warn({ urls, commentId }, "old.reddit HTML fetch returned null — inconclusive");
       return null;
     }
-    // Look for the comment's container div by its id attribute.
+
+    // ── Sanity-check: is this actually a Reddit thread page? ────────────────
+    // Proxies can return CAPTCHA pages, Cloudflare challenges, or error pages.
+    // If the HTML doesn’t look like old.reddit, we can't trust the result.
+    // old.reddit thread pages always contain these markers:
+    const isRealRedditPage =
+      html.includes('class="commentarea"') ||
+      html.includes('class="comment"')     ||
+      html.includes('data-subreddit=')     ||
+      html.includes('class="thing"')       ||
+      html.includes('id="siteTable"');
+    if (!isRealRedditPage) {
+      logger.warn(
+        { commentId, subreddit, htmlLen: html.length },
+        "old.reddit HTML doesn’t look like a Reddit page (proxy returned CAPTCHA/error?) — inconclusive"
+      );
+      return null;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Look for the comment’s container div by its id attribute.
     // old.reddit uses id="thing_t1_<commentId>" for each comment div.
     const containerPresent = html.includes(`id="thing_t1_${commentId}"`);
     if (!containerPresent) {
@@ -1025,12 +1045,53 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   // ── Comment liveness via old.reddit HTML (most reliable path) ─────────────
   if (parsed.commentId && htmlVisible !== null) {
     if (htmlVisible === false) {
-      return {
-        liveStatus: "removed",
-        detailedStatus: "comment_missing",
-        statusLabel: "Comment removed",
-        reason: "Comment is no longer visible on Reddit (removed or spam-filtered).",
-      };
+      // HTML says the comment is gone. But before hard-marking as removed, try
+      // to corroborate with the JSON response — a proxy returning garbage HTML
+      // must not trigger a false positive on its own.
+      if (result.ok) {
+        // JSON fetched successfully — check if the comment body is present.
+        const commentsListing = Array.isArray(result.body) ? result.body[1] : null;
+        const allComments: any[] = [];
+        function flattenForHtmlCheck(children: any[]) {
+          for (const child of children ?? []) {
+            if (child.kind === "t1") {
+              allComments.push(child.data);
+              if (child.data.replies?.data?.children) {
+                flattenForHtmlCheck(child.data.replies.data.children);
+              }
+            }
+          }
+        }
+        flattenForHtmlCheck(commentsListing?.data?.children ?? []);
+        const target = allComments.find((c) => c.id === parsed.commentId);
+        if (!target) {
+          // JSON also can't find the comment — both sources agree it's gone.
+          return {
+            liveStatus: "removed",
+            detailedStatus: "comment_missing",
+            statusLabel: "Comment removed",
+            reason: "Comment is no longer visible on Reddit (confirmed by both HTML and JSON).",
+          };
+        }
+        // JSON found the comment — HTML was probably a bad proxy response.
+        // Check JSON for removal markers instead.
+        const cstate = classifyComment(target);
+        if (cstate) {
+          const m = STATUS_META[cstate];
+          const live: LiveStatus = cstate === "deleted_by_author" ? "deleted" : "removed";
+          return { liveStatus: live, detailedStatus: cstate, statusLabel: m.label, reason: m.label };
+        }
+        // JSON says comment is live — trust JSON over HTML proxy result.
+        logger.info({ commentId: parsed.commentId }, "HTML said removed but JSON says live — treating as live (proxy false positive)");
+        return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+      } else {
+        // JSON also failed — can't confirm. Treat as unknown so we retry next tick.
+        logger.warn(
+          { commentId: parsed.commentId, jsonStatus: result.status },
+          "HTML says removed but JSON fetch also failed — treating as unknown to avoid false positive"
+        );
+        return { liveStatus: "unknown", detailedStatus: "api_unreachable", statusLabel: "Reddit API unreachable" };
+      }
     }
     // htmlVisible === true — comment is live. If JSON also succeeded, do a
     // deeper check for removal markers on the comment body.

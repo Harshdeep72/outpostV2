@@ -52,6 +52,16 @@ function emojiFor(status: LiveStatus): string {
   }
 }
 
+function titleFor(oldStatus: LiveStatus, newStatus: LiveStatus): string {
+  if (newStatus === "live") {
+    if (oldStatus === "unknown") return "✅ Submission APPROVED";
+    return "✅ Submission RESTORED (back to live)";
+  }
+  if (newStatus === "removed") return "🛡️ Submission REMOVED";
+  if (newStatus === "deleted") return "🗑️ Submission DELETED";
+  return `${emojiFor(newStatus)} Submission ${newStatus.toUpperCase()}`;
+}
+
 async function notifyStatusChange(
   client: Client,
   row: SubmissionRow,
@@ -59,8 +69,7 @@ async function notifyStatusChange(
   newStatus: LiveStatus,
   reason: string | undefined
 ) {
-  // Skip noise: don't shout when first establishing 'unknown' → 'live'.
-  if (oldStatus === "unknown" && newStatus === "live") return;
+  // Only skip truly redundant same-status pings — all real transitions notify.
 
   for (const guild of client.guilds.cache.values()) {
     try {
@@ -68,7 +77,7 @@ async function notifyStatusChange(
       if (!(taskLogsChannel instanceof TextChannel)) continue;
 
       const embed = new EmbedBuilder()
-        .setTitle(`${emojiFor(newStatus)} Submission ${newStatus.toUpperCase()}`)
+        .setTitle(titleFor(oldStatus, newStatus))
         .setColor(colorFor(newStatus))
         .setDescription(
           [
@@ -100,31 +109,43 @@ async function notifyStatusChange(
   // DM the submitter when their post goes removed/deleted so they know what
   // happened to their submission. Embedded for readability. Wrapped in
   // try/catch so a closed-DM user never breaks the checker loop.
-  if (newStatus === "removed" || newStatus === "deleted") {
-    try {
-      const user = await client.users.fetch(row.discord_id);
-      const dmEmbed = new EmbedBuilder()
-        .setTitle(`${emojiFor(newStatus)} Your submission was ${newStatus}`)
-        .setColor(colorFor(newStatus))
-        .setDescription(
-          [
-            `Your submission **#${row.id}** is no longer live on Reddit.`,
-            reason ? `**Reason:** ${reason}` : null,
-            `If this was unexpected, check the post on Reddit or reach out to staff.`,
-          ]
-            .filter(Boolean)
-            .join("\n\n")
-        )
-        .addFields(
-          { name: "Reward", value: `$${row.reward}`, inline: true },
-          { name: "Reddit user", value: row.reddit_username ? `u/${row.reddit_username}` : "—", inline: true },
-          { name: "Proof", value: `[Open post](${row.proof_link})`, inline: false }
-        )
-        .setTimestamp(new Date());
-      await user.send({ embeds: [dmEmbed] });
-    } catch (err) {
-      logger.debug({ err, discordId: row.discord_id, submissionId: row.id }, "Liveness checker: DM to user failed (DMs closed?)");
+  try {
+    const user = await client.users.fetch(row.discord_id);
+    let dmTitle: string;
+    let dmDesc: string[];
+    if (newStatus === "live" && oldStatus === "unknown") {
+      dmTitle = "✅ Submission Confirmed Live";
+      dmDesc = [
+        `Your submission **#${row.id}** has been verified as live on Reddit.`,
+        `Your reward of **$${row.reward}** is on its way.`,
+      ];
+    } else if (newStatus === "live") {
+      dmTitle = "✅ Submission Restored to Live";
+      dmDesc = [
+        `Good news — your submission **#${row.id}** is back live on Reddit after being ${oldStatus}.`,
+        `Your reward of **$${row.reward}** is processing.`,
+      ];
+    } else {
+      dmTitle = `${emojiFor(newStatus)} Your submission was ${newStatus}`;
+      dmDesc = [
+        `Your submission **#${row.id}** is no longer live on Reddit.`,
+        reason ? `**Reason:** ${reason}` : null,
+        `If this was unexpected, check the post on Reddit or reach out to staff.`,
+      ].filter(Boolean) as string[];
     }
+    const dmEmbed = new EmbedBuilder()
+      .setTitle(dmTitle)
+      .setColor(colorFor(newStatus))
+      .setDescription(dmDesc.join("\n\n"))
+      .addFields(
+        { name: "Reward", value: `$${row.reward}`, inline: true },
+        { name: "Reddit user", value: row.reddit_username ? `u/${row.reddit_username}` : "—", inline: true },
+        { name: "Proof", value: `[Open post](${row.proof_link})`, inline: false }
+      )
+      .setTimestamp(new Date());
+    await user.send({ embeds: [dmEmbed] });
+  } catch (err) {
+    logger.debug({ err, discordId: row.discord_id, submissionId: row.id }, "Liveness checker: DM to user failed (DMs closed?)");
   }
 }
 

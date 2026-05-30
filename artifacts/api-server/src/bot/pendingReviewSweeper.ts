@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { db } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { recheckRedditLiveness } from "./reddit-validator.js";
+import { validateRedditProof } from "./reddit-validator.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 import { tryCompleteReferral } from "./db.js";
@@ -35,6 +35,12 @@ interface PendingRow extends Record<string, unknown> {
   task_max_slots: number;
   user_id: string;
   workspace_channel_id: string | null;
+  /** The target subreddit/post URL from the task (for full validation). */
+  task_reddit_link: string;
+  /** Task creation timestamp (for freshness check). */
+  task_created_at: Date | null;
+  /** Primary Reddit username for the user. */
+  user_reddit_username: string | null;
 }
 
 function isRedditUrl(url: string): boolean {
@@ -254,7 +260,10 @@ async function tick(client: Client) {
                  t.status                            AS task_status,
                  t.slots_filled                      AS task_slots_filled,
                  t.max_slots                         AS task_max_slots,
-                 u.workspace_channel_id              AS workspace_channel_id
+                 t.reddit_link                       AS task_reddit_link,
+                 t.created_at                        AS task_created_at,
+                 u.workspace_channel_id              AS workspace_channel_id,
+                 u.reddit_username                   AS user_reddit_username
             FROM submissions s
             JOIN tasks t ON t.id = s.task_id
             LEFT JOIN users u ON u.id = s.user_id
@@ -275,29 +284,53 @@ async function tick(client: Client) {
         continue;
       }
 
-      const result = await recheckRedditLiveness(row.proof_link).catch((err) => {
-        logger.warn({ err, subId: row.id }, "pending-sweeper: recheck threw");
-        return { liveStatus: "unknown" as const, reason: undefined };
-      });
-
-      if (result.liveStatus === "unknown") {
-        // Transient — try again next tick. Don't decide on inconclusive data.
-        logger.info({ subId: row.id }, "pending-sweeper: recheck inconclusive, will retry");
-        continue;
+      // Build list of all Reddit usernames this Discord user has linked.
+      // We check both the primary users.reddit_username and the reddit_accounts table.
+      let expectedAuthors: string[] = [];
+      if (row.user_reddit_username) {
+        expectedAuthors.push(row.user_reddit_username.toLowerCase());
+      }
+      try {
+        const extraAccounts = await db.execute<{ reddit_username: string }>(
+          sql`SELECT reddit_username FROM reddit_accounts WHERE discord_id = ${row.discord_id}`
+        );
+        for (const acct of extraAccounts.rows) {
+          const name = (acct.reddit_username ?? "").toLowerCase().trim();
+          if (name && !expectedAuthors.includes(name)) expectedAuthors.push(name);
+        }
+      } catch (err) {
+        logger.warn({ err, subId: row.id }, "pending-sweeper: failed to fetch reddit_accounts");
       }
 
-      if (result.liveStatus === "live") {
+      // Run full validation (author + subreddit + post + liveness).
+      // This is the same check run at submission time — ensures backlog tasks
+      // are verified with the same rigour as live submissions.
+      const result = await validateRedditProof(
+        row.proof_link,
+        expectedAuthors,
+        row.task_reddit_link ?? "",
+        { taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined },
+      ).catch((err) => {
+        logger.warn({ err, subId: row.id }, "pending-sweeper: validateRedditProof threw");
+        return null;
+      });
+
+      if (!result) {
+        // Unexpected error — skip and retry next tick.
+        logger.info({ subId: row.id }, "pending-sweeper: validation errored, will retry");
+      } else if (result.status === "api_unreachable") {
+        // Transient network failure — don't decide yet.
+        logger.info({ subId: row.id }, "pending-sweeper: API unreachable (proxy blocked?), will retry");
+      } else if (result.passed) {
         await autoAccept(client, row);
       } else {
-        // removed / deleted
-        const reason = result.reason
-          ? `${result.liveStatus} — ${result.reason}`
-          : `post ${result.liveStatus} on Reddit`;
+        // Permanent failure — reject with the first failure message.
+        const reason = result.failures[0] ?? result.statusLabel ?? `post ${result.status}`;
         await autoReject(client, row, reason);
       }
 
       // Polite gap between Reddit calls.
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 500));
     }
   } catch (err) {
     logger.error({ err }, "pending-sweeper: tick failed");

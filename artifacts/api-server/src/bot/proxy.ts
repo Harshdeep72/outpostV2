@@ -203,6 +203,8 @@ export interface ProxyFetchOptions {
   timeoutMs?: number;
   retries?: number;
   headers?: Record<string, string>;
+  /** Override the Accept header (default: application/json). */
+  acceptHeader?: string;
 }
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -220,7 +222,8 @@ async function fetchOnce(
   via: string,
   timeoutMs: number,
   headers: Record<string, string>,
-  kind: "proxy" | "direct"
+  kind: "proxy" | "direct",
+  acceptHeader = "application/json"
 ): Promise<ProxyFetchResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -228,7 +231,7 @@ async function fetchOnce(
   try {
     const res = await undiciFetch(url, {
       dispatcher,
-      headers: { "User-Agent": DEFAULT_UA, "Accept": "application/json", ...headers },
+      headers: { "User-Agent": DEFAULT_UA, "Accept": acceptHeader, ...headers },
       signal: controller.signal,
     });
     let body: any = null;
@@ -252,9 +255,10 @@ async function fetchOnce(
   }
 }
 
-export async function proxyFetchJson(
+async function runProxyRace(
   urls: string[],
-  opts: ProxyFetchOptions = {}
+  opts: ProxyFetchOptions,
+  acceptHeader: string
 ): Promise<ProxyFetchResult> {
   await loadProxies().catch(() => {});
 
@@ -266,14 +270,15 @@ export async function proxyFetchJson(
 
   if (targets.length === 0) {
     for (const url of urls) {
-      tasks.push(fetchOnce(url, directAgent, "direct", timeoutMs, headers, "direct"));
+      tasks.push(fetchOnce(url, directAgent, "direct", timeoutMs, headers, "direct", acceptHeader));
     }
   } else {
     for (const proxy of targets) {
       const url = urls[Math.floor(Math.random() * urls.length)]!;
-      tasks.push(fetchOnce(url, proxy.agent, `proxy:${maskProxy(proxy.url)}`, timeoutMs, headers, "proxy"));
+      tasks.push(fetchOnce(url, proxy.agent, `proxy:${maskProxy(proxy.url)}`, timeoutMs, headers, "proxy", acceptHeader));
     }
-    tasks.push(fetchOnce(urls[0]!, directAgent, "direct-fallback", timeoutMs, headers, "direct"));
+    // Always also try direct as a fallback in case proxies are all slow/dead.
+    tasks.push(fetchOnce(urls[0]!, directAgent, "direct-fallback", timeoutMs, headers, "direct", acceptHeader));
   }
 
   // Race: only treat 2xx as a winner. 404 and other errors are NOT short-circuit successes
@@ -306,6 +311,29 @@ export async function proxyFetchJson(
     }
     return { ok: false, status: 0, body: null, via: "error" };
   }
+}
+
+export async function proxyFetchJson(
+  urls: string[],
+  opts: ProxyFetchOptions = {}
+): Promise<ProxyFetchResult> {
+  return runProxyRace(urls, opts, opts.acceptHeader ?? "application/json");
+}
+
+/**
+ * Like proxyFetchJson but returns the raw text body (not parsed as JSON).
+ * Used for RSS/XML/HTML fetches that need the same proxy-rotation logic.
+ * Returns null if all attempts fail or the body is empty/not a string.
+ */
+export async function proxyFetchText(
+  urls: string[],
+  opts: ProxyFetchOptions = {}
+): Promise<string | null> {
+  const accept = opts.acceptHeader ?? "text/html, application/xml, text/xml, */*";
+  const result = await runProxyRace(urls, opts, accept);
+  if (!result.ok) return null;
+  if (typeof result.body === "string" && result.body.length > 0) return result.body;
+  return null;
 }
 
 function maskProxy(url: string): string {

@@ -1,31 +1,22 @@
 import { logger } from "../lib/logger.js";
-import { proxyFetchJson } from "./proxy.js";
+import { proxyFetchJson, proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-async function fetchDirectText(url: string, timeoutMs = 6000): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+/**
+ * Fetch text content (RSS/XML/HTML) via proxy rotation.
+ * Tries the proxy pool first; falls back to direct if no proxies are loaded.
+ * This replaces the original direct-only fetchDirectText so the sweeper can
+ * reach Reddit even when the server's IP is rate-limited or blocked.
+ */
+async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | null> {
   try {
-    const res = await undiciFetch(url, {
-      headers: {
-        "User-Agent": DEFAULT_UA,
-        "Accept": "application/xml, text/xml, */*",
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      logger.warn({ url, status: res.status }, "Direct XML fetch failed");
-      return null;
-    }
-    const text = await res.text();
+    const text = await proxyFetchText([url], { timeoutMs, acceptHeader: "application/xml, text/xml, text/html, */*" });
     return text;
   } catch (err) {
-    logger.warn({ url, err }, "Direct XML fetch unexpected error");
+    logger.warn({ url, err }, "fetchDirectText proxy fetch unexpected error");
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -90,25 +81,20 @@ async function isCommentVisibleOnOldReddit(
   postId: string,
   commentId: string,
   isUserPost = false,
-  timeoutMs = 7000
+  timeoutMs = 10000
 ): Promise<boolean | null> {
   const sub = isUserPost ? `user/${subreddit.slice(2)}` : `r/${subreddit}`;
-  const url = `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}/`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Try both old.reddit (most rate-limit-resistant) and www.reddit as fallback.
+  const urls = [
+    `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}/`,
+    `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}/`,
+  ];
   try {
-    const res = await undiciFetch(url, {
-      headers: {
-        "User-Agent": DEFAULT_UA,
-        "Accept": "text/html, */*",
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      logger.warn({ url, status: res.status }, "old.reddit HTML fetch failed");
+    const html = await proxyFetchText(urls, { timeoutMs, acceptHeader: "text/html, */*" });
+    if (!html) {
+      logger.warn({ urls, commentId }, "old.reddit HTML fetch returned null — inconclusive");
       return null;
     }
-    const html = await res.text();
     // Look for the comment's container div by its id attribute.
     // old.reddit uses id="thing_t1_<commentId>" for each comment div.
     const containerPresent = html.includes(`id="thing_t1_${commentId}"`);
@@ -130,10 +116,8 @@ async function isCommentVisibleOnOldReddit(
     }
     return true;
   } catch (err) {
-    logger.warn({ url, err }, "old.reddit HTML liveness check failed");
+    logger.warn({ urls, err }, "old.reddit HTML liveness check failed");
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -575,8 +559,8 @@ export async function validateRedditProof(
 
   // Start all fetches simultaneously.
   const [result, rssBody] = await Promise.all([
-    proxyFetchJson(jsonUrls, { timeoutMs: 3_000 }),   // short timeout — if proxies work, great
-    fetchDirectText(rssUrl, 7_000),                    // RSS almost always returns 200
+    proxyFetchJson(jsonUrls, { timeoutMs: 8_000 }),   // allow enough time for proxy rotation
+    fetchDirectText(rssUrl, 8_000),                    // RSS via proxy — allows 8s
   ]);
 
   let data = result.body;
@@ -1028,10 +1012,11 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
         `https://old.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
       ];
 
-  // Run JSON (proxies, short timeout) and old.reddit HTML check in parallel.
+  // Run JSON (proxies, longer timeout) and old.reddit HTML check in parallel.
   // JSON is often 403'd from server IPs; old.reddit HTML is ground truth.
+  // Both now route through the proxy pool for reliability on server IPs.
   const [result, htmlVisible] = await Promise.all([
-    proxyFetchJson(urls, { timeoutMs: 3_000 }),
+    proxyFetchJson(urls, { timeoutMs: 8_000 }),
     parsed.commentId
       ? isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
       : Promise.resolve<boolean | null>(null),  // post-only checks use JSON path

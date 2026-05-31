@@ -26,6 +26,9 @@ services:
     buildCommand: |
       npx --yes pnpm@9.15.0 install --frozen-lockfile=false --prod=false
       npx --yes pnpm@9.15.0 run build:all
+      python3 -m venv venv
+      ./venv/bin/pip install --upgrade pip
+      ./venv/bin/pip install curl_cffi
     startCommand: npx --yes pnpm@9.15.0 --filter @workspace/api-server run start:prod
     healthCheckPath: /api/health
     envVars:

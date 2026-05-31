@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -13,6 +15,27 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
+
+  // Automatically build/update Python virtual environment on Linux (e.g. Render / Replit / local Linux)
+  if (process.platform === "linux") {
+    try {
+      console.log("Checking python3 availability for Reddit curl_cffi client...");
+      execSync("which python3", { stdio: "ignore" });
+      
+      const venvPython = path.resolve(artifactDir, "../../venv/bin/python");
+      if (!existsSync(venvPython)) {
+        console.log("Creating python virtual environment at repository root...");
+        execSync("python3 -m venv ../../venv", { cwd: artifactDir, stdio: "inherit" });
+      }
+      
+      console.log("Installing/upgrading curl_cffi inside venv...");
+      execSync("../../venv/bin/pip install --upgrade pip", { cwd: artifactDir, stdio: "inherit" });
+      execSync("../../venv/bin/pip install curl_cffi", { cwd: artifactDir, stdio: "inherit" });
+      console.log("Python environment setup completed successfully.");
+    } catch (err) {
+      console.warn("Warning: Failed to setup python virtual environment:", err.message);
+    }
+  }
 
   await esbuild({
     entryPoints: [path.resolve(artifactDir, "src/index.ts")],

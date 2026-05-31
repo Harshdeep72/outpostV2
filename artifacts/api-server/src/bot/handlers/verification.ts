@@ -306,17 +306,28 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
         ? new AttachmentBuilder(cardBuf, { name: `verify-${p.name}.png` })
         : null;
 
+      // Show karma floor if we have archived data (totalKarma > 0 means Arctic Shift gave us a floor)
+      const hasKarmaFloor = p.totalKarma > 0;
+      const karmaFloorLine = hasKarmaFloor
+        ? `Archived score floor: **${p.totalKarma.toLocaleString()}** (actual karma is ≥ this — verify on Reddit).\n\n`
+        : ``;
+      const reasonLine = hasKarmaFloor
+        ? `Archived karma floor is below the ${MIN_KARMA} threshold — actual karma may be higher.`
+        : `Reddit's karma API is blocked from the server IP — karma could not be fetched automatically.`;
+
       const networkEmbed = makeEmbed(COLORS.WARNING)
         .setTitle("📋 Verification Request — Manual Karma Check Required")
         .setDescription(
-          `Reddit's karma API is blocked — karma could not be fetched automatically.\n\n` +
+          `${reasonLine}\n\n` +
           `**[u/${p.name}](https://old.reddit.com/user/${p.name})** — ${p.accountAgeDays} days old account.\n\n` +
+          `${karmaFloorLine}` +
           `Open **[their profile](https://old.reddit.com/user/${p.name})** to check karma, then click Accept or Reject.`
         )
         .addFields(
           { name: "Discord User", value: `<@${discordId}> (${discordUsername})`, inline: true },
           { name: "Reddit Profile", value: `[u/${p.name}](https://old.reddit.com/user/${p.name})`, inline: true },
           { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
+          ...(hasKarmaFloor ? [{ name: "Karma Floor (Archive)", value: `≥ ${p.totalKarma.toLocaleString()}`, inline: true }] : []),
         )
         .setFooter({ text: `Requires ≥${MIN_KARMA} karma  ·  ≥${MIN_AGE_DAYS} days old` });
 
@@ -347,11 +358,12 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
       });
       await interaction.editReply({
         embeds: [makeEmbed(COLORS.WARNING).setDescription(
-          `⏳ Reddit's karma API is temporarily blocked. A moderator will check your karma and verify you shortly.\n\n` +
-          `Your account **u/${p.name}** (${p.accountAgeDays} days old) has been submitted for review.`
+          `⏳ Your karma could not be automatically verified. A moderator will check and verify you shortly.\n\n` +
+          `Your account **u/${p.name}** (${p.accountAgeDays} days old) has been submitted for review.` +
+          (hasKarmaFloor ? `\n\nArchived karma floor: **${p.totalKarma.toLocaleString()}** (actual karma ≥ this).` : "")
         )],
       });
-      logger.info({ discordId, parsed, ageDays: p.accountAgeDays, hasCard: !!cardFile }, "Verification queued — karma unverifiable, review card attached");
+      logger.info({ discordId, parsed, ageDays: p.accountAgeDays, hasCard: !!cardFile, karmaFloor: p.totalKarma }, "Verification queued — karma unverifiable, review card attached");
       return;
     }
 

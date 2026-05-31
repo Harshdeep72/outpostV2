@@ -3,6 +3,7 @@ import { logger } from "./lib/logger.js";
 import { startBot } from "./bot/index.js";
 import { pool } from "@workspace/db";
 import { bootstrapSchema } from "./lib/bootstrapSchema.js";
+import { initRedditCookieManager } from "./bot/redditCookieManager.js";
 
 const REQUIRED_ENV = [
   "DISCORD_BOT_TOKEN",
@@ -71,6 +72,8 @@ app.listen(port, async (err?: Error) => {
     process.exit(1);
   }
   logger.info({ port }, "Server listening");
+
+  initRedditCookieManager();
 
   await probeDatabase();
   try {

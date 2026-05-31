@@ -1,6 +1,7 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText, proxyFetchJson } from "./proxy.js";
 import { executePythonRedditClient } from "./pythonClient.js";
+import { getRedditSessionCookie } from "./redditCookieManager.js";
 
 export interface RedditProfile {
   name: string;
@@ -402,8 +403,9 @@ async function fetchViaDirectJson(name: string): Promise<RedditFetchResult | nul
 
   try {
     const headers: Record<string, string> = {};
-    if (process.env.REDDIT_SESSION_COOKIE) {
-      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    const sessionCookie = getRedditSessionCookie();
+    if (sessionCookie) {
+      headers["Cookie"] = sessionCookie;
     }
 
     const result = await proxyFetchJson(candidates, {
@@ -476,8 +478,9 @@ async function fetchViaNewRedditHtml(name: string): Promise<RedditFetchResult | 
       "Sec-Fetch-Mode": "navigate",
       "Sec-Fetch-Site": "none",
     };
-    if (process.env.REDDIT_SESSION_COOKIE) {
-      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    const sessionCookie = getRedditSessionCookie();
+    if (sessionCookie) {
+      headers["Cookie"] = sessionCookie;
     }
 
     const res = await undiciFetch(url, {
@@ -588,8 +591,9 @@ async function fetchViaHtmlScrape(name: string): Promise<RedditFetchResult | nul
   let html: string | null = null;
   try {
     const headers: Record<string, string> = {};
-    if (process.env.REDDIT_SESSION_COOKIE) {
-      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    const sessionCookie = getRedditSessionCookie();
+    if (sessionCookie) {
+      headers["Cookie"] = sessionCookie;
     }
     html = await proxyFetchText(profileUrls, {
       timeoutMs: 12_000,
@@ -850,9 +854,8 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
         try {
           const agent = new Agent({ connect: { timeout: 4_000 }, bodyTimeout: 6_000, headersTimeout: 6_000 });
           const headers: Record<string, string> = { "User-Agent": UA, "Accept": "text/xml, */*" };
-          if (process.env.REDDIT_SESSION_COOKIE) {
-            headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
-          }
+          const sc = getRedditSessionCookie();
+          if (sc) headers["Cookie"] = sc;
           const res = await undiciFetch(url, { dispatcher: agent, headers });
           if (!res.ok) return null;
           const text = await res.text();
@@ -865,9 +868,8 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
           try {
             const agent = new ProxyAgent({ uri: proxyUrl, connectTimeout: 4_000, bodyTimeout: 6_000, headersTimeout: 6_000 });
             const headers: Record<string, string> = { "User-Agent": UA, "Accept": "text/xml, */*" };
-            if (process.env.REDDIT_SESSION_COOKIE) {
-              headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
-            }
+            const sc = getRedditSessionCookie();
+            if (sc) headers["Cookie"] = sc;
             const res = await undiciFetch(url, { dispatcher: agent, headers });
             if (!res.ok) return null;
             const text = await res.text();

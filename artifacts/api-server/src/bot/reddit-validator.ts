@@ -2,6 +2,7 @@ import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
 import { executePythonRedditClient } from "./pythonClient.js";
+import { getRedditSessionCookie } from "./redditCookieManager.js";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -45,8 +46,9 @@ async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | 
  */
 export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Promise<string | null> {
   const cookieHeaders: Record<string, string> = {};
-  if (process.env.REDDIT_SESSION_COOKIE) {
-    cookieHeaders["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+  const sessionCookie = getRedditSessionCookie();
+  if (sessionCookie) {
+    cookieHeaders["Cookie"] = sessionCookie;
   }
 
   // ── Strategy 1: HEAD + redirect:manual (fastest, reads Location header) ───

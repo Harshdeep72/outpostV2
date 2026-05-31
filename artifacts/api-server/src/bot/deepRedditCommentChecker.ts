@@ -141,13 +141,11 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
       return { found: false, author: null, subreddit: null, createdAt: null, isRemoved: true, body: null, validPage: true };
     }
     
-    // Check if collapsed
     const idx = html.indexOf(idAttr);
     const fragmentStart = Math.max(0, idx - 300);
     // Grab 1000 characters after idx to ensure we capture the whole opening tag
     const fragment = html.substring(fragmentStart, idx + 1000);
-    const isCollapsed = /class="[^"]*\bcollapsed\b[^"]*"/.test(fragment);
-    
+
     // Extract author
     const authorMatch = fragment.match(/data-author="([^"]+)"/i);
     const author = authorMatch ? authorMatch[1].toLowerCase() : null;
@@ -180,12 +178,22 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
     // attribute means we couldn't parse the author — it does NOT mean the
     // comment was removed. Treating it as removed caused false positives where
     // live comments with un-parseable author attributes triggered payout reversals.
-    const isRemoved = isCollapsed ||
+    //
+    // We also deliberately exclude `isCollapsed`. Reddit auto-collapses low-karma
+    // or controversial comments — a collapsed comment is still live. Using
+    // isCollapsed as a removal signal caused false positives for valid low-karma
+    // comments.
+    //
+    // Body checks use exact-match (trimmed) rather than substring/regex so a
+    // user comment that happens to mention "[removed]" or "removed by" in its
+    // text is not misidentified as removed. Reddit replaces the ENTIRE body
+    // with "[removed]" or "[deleted]" — partial matches are not reliable.
+    const bodyTrimmed = (body ?? "").trim();
+    const isRemoved =
       author === "[deleted]" ||
       author === "[removed]" ||
-      /\[\s*removed\s*\]/i.test(body ?? "") ||
-      /\[\s*deleted\s*\]/i.test(body ?? "") ||
-      /removed\s+by/i.test(body ?? "");
+      bodyTrimmed === "[removed]" ||
+      bodyTrimmed === "[deleted]";
     
     return {
       found: true,

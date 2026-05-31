@@ -175,6 +175,8 @@ export interface ValidationResult {
   statusLabel: string;
   title?: string;
   createdAt?: string;
+  /** Which source confirmed the comment was live: 'oauth' | 'json_proxy' | 'html' | 'rss' */
+  verifiedVia?: "oauth" | "json_proxy" | "html" | "rss";
 }
 
 // Minimum chars a comment body must contain (after stripping HTML tags).

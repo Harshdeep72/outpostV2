@@ -50,7 +50,11 @@ const inFlight = new Map<string, Promise<RedditFetchResult>>();
 // API (oauth.reddit.com) which is NOT IP-blocked. Token is cached 55 min.
 let oauthToken: { token: string; expires: number } | null = null;
 
-async function getOAuthToken(): Promise<string | null> {
+export function invalidateOAuthToken(): void {
+  oauthToken = null;
+}
+
+export async function getOAuthToken(): Promise<string | null> {
   const clientId = process.env.REDDIT_CLIENT_ID;
   const secret   = process.env.REDDIT_CLIENT_SECRET;
   if (!clientId || !secret) return null;

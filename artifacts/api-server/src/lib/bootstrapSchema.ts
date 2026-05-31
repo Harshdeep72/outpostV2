@@ -292,6 +292,9 @@ const POST_FIXES: string[] = [
   // can split per-creator "mark as paid" gates on payout day. NULL = unallocated.
   `ALTER TABLE "submissions" ADD COLUMN IF NOT EXISTS "withdrawal_id" INTEGER;`,
   `CREATE INDEX IF NOT EXISTS "submissions_withdrawal_idx" ON "submissions" ("withdrawal_id");`,
+  // v1.4.0 — track which source successfully verified the proof comment so admins
+  // can see exposure to Reddit unauthenticated JSON deprecation.
+  `ALTER TABLE "submissions" ADD COLUMN IF NOT EXISTS "proof_verified_via" TEXT;`,
 
   // ---- withdrawals ----
   `ALTER TABLE "withdrawals" ADD COLUMN IF NOT EXISTS "user_id" INTEGER NOT NULL DEFAULT 0;`,

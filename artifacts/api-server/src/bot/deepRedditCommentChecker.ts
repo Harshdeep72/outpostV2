@@ -2,6 +2,7 @@ import { logger } from "../lib/logger.js";
 import { proxyFetchJson, proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { commentValidationCache } from "./cache.js";
+import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
 
 const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
 const TASK_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -55,6 +56,69 @@ function decodeRssContent(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/<[^>]*>/g, "") // strip tags
     .trim();
+}
+
+/**
+ * Fetch a comment thread via Reddit's authenticated OAuth API.
+ *
+ * Uses oauth.reddit.com which:
+ *  - Requires REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET env vars (app-only grant).
+ *  - Is not subject to datacenter IP blocks — no proxy needed.
+ *  - Will continue working after Reddit deprecates unauthenticated JSON access.
+ *
+ * Returns the raw Reddit JSON body (same shape as .json endpoint) or null if
+ * OAuth is not configured, the token cannot be obtained, or the fetch fails.
+ */
+async function fetchCommentThreadViaOAuth(
+  sub: string,
+  postId: string,
+  commentId: string
+): Promise<{ ok: boolean; body: any } | null> {
+  const token = await getOAuthToken();
+  if (!token) return null;
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({
+      connect: { timeout: 5_000 },
+      bodyTimeout: 10_000,
+      headersTimeout: 10_000,
+    });
+    const url = `https://oauth.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?context=3&raw_json=1`;
+    const res = await undiciFetch(url, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": "OutpostBot/1.0",
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json",
+      },
+    });
+
+    if (res.status === 401) {
+      // Token may have been revoked externally — drop it so next call re-fetches.
+      invalidateOAuthToken();
+      logger.warn({ status: res.status, sub, postId, commentId }, "Reddit OAuth token rejected (401) — invalidated");
+      return null;
+    }
+    if (!res.ok) {
+      logger.warn({ status: res.status, sub, postId, commentId }, "Reddit OAuth comment thread fetch failed");
+      return null;
+    }
+
+    let body: any = null;
+    try {
+      const text = await res.text();
+      body = JSON.parse(text);
+    } catch {
+      logger.warn({ sub, postId, commentId }, "Reddit OAuth response was not valid JSON");
+      return null;
+    }
+
+    return { ok: true, body };
+  } catch (err) {
+    logger.warn({ err }, "Reddit OAuth comment thread fetch error");
+    return null;
+  }
 }
 
 export interface ParsedHtmlComment {
@@ -302,27 +366,39 @@ async function runDeepCheck(
 
   logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
 
-  // Fetch JSON, RSS, and HTML in parallel
-  const [jsonRes, rssHtml, htmlContent] = await Promise.all([
+  // Fetch OAuth, JSON proxy, RSS, and HTML all in parallel for resilience.
+  // OAuth (oauth.reddit.com) is the highest-priority source:
+  //  - Authenticated — not subject to datacenter IP blocks.
+  //  - Survives Reddit's deprecation of unauthenticated JSON access.
+  //  - Only active when REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET are configured.
+  const [oauthRes, jsonRes, rssHtml, htmlContent] = await Promise.all([
+    fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId),
     proxyFetchJson(jsonUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null)
   ]);
+
+  // Prefer OAuth result — it's authenticated and future-proof.
+  // Fall back to proxied JSON when OAuth isn't configured or failed.
+  const effectiveJsonRes = (oauthRes?.ok) ? oauthRes : jsonRes;
+  const jsonSource: "oauth" | "json_proxy" = (oauthRes?.ok) ? "oauth" : "json_proxy";
 
   let authorFound: string | null = null;
   let subredditFound: string | null = null;
   let createdAt: string | null = null;
   let bodyText: string | null = null;
   let commentStatus: SubmissionStatus = "live";
+  // Which source ultimately confirmed the comment's state (for proofVerifiedVia).
+  let verifiedVia: ValidationResult["verifiedVia"] = undefined;
   // Track whether the JSON fetch itself succeeded so HTML-only "not found"
   // results can be treated as inconclusive rather than confirmed-removed.
   let jsonSucceeded = false;
 
-  // 1. Evaluate JSON result (if successful)
-  if (jsonRes && jsonRes.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: JSON fetch succeeded");
+  // 1. Evaluate JSON result (OAuth preferred, proxy JSON fallback)
+  if (effectiveJsonRes && effectiveJsonRes.ok) {
+    logger.info({ commentId: parsed.commentId, source: jsonSource }, "Deep check: JSON fetch succeeded");
     jsonSucceeded = true;
-    const data = jsonRes.body;
+    const data = effectiveJsonRes.body;
     const postListing = Array.isArray(data) ? data[0] : null;
     const postData = postListing?.data?.children?.[0]?.data;
     if (postData) {
@@ -352,6 +428,7 @@ async function runDeepCheck(
       if (cstate) {
         commentStatus = cstate;
       }
+      verifiedVia = jsonSource;
     }
   }
 
@@ -365,6 +442,7 @@ async function runDeepCheck(
         subredditFound = parsedHtml.subreddit || subredditFound;
         createdAt = parsedHtml.createdAt || createdAt;
         bodyText = parsedHtml.body || bodyText;
+        verifiedVia = "html";
         if (parsedHtml.isRemoved) {
           commentStatus = "comment_deleted";
           // Use a sentinel so the flow reaches the liveness check instead of
@@ -424,6 +502,7 @@ async function runDeepCheck(
           bodyText = entryContent; // Contains raw XML, but we only need it for length/date checks
           const pubMatch = /<(?:published|updated)>([\s\S]*?)<\/(?:published|updated)>/i.exec(entryContent);
           createdAt = pubMatch ? pubMatch[1].trim() : null;
+          verifiedVia = "rss";
           break;
         }
       }
@@ -558,6 +637,7 @@ async function runDeepCheck(
     subredditFound,
     postLive: true,
     createdAt: createdAt ?? undefined,
+    verifiedVia,
     ...meta("live"),
   };
 }

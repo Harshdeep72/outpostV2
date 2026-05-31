@@ -1394,11 +1394,12 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
       reviewStatus: "accepted",
       reviewedAt: new Date(),
       availableAt,
-      reviewReason: "Auto-validated by Reddit API",
+      reviewReason: `Auto-validated via ${validation.verifiedVia ?? "reddit"}`,
       reviewerDiscordId: "system",
       liveStatus: "live",
       lastCheckedAt: new Date(),
       liveStatusChangedAt: new Date(),
+      proofVerifiedVia: validation.verifiedVia ?? null,
     }).where(eq(submissions.id, sub.id));
 
     await db.update(claims).set({ status: "accepted" }).where(eq(claims.id, claimId));

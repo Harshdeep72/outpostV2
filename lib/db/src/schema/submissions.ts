@@ -25,6 +25,9 @@ export const submissions = pgTable("submissions", {
   // balance_pending → balance_available. Surfaces "paid date" to the
   // accountant's Google Sheet so they can reconcile payouts by date.
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  // Which source successfully verified the proof comment: 'oauth', 'json_proxy',
+  // 'html', 'rss', or 'manual'. NULL for legacy rows or non-Reddit proofs.
+  proofVerifiedVia: text("proof_verified_via"),
 });
 
 export type Submission = typeof submissions.$inferSelect;

@@ -218,11 +218,22 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
     // text is not misidentified as removed. Reddit replaces the ENTIRE body
     // with "[removed]" or "[deleted]" — partial matches are not reliable.
     const bodyTrimmed = (body ?? "").trim();
+    // Reddit uses several removal sentinels depending on who/what removed it:
+    //   old.reddit / classic: "[removed]" / "[deleted]"
+    //   modern Reddit UI:     "[ Removed by Reddit ]" / "[ Deleted by user ]"
+    // We normalise to lowercase-no-spaces for comparison so all variants match.
+    const bodyNorm = bodyTrimmed.toLowerCase().replace(/\s+/g, "");
+    const isRemovedBody =
+      bodyTrimmed === "[removed]" ||
+      bodyTrimmed === "[deleted]" ||
+      bodyNorm === "[removedbyreddit]" ||
+      bodyNorm === "[deletedbyuser]" ||
+      // Catch any bracket-enclosed removal notice: [ Removed by X ], [removed by mod], etc.
+      /^\[[\s\w]*(?:removed|deleted)[\s\w]*\]$/i.test(bodyTrimmed);
     const isRemoved =
       author === "[deleted]" ||
       author === "[removed]" ||
-      bodyTrimmed === "[removed]" ||
-      bodyTrimmed === "[deleted]" ||
+      isRemovedBody ||
       isDeletedByClass ||
       hasDataDeleted;
     

@@ -535,17 +535,10 @@ async function runDeepCheck(
         };
       }
     } else if (authorFound && !htmlContent) {
-      logger.warn({ commentId: parsed.commentId }, "Deep check: RSS found comment but HTML fetch failed completely");
-      return {
-        passed: false,
-        autoApproved: false,
-        status: "api_unreachable",
-        failures: ["Relying on RSS but HTML verification fetch failed (network / proxy error)."],
-        authorFound,
-        subredditFound: subredditFound ?? parsed.subreddit,
-        postLive: true,
-        ...meta("api_unreachable"),
-      };
+      // HTML is blocked (server IP rate-limited / 403 from Reddit).
+      // The permalink-specific RSS already confirmed the comment exists — trust it
+      // and continue so the comment can be approved instead of always blocking.
+      logger.info({ commentId: parsed.commentId }, "Deep check: RSS found comment, HTML unavailable (IP blocked) — trusting RSS");
     }
   }
 

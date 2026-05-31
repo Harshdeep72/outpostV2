@@ -945,162 +945,66 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     };
   }
 
-  // Unauthenticated JSON is deprecated. Use old.reddit HTML as the primary
-  // liveness source. result is a stub so the existing HTML-path logic below
-  // works unchanged (HTML-says-removed without JSON corroboration → unknown).
-  const result = { ok: false as const, status: 0, body: null as any };
-  const htmlVisible = parsed.commentId
-    ? await isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
-    : null;
+  // ── Post-only liveness via RSS ────────────────────────────────────────────
+  // Comment URLs are handled above by deepCheckComment.
+  // Unauthenticated JSON is deprecated and OAuth is not yet configured, so
+  // RSS is the sole source for post liveness checks.
+  const postRssUrl = parsed.isUserPost
+    ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
+    : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
 
-  // ── Comment liveness via old.reddit HTML (most reliable path) ─────────────
-  if (parsed.commentId && htmlVisible !== null) {
-    if (htmlVisible === false) {
-      // HTML says the comment is gone. But before hard-marking as removed, try
-      // to corroborate with the JSON response — a proxy returning garbage HTML
-      // must not trigger a false positive on its own.
-      if (result.ok) {
-        // JSON fetched successfully — check if the comment body is present.
-        const commentsListing = Array.isArray(result.body) ? result.body[1] : null;
-        const allComments: any[] = [];
-        function flattenForHtmlCheck(children: any[]) {
-          for (const child of children ?? []) {
-            if (child.kind === "t1") {
-              allComments.push(child.data);
-              if (child.data.replies?.data?.children) {
-                flattenForHtmlCheck(child.data.replies.data.children);
-              }
-            }
-          }
-        }
-        flattenForHtmlCheck(commentsListing?.data?.children ?? []);
-        const target = allComments.find((c) => c.id === parsed.commentId);
-        if (!target) {
-          // JSON also can't find the comment — both sources agree it's gone.
-          return {
-            liveStatus: "removed",
-            detailedStatus: "comment_missing",
-            statusLabel: "Comment removed",
-            reason: "Comment is no longer visible on Reddit (confirmed by both HTML and JSON).",
-          };
-        }
-        // JSON found the comment — HTML was probably a bad proxy response.
-        // Check JSON for removal markers instead.
-        const cstate = classifyComment(target);
-        if (cstate) {
-          const m = STATUS_META[cstate];
-          const live: LiveStatus = cstate === "deleted_by_author" ? "deleted" : "removed";
-          return { liveStatus: live, detailedStatus: cstate, statusLabel: m.label, reason: m.label };
-        }
-        // JSON says comment is live — trust JSON over HTML proxy result.
-        logger.info({ commentId: parsed.commentId }, "HTML said removed but JSON says live — treating as live (proxy false positive)");
-        return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
-      } else {
-        // JSON also failed — can't confirm. Treat as unknown so we retry next tick.
-        logger.warn(
-          { commentId: parsed.commentId, jsonStatus: result.status },
-          "HTML says removed but JSON fetch also failed — treating as unknown to avoid false positive"
-        );
-        return { liveStatus: "unknown", detailedStatus: "api_unreachable", statusLabel: "Reddit API unreachable" };
-      }
-    }
-    // htmlVisible === true — comment is live. If JSON also succeeded, do a
-    // deeper check for removal markers on the comment body.
-    if (result.ok) {
-      const data = result.body;
-      const commentsListing = Array.isArray(data) ? data[1] : null;
-      const allComments: any[] = [];
-      function flattenComments(children: any[]) {
-        for (const child of children ?? []) {
-          if (child.kind === "t1") {
-            allComments.push(child.data);
-            if (child.data.replies?.data?.children) {
-              flattenComments(child.data.replies.data.children);
-            }
-          }
-        }
-      }
-      flattenComments(commentsListing?.data?.children ?? []);
-      const target = allComments.find((c) => c.id === parsed.commentId);
-      if (target) {
-        const cstate = classifyComment(target);
-        if (cstate) {
-          const m = STATUS_META[cstate];
-          const live: LiveStatus = cstate === "deleted_by_author" ? "deleted" : "removed";
-          return { liveStatus: live, detailedStatus: cstate, statusLabel: m.label, reason: m.label };
-        }
-      }
-    }
-    return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post RSS");
+  const postRssText = await fetchDirectText(postRssUrl, 8_000);
+
+  if (!postRssText || !postRssText.includes("<feed")) {
+    logger.warn({ postId: parsed.postId }, "recheckRedditLiveness: post RSS unavailable — inconclusive");
+    return { liveStatus: "unknown", detailedStatus: "api_unreachable", statusLabel: "Reddit API unreachable" };
   }
 
-  // ── Post-only or HTML check inconclusive: use JSON path ───────────────────
-  if (!result.ok) {
-    if (result.status === 404) {
-      return {
-        liveStatus: "deleted",
-        detailedStatus: "not_found",
-        statusLabel: "Post not found (404)",
-        reason: "Reddit returned 404 — the post is gone.",
-      };
+  // Search for the post entry (kind t3) in the RSS feed
+  const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+  let entryMatch: RegExpExecArray | null;
+  let postFound = false;
+  let postRemoved = false;
+
+  while ((entryMatch = entryRegex.exec(postRssText)) !== null) {
+    const entry = entryMatch[1];
+    if (
+      entry.includes(`<id>t3_${parsed.postId}</id>`) ||
+      entry.includes(`<id>t3_${parsed.postId.toLowerCase()}</id>`)
+    ) {
+      postFound = true;
+      const contentMatch = /<content[^>]*>([\s\S]*?)<\/content>/i.exec(entry);
+      if (contentMatch) {
+        const plain = decodeRssContent(contentMatch[1]).trim();
+        if (/^\[removed\]$/i.test(plain) || /^\[deleted\]$/i.test(plain)) {
+          postRemoved = true;
+        }
+      }
+      break;
     }
-    // Transient — don't flip status, retry next tick.
+  }
+
+  if (!postFound) {
+    logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post not found in RSS — likely deleted");
     return {
-      liveStatus: "unknown",
-      detailedStatus: "api_unreachable",
-      statusLabel: "Reddit API unreachable",
+      liveStatus: "deleted",
+      detailedStatus: "not_found",
+      statusLabel: "Post not found",
+      reason: "Post no longer appears in the RSS feed.",
     };
   }
 
-  const data = result.body;
-  const postListing = Array.isArray(data) ? data[0] : null;
-  const postData = postListing?.data?.children?.[0]?.data;
-
-  if (!postData) {
+  if (postRemoved) {
+    logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post marked [removed] in RSS");
     return {
-      liveStatus: "unknown",
-      detailedStatus: null,
-      statusLabel: "Empty Reddit response",
+      liveStatus: "removed",
+      detailedStatus: "removed_by_mod",
+      statusLabel: "Post removed",
+      reason: "Post content is [removed] in the RSS feed.",
     };
   }
 
-  const postState = classifyPost(postData);
-  if (postState) {
-    const m = STATUS_META[postState];
-    const live: LiveStatus = postState === "deleted_by_author" ? "deleted" : "removed";
-    return { liveStatus: live, detailedStatus: postState, statusLabel: m.label, reason: m.label };
-  }
-
-  if (parsed.commentId) {
-    const commentsListing = Array.isArray(data) ? data[1] : null;
-    const allComments: any[] = [];
-    function flattenComments2(children: any[]) {
-      for (const child of children ?? []) {
-        if (child.kind === "t1") {
-          allComments.push(child.data);
-          if (child.data.replies?.data?.children) {
-            flattenComments2(child.data.replies.data.children);
-          }
-        }
-      }
-    }
-    flattenComments2(commentsListing?.data?.children ?? []);
-    const target = allComments.find((c) => c.id === parsed.commentId);
-    if (!target) {
-      return {
-        liveStatus: "removed",
-        detailedStatus: "comment_missing",
-        statusLabel: "Comment missing",
-        reason: "Comment was filtered or removed by Reddit/Automod.",
-      };
-    }
-    const cstate = classifyComment(target);
-    if (cstate) {
-      const m = STATUS_META[cstate];
-      const live: LiveStatus = cstate === "deleted_by_author" ? "deleted" : "removed";
-      return { liveStatus: live, detailedStatus: cstate, statusLabel: m.label, reason: m.label };
-    }
-  }
-
+  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post confirmed live via RSS");
   return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
 }

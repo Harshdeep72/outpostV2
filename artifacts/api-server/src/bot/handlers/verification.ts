@@ -28,6 +28,27 @@ import { logger } from "../../lib/logger.js";
 import { getMaxRedditAccounts } from "../../lib/settings.js";
 
 const MIN_KARMA = 100;
+
+/**
+ * Wraps member.roles.add() with a clear diagnostic for DiscordAPIError[50013].
+ * [50013] "Missing Permissions" on role assignment almost always means the
+ * bot's highest role sits LOWER in the server hierarchy than the role it's
+ * trying to assign. Fix: Server Settings → Roles → drag the bot's role
+ * (outpostv2) above Verified/Mod/Admin.
+ */
+async function addRoleOrThrowClear(member: import("discord.js").GuildMember, role: import("discord.js").Role): Promise<void> {
+  try {
+    await member.roles.add(role);
+  } catch (err: any) {
+    if (err?.code === 50013) {
+      throw new Error(
+        `DiscordAPIError[50013]: Missing Permissions — the bot cannot assign the "${role.name}" role because the bot's role is below it in the server hierarchy.\n\n` +
+        `**Fix:** Go to Server Settings → Roles → drag the **outpostv2** bot role above **${role.name}**, then have the user retry.`
+      );
+    }
+    throw err;
+  }
+}
 const MIN_AGE_DAYS = 30;
 // Default — overridden at runtime by the DB setting (Settings → Max Reddit accounts).
 const DEFAULT_MAX_REDDIT_ACCOUNTS = 3;
@@ -582,7 +603,7 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
 
     const member = await guild.members.fetch(discordId);
     const { verifiedRole } = await setupGuild(guild);
-    await member.roles.add(verifiedRole);
+    await addRoleOrThrowClear(member, verifiedRole);
 
     const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 
@@ -895,7 +916,7 @@ export async function handleVerifyAccept(
 
   // ─── FIRST-TIME verification path (legacy, kept intact) ─────────────────
   const { verifiedRole } = await setupGuild(guild);
-  await member.roles.add(verifiedRole);
+  await addRoleOrThrowClear(member, verifiedRole);
 
   const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 

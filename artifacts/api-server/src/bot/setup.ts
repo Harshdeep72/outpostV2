@@ -37,7 +37,22 @@ const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
 async function ensureRole(guild: Guild, name: string, color: number): Promise<Role> {
   let role = guild.roles.cache.find((r) => r.name === name);
   if (!role) {
-    role = await guild.roles.create({ name, color, reason: "Outpost Bot bot setup" });
+    role = await guild.roles.create({ name, color, reason: "Outpost Bot setup" });
+    // After creating a role, try to position it just below the bot's highest
+    // role so the bot always has authority to assign it. This is best-effort —
+    // if it fails (e.g. bot lacks MANAGE_ROLES or the position is already fine)
+    // we swallow the error silently; the admin can reorder manually.
+    try {
+      const botMember = guild.members.me;
+      if (botMember && botMember.roles.highest.position > 1) {
+        const targetPos = botMember.roles.highest.position - 1;
+        if (role.position < targetPos) {
+          await role.setPosition(targetPos);
+        }
+      }
+    } catch {
+      // Ignore — hierarchy nudge is best-effort only
+    }
   }
   return role;
 }

@@ -6,8 +6,8 @@ import { recheckRedditLiveness, type LiveStatus } from "./reddit-validator.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
-const TICK_MS = 5 * 60 * 1000;            // run every 5 minutes
-const RECHECK_INTERVAL_MS = 30 * 60 * 1000; // re-check each row no more than once per 30 min
+const TICK_MS = 12 * 60 * 60 * 1000;      // run every 12 hours
+const RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // re-check each row no more than once per 12 hr
 const MAX_AGE_DAYS = 14;                   // stop checking after 14 days
 const BATCH_SIZE = 30;                     // max rows per pass
 

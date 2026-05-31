@@ -91,7 +91,7 @@ def cookies_to_header(jar) -> str:
     return "; ".join(pairs)
 
 
-def try_refresh(profile: str, proxy: str | None) -> dict:
+def try_refresh(profile: str, proxy: str | None, skip_probe: bool = False) -> dict:
     session = cffi_requests.Session(impersonate=profile)
     if proxy:
         session.proxies = {"http": proxy, "https": proxy}
@@ -130,27 +130,58 @@ def try_refresh(profile: str, proxy: str | None) -> dict:
     return {"ok": True, "cookie": cookie_header, "count": count}
 
 
+def get_all_proxies() -> list:
+    """Return all proxies from proxies.txt (shuffled), or empty list."""
+    paths = [
+        "proxies.txt",
+        "../proxies.txt",
+        "../../proxies.txt",
+        "/opt/render/project/src/proxies.txt",
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                with open(p) as f:
+                    lines = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+                formatted = []
+                for line in lines:
+                    parts = line.split(":")
+                    if len(parts) == 4:
+                        host, port, user, pw = parts
+                        formatted.append(f"http://{user}:{pw}@{host}:{port}")
+                    else:
+                        formatted.append(f"http://{line}" if not line.startswith("http") else line)
+                random.shuffle(formatted)
+                return formatted
+            except Exception:
+                pass
+    return []
+
+
 def main():
-    proxy = get_proxy()
     profiles = IMPERSONATION_PROFILES.copy()
     random.shuffle(profiles)
 
-    last_error = "no profiles tried"
-    for profile in profiles:
-        result = try_refresh(profile, proxy)
-        if result["ok"]:
-            print(json.dumps(result))
-            return
-        last_error = result.get("error", "unknown")
+    all_proxies = get_all_proxies()
 
-    # All profiles failed — try without proxy as a last resort if we used one
-    if proxy:
+    last_error = "no profiles tried"
+
+    # ── Round 1: try a few proxies first (datacenter IPs are blocked by Reddit) ──
+    for proxy in all_proxies[:5]:
         for profile in profiles:
-            result = try_refresh(profile, None)
+            result = try_refresh(profile, proxy)
             if result["ok"]:
                 print(json.dumps(result))
                 return
             last_error = result.get("error", "unknown")
+
+    # ── Round 2: direct attempt (works on residential IPs / local dev) ──────────
+    for profile in profiles:
+        result = try_refresh(profile, None)
+        if result["ok"]:
+            print(json.dumps(result))
+            return
+        last_error = result.get("error", "unknown")
 
     print(json.dumps({"ok": False, "error": last_error}))
 

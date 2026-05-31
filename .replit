@@ -41,6 +41,10 @@ path = "scripts/post-merge.sh"
 timeoutMs = 20000
 
 [[ports]]
+localPort = 3000
+externalPort = 3003
+
+[[ports]]
 localPort = 8080
 externalPort = 8080
 
@@ -68,3 +72,4 @@ channel = "stable-25_05"
 [userenv.shared]
 DISCORD_GUILD_ID = "1452247632318697472"
 DISCORD_CLIENT_ID = "1497238007688859770"
+PORT = "8080"

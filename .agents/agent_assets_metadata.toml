@@ -18,6 +18,18 @@ uri = "file://attached_assets/outpost_bot_pfp_v3.png"
 type = "image"
 title = "outpost bot pfp radar"
 
+[[generated]]
+id = "vHYNlEnsS3NqkiuSMHo_z"
+uri = "file://attached_assets/outpost_bot_banner_v1.png"
+type = "image"
+title = "outpost bot banner tower wide"
+
+[[generated]]
+id = "gLGk3LL3zj-5Rx0eYCYDP"
+uri = "file://attached_assets/outpost_bot_banner_v2.png"
+type = "image"
+title = "outpost bot banner with text"
+
 [[outputs]]
 id = "-QtVIizOFjQGVUi_OpAgX"
 uri = "file://attached_assets/outpost_bot_pfp_v1.png"
@@ -35,3 +47,15 @@ id = "NZB5fXJiTuXHjA1kDRnMh"
 uri = "file://attached_assets/outpost_bot_pfp_v3.png"
 type = "image"
 title = "Option 3 — Radar Ring"
+
+[[outputs]]
+id = "25YpvDjQfvNudEJ7WGJYh"
+uri = "file://attached_assets/outpost_bot_banner_v1.png"
+type = "image"
+title = "Option 1 — Tower Glow (no text)"
+
+[[outputs]]
+id = "wZTaheYq8YFuIIgsWZOvR"
+uri = "file://attached_assets/outpost_bot_banner_v2.png"
+type = "image"
+title = "Option 2 — Tower + Text"

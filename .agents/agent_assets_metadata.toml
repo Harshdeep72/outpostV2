@@ -30,6 +30,12 @@ uri = "file://attached_assets/outpost_bot_banner_v2.png"
 type = "image"
 title = "outpost bot banner with text"
 
+[[generated]]
+id = "Qr4cqcy3oyamigi6rVPbH"
+uri = "file://attached_assets/outpost_marketing_banner.png"
+type = "image"
+title = "outpost marketing banner"
+
 [[outputs]]
 id = "-QtVIizOFjQGVUi_OpAgX"
 uri = "file://attached_assets/outpost_bot_pfp_v1.png"
@@ -59,3 +65,9 @@ id = "wZTaheYq8YFuIIgsWZOvR"
 uri = "file://attached_assets/outpost_bot_banner_v2.png"
 type = "image"
 title = "Option 2 — Tower + Text"
+
+[[outputs]]
+id = "6SgCzBB92jhg0-04JbGPi"
+uri = "file://attached_assets/outpost_marketing_banner.png"
+type = "image"
+title = "Outpost Marketing Banner"

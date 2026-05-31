@@ -2215,16 +2215,18 @@ router.get("/campaigns", requireAuth, async (req, res) => {
           : null,
       };
     });
-    // Also expose whether the service account is configured (so the dashboard
+    // Also expose whether Google is configured (so the dashboard
     // can grey-out the "Create Sheet" button with a helpful message).
     let sheetsServiceConfigured = false;
     let sheetsServiceEmail: string | null = null;
+    let sheetsOAuthConnected = false;
     try {
       const gs = await import("../lib/googleSheets.js");
       sheetsServiceConfigured = gs.isGoogleSheetsConfigured();
       sheetsServiceEmail = gs.getServiceAccountEmail();
+      sheetsOAuthConnected = await gs.isOAuthConnected();
     } catch { /* swallow */ }
-    res.json({ campaigns: mapped, sheetsServiceConfigured, sheetsServiceEmail });
+    res.json({ campaigns: mapped, sheetsServiceConfigured, sheetsServiceEmail, sheetsOAuthConnected });
   } catch (err) {
     req.log.error({ err }, "List campaigns error");
     res.status(500).json({ error: "Internal server error" });

@@ -26,6 +26,8 @@ interface CampaignsResponse {
   campaigns: AdminCampaign[];
   /** True iff GOOGLE_SERVICE_ACCOUNT_JSON is set + parseable on the server. */
   sheetsServiceConfigured: boolean;
+  /** True iff operator has connected their Google account via OAuth in Settings. */
+  sheetsOAuthConnected: boolean;
   /** The bot's service-account email — needed for the "share an existing sheet
    *  with this email" power-user flow. */
   sheetsServiceEmail: string | null;
@@ -390,7 +392,7 @@ export default function Campaigns() {
               {/* ONE-CLICK CREATE — main action */}
               {!sheetCampaign.sheetsUrl && (
                 <>
-                  {data?.sheetsServiceConfigured ? (
+                  {(data?.sheetsServiceConfigured || data?.sheetsOAuthConnected) ? (
                     <button
                       onClick={() => createSheetMutation.mutate({ id: sheetCampaign.id })}
                       disabled={createSheetMutation.isPending}
@@ -417,8 +419,7 @@ export default function Campaigns() {
                     <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-4 text-xs text-yellow-300 space-y-2">
                       <p className="font-medium">"Create Sheet" not available yet</p>
                       <p className="text-yellow-300/80">
-                        Set the <code className="px-1 rounded bg-yellow-500/20">GOOGLE_SERVICE_ACCOUNT_JSON</code> env var on Render
-                        with your service account's JSON key, then redeploy. (One-time 5-min Google Cloud setup.)
+                        Go to <strong>Settings → Google Sheets</strong> and click <strong>Connect Google</strong> to link your account. Sheets will be created in your own Drive (free, no subscription needed).
                       </p>
                     </div>
                   )}

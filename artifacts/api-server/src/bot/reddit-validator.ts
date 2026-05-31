@@ -30,35 +30,83 @@ async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | 
  *
  * Returns the resolved URL string, or null on failure.
  */
-export async function resolveShareLink(shareUrl: string, timeoutMs = 5000): Promise<string | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Promise<string | null> {
+  // ── Strategy 1: HEAD + redirect:manual (fastest, reads Location header) ───
+  // Works when the server receives a proper 301/302 from Reddit's CDN.
   try {
-    const res = await undiciFetch(shareUrl, {
-      method: "HEAD",
-      headers: { "User-Agent": DEFAULT_UA },
-      signal: controller.signal,
-      // Do NOT auto-follow — we want the Location header from the first redirect.
-      redirect: "manual",
-    });
-    // 301/302/307/308 all carry a Location header with the real URL.
-    const location = res.headers.get("location");
-    if (location && location.includes("/comments/")) {
-      // Normalise to https://www.reddit.com/...
-      const resolved = location.startsWith("/")
-        ? `https://www.reddit.com${location}`
-        : location;
-      logger.info({ shareUrl, resolved }, "Share link resolved");
-      return resolved;
+    const ctrl1 = new AbortController();
+    const t1 = setTimeout(() => ctrl1.abort(), Math.min(timeoutMs, 5000));
+    try {
+      const res = await undiciFetch(shareUrl, {
+        method: "HEAD",
+        headers: { "User-Agent": DEFAULT_UA },
+        signal: ctrl1.signal,
+        redirect: "manual",
+      });
+      const location = res.headers.get("location");
+      if (location && location.includes("/comments/")) {
+        const resolved = location.startsWith("/")
+          ? `https://www.reddit.com${location}`
+          : location;
+        logger.info({ shareUrl, resolved, via: "HEAD/manual" }, "Share link resolved");
+        return resolved;
+      }
+    } finally {
+      clearTimeout(t1);
     }
-    logger.warn({ shareUrl, status: res.status, location }, "Share link redirect did not contain /comments/ path");
-    return null;
   } catch (err) {
-    logger.warn({ shareUrl, err }, "Share link resolution failed");
-    return null;
-  } finally {
-    clearTimeout(timer);
+    logger.debug({ shareUrl, err }, "resolveShareLink: HEAD/manual attempt failed");
   }
+
+  // ── Strategy 2: GET + redirect:follow (handles 200-HTML responses) ─────────
+  // Datacenter IPs sometimes receive a 200 HTML page (login wall / regional
+  // redirect) instead of a 301. With redirect:follow, undici tracks the final
+  // URL after all hops and we can read it from the response URL.
+  try {
+    const ctrl2 = new AbortController();
+    const t2 = setTimeout(() => ctrl2.abort(), timeoutMs);
+    try {
+      const res = await undiciFetch(shareUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": DEFAULT_UA,
+          "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        },
+        signal: ctrl2.signal,
+        redirect: "follow",
+      });
+
+      // If we followed redirects, the final URL is where we landed.
+      const finalUrl = res.url ?? "";
+      if (finalUrl.includes("/comments/")) {
+        // Strip query-string tracking params Reddit appends on redirect.
+        const clean = finalUrl.split("?")[0]!.replace(/\/$/, "");
+        logger.info({ shareUrl, resolved: clean, via: "GET/follow" }, "Share link resolved via redirect follow");
+        return clean;
+      }
+
+      // Fallback: parse the <link rel="canonical"> or og:url from the HTML body.
+      const html = await res.text();
+      const canonicalMatch =
+        /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html) ??
+        /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i.exec(html);
+      if (canonicalMatch) {
+        const candidate = canonicalMatch[1]!;
+        if (candidate.includes("/comments/")) {
+          const clean = candidate.split("?")[0]!.replace(/\/$/, "");
+          logger.info({ shareUrl, resolved: clean, via: "GET/canonical" }, "Share link resolved via canonical tag");
+          return clean;
+        }
+      }
+    } finally {
+      clearTimeout(t2);
+    }
+  } catch (err) {
+    logger.debug({ shareUrl, err }, "resolveShareLink: GET/follow attempt failed");
+  }
+
+  logger.warn({ shareUrl }, "resolveShareLink: all strategies failed");
+  return null;
 }
 
 /**
@@ -908,14 +956,30 @@ export interface LivenessResult {
 }
 
 export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessResult> {
-  const parsed = parseRedditProofUrl(proofUrl);
+  // ── Resolve share links before parsing ────────────────────────────────────
+  // reddit.com/r/sub/s/XXXX share links must be resolved to a full /comments/
+  // URL first. Without this step parseRedditProofUrl returns null and the
+  // bulk checker marks every share link as "Invalid URL".
+  let resolvedUrl = proofUrl;
+  const appKind = detectAppUrl(proofUrl);
+  if (appKind === "share_link_resolvable") {
+    const resolved = await resolveShareLink(proofUrl);
+    if (!resolved) {
+      logger.warn({ proofUrl }, "recheckRedditLiveness: share link could not be resolved");
+      return { liveStatus: "unknown", detailedStatus: null, statusLabel: "Share link unresolvable" };
+    }
+    resolvedUrl = resolved;
+    logger.info({ proofUrl, resolvedUrl }, "recheckRedditLiveness: share link resolved");
+  }
+
+  const parsed = parseRedditProofUrl(resolvedUrl);
   if (!parsed) {
     return { liveStatus: "unknown", detailedStatus: null, statusLabel: "Invalid URL" };
   }
 
   if (parsed.commentId) {
     const { deepCheckComment } = await import("./deepRedditCommentChecker.js");
-    const validation = await deepCheckComment(proofUrl, [], "");
+    const validation = await deepCheckComment(resolvedUrl, [], "");
     let liveStatus: LiveStatus = "unknown";
     if (validation.passed) {
       liveStatus = "live";

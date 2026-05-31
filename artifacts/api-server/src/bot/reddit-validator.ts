@@ -1052,6 +1052,37 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   }
 
   if (!postFound) {
+    // Before declaring the post deleted, verify the feed actually covers this
+    // post. Reddit's thread RSS for link-posts or posts with 0 comments may
+    // return a valid <feed> whose <entry> list contains only t1_ comments
+    // (or is empty) — the post itself doesn't appear as a t3_ entry.
+    // In that case the feed's own <link> will contain the postId (Reddit
+    // always puts the thread URL in the feed header), confirming existence.
+    //
+    // Pattern: <link ... href="https://www.reddit.com/r/sub/comments/POSTID/..."/>
+    const feedLinkMatch = /<link[^>]+href="([^"]+)"/i.exec(postRssText);
+    const feedLink = feedLinkMatch?.[1] ?? "";
+    const postIdLower = parsed.postId.toLowerCase();
+
+    if (feedLink.toLowerCase().includes(postIdLower)) {
+      // Feed is for this post — existence confirmed. Check feed-level title
+      // for a [removed] or [deleted] signal.
+      const feedTitleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(postRssText);
+      const feedTitle = decodeRssContent(feedTitleMatch?.[1] ?? "").trim();
+      if (/\[removed\]|\[deleted\]/i.test(feedTitle)) {
+        logger.info({ postId: parsed.postId }, "recheckRedditLiveness: feed title shows [removed] — post removed");
+        return {
+          liveStatus: "removed",
+          detailedStatus: "removed_by_mod",
+          statusLabel: "Post removed",
+          reason: "Post is marked [removed] in the RSS feed.",
+        };
+      }
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post confirmed live via feed header (no t3_ entry — link-post or 0 comments)");
+      return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+    }
+
+    // Feed link doesn't reference this postId — genuinely not found.
     logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post not found in RSS — likely deleted");
     return {
       liveStatus: "deleted",

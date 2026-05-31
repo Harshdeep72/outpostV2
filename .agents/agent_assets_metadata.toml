@@ -36,6 +36,12 @@ uri = "file://attached_assets/outpost_marketing_banner.png"
 type = "image"
 title = "outpost marketing banner"
 
+[[generated]]
+id = "WYiPfvgbKY54M-dKkNQpC"
+uri = "file://attached_assets/outpost_marketing_banner_minimal.png"
+type = "image"
+title = "outpost marketing minimal banner"
+
 [[outputs]]
 id = "-QtVIizOFjQGVUi_OpAgX"
 uri = "file://attached_assets/outpost_bot_pfp_v1.png"
@@ -71,3 +77,9 @@ id = "6SgCzBB92jhg0-04JbGPi"
 uri = "file://attached_assets/outpost_marketing_banner.png"
 type = "image"
 title = "Outpost Marketing Banner"
+
+[[outputs]]
+id = "M9M30ddAQHFF9obNrd-m-"
+uri = "file://attached_assets/outpost_marketing_banner_minimal.png"
+type = "image"
+title = "Outpost Marketing — Minimal"

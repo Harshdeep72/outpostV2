@@ -45,6 +45,8 @@ interface PendingRow extends Record<string, unknown> {
   task_created_at: Date | null;
   /** Primary Reddit username for the user. */
   user_reddit_username: string | null;
+  /** Task type (comment / post / upvote / etc.) — passed to validateRedditProof. */
+  task_type: string;
 }
 
 function isRedditUrl(url: string): boolean {
@@ -266,6 +268,7 @@ async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500) {
                  t.max_slots                         AS task_max_slots,
                  t.reddit_link                       AS task_reddit_link,
                  t.created_at                        AS task_created_at,
+                 t.type                              AS task_type,
                  u.workspace_channel_id              AS workspace_channel_id,
                  u.reddit_username                   AS user_reddit_username
             FROM submissions s
@@ -313,7 +316,10 @@ async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500) {
         row.proof_link,
         expectedAuthors,
         row.task_reddit_link ?? "",
-        { taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined },
+        {
+          taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined,
+          taskType: row.task_type,
+        },
       ).catch((err) => {
         logger.warn({ err, subId: row.id }, "pending-sweeper: validateRedditProof threw");
         return null;
@@ -422,6 +428,7 @@ export async function runPendingSlowSweepNow(forceBacklog = false): Promise<{
                  t.max_slots                         AS task_max_slots,
                  t.reddit_link                       AS task_reddit_link,
                  t.created_at                        AS task_created_at,
+                 t.type                              AS task_type,
                  u.workspace_channel_id              AS workspace_channel_id,
                  u.reddit_username                   AS user_reddit_username
             FROM submissions s
@@ -457,7 +464,10 @@ export async function runPendingSlowSweepNow(forceBacklog = false): Promise<{
         row.proof_link,
         expectedAuthors,
         row.task_reddit_link ?? "",
-        { taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined },
+        {
+          taskCreatedAt: row.task_created_at ? new Date(row.task_created_at as any) : undefined,
+          taskType: row.task_type,
+        },
       ).catch((err) => {
         logger.warn({ err, subId: row.id }, "pending-sweeper(slow): validateRedditProof threw");
         return null;

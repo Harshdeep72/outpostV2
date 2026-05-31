@@ -525,6 +525,12 @@ export interface ValidateOptions {
   taskCreatedAt?: Date;
   /** Minimum comment body length in characters after stripping HTML. 0 = disabled. */
   minCommentChars?: number;
+  /**
+   * Task type (e.g. "comment", "post", "upvote"). When set to "comment", the
+   * proof URL MUST contain a comment ID or the submission is rejected immediately.
+   * This prevents post-only URLs from slipping through the RSS post-check path.
+   */
+  taskType?: string;
 }
 
 export async function validateRedditProof(
@@ -576,6 +582,26 @@ export async function validateRedditProof(
     return {
       passed: false, autoApproved: false, status: "url_invalid",
       failures: ["Proof URL is not a valid reddit.com post or comment URL."],
+      ...meta("url_invalid"),
+    };
+  }
+
+  // ── Comment-task guard ─────────────────────────────────────────────────────
+  // A comment task requires a proof URL that contains a specific comment ID
+  // (i.e. the URL must look like /r/sub/comments/POST_ID/title/COMMENT_ID/).
+  // Without this check, a post-only URL slips through to the RSS post-check
+  // path below, which validates the post author — not the comment author —
+  // and auto-approves even when the worker never actually commented.
+  if (options?.taskType === "comment" && !parsed.commentId) {
+    return {
+      passed: false, autoApproved: false, status: "url_invalid",
+      failures: [
+        "Your proof link points to a Reddit post, not to a specific comment. " +
+        "For comment tasks you must link directly to **your comment**. " +
+        "Open your comment on Reddit, tap the three-dot menu → **Share** → **Copy link**, " +
+        "then paste that URL here. It should look like: " +
+        "`https://www.reddit.com/r/SubName/comments/POSTID/posttitle/COMMENTID/`."
+      ],
       ...meta("url_invalid"),
     };
   }

@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { db } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { recheckRedditLiveness, type LiveStatus } from "./reddit-validator.js";
+import { recheckRedditLiveness, parseRedditProofUrl, type LiveStatus } from "./reddit-validator.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
@@ -501,6 +501,7 @@ interface FullSubmissionRow extends Record<string, unknown> {
   proof_link: string;
   discord_id: string;
   task_id: string;
+  task_type: string;
   reward: string;
   live_status: string;
   review_status: string;
@@ -532,9 +533,11 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
                s.live_status           AS live_status,
                s.review_status         AS review_status,
                s.moved_to_available    AS moved_to_available,
+               t.type                  AS task_type,
                u.reddit_username       AS reddit_username,
                u.workspace_channel_id  AS workspace_channel_id
         FROM submissions s
+        JOIN tasks t ON t.id = s.task_id
         LEFT JOIN users u ON u.id = s.user_id
         WHERE s.id = ${submissionId}
         LIMIT 1`
@@ -548,6 +551,22 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
       ...base, found: true, proofLink: row.proof_link,
       errorMessage: "This submission's proof link is not a Reddit URL — nothing to check.",
     };
+  }
+
+  // Detect the "post URL submitted for a comment task" case.  The liveness
+  // checker would otherwise see no commentId and treat it as a live post check.
+  if (row.task_type === "comment") {
+    const parsedProof = parseRedditProofUrl(row.proof_link);
+    if (!parsedProof?.commentId) {
+      return {
+        ...base, found: true, proofLink: row.proof_link,
+        previousStatus: row.live_status as LiveStatus,
+        errorMessage:
+          "This submission contains a Reddit **post** URL, not a comment link. " +
+          "The worker submitted post-level proof for a comment task. " +
+          "Manually reverse this submission — it should never have been approved.",
+      };
+    }
   }
 
   const previousStatus = row.live_status as LiveStatus;

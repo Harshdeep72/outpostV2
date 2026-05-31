@@ -1228,6 +1228,7 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     });
     validation = await validateRedditProof(proofLink, expectedAuthors, task.redditLink, {
       taskCreatedAt: task.createdAt ?? undefined,
+      taskType: task.type,
     });
   } else {
     const platformName = twitterTask ? "Twitter" : "Quora";

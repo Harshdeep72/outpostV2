@@ -1,0 +1,37 @@
+uploads = []
+
+[[generated]]
+id = "cU3KlhgTObGuUXTuFJn6t"
+uri = "file://attached_assets/outpost_bot_pfp_v1.png"
+type = "image"
+title = "outpost bot pfp tower"
+
+[[generated]]
+id = "VJuP3DkUPegEmlI6-N9TY"
+uri = "file://attached_assets/outpost_bot_pfp_v2.png"
+type = "image"
+title = "outpost bot pfp shield"
+
+[[generated]]
+id = "2AoAPW6CmM2G_ZYAei_yC"
+uri = "file://attached_assets/outpost_bot_pfp_v3.png"
+type = "image"
+title = "outpost bot pfp radar"
+
+[[outputs]]
+id = "-QtVIizOFjQGVUi_OpAgX"
+uri = "file://attached_assets/outpost_bot_pfp_v1.png"
+type = "image"
+title = "Option 1 — Watchtower"
+
+[[outputs]]
+id = "Br9IgpQJ62E7t2bXta2Q2"
+uri = "file://attached_assets/outpost_bot_pfp_v2.png"
+type = "image"
+title = "Option 2 — Shield"
+
+[[outputs]]
+id = "NZB5fXJiTuXHjA1kDRnMh"
+uri = "file://attached_assets/outpost_bot_pfp_v3.png"
+type = "image"
+title = "Option 3 — Radar Ring"

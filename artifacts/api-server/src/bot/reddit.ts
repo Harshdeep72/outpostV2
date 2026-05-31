@@ -1,5 +1,4 @@
 import { logger } from "../lib/logger.js";
-import { proxyFetchJson } from "./proxy.js";
 
 export interface RedditProfile {
   name: string;
@@ -52,6 +51,44 @@ let oauthToken: { token: string; expires: number } | null = null;
 
 export function invalidateOAuthToken(): void {
   oauthToken = null;
+}
+
+/**
+ * Fetch any reddit.com or oauth.reddit.com URL using the app-only OAuth token.
+ * Automatically rewrites www/old.reddit.com URLs to oauth.reddit.com.
+ * Returns { ok, status, body } — never throws.
+ * Returns { ok: false, status: 0 } when OAuth is not configured or the token
+ * could not be obtained.
+ */
+export async function fetchRedditApiUrl(url: string): Promise<{ ok: boolean; status: number; body: any }> {
+  const token = await getOAuthToken();
+  if (!token) return { ok: false, status: 0, body: null };
+
+  const oauthUrl = url.replace(/^https:\/\/(www|old)\.reddit\.com\//, "https://oauth.reddit.com/");
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 5_000 }, bodyTimeout: 10_000, headersTimeout: 10_000 });
+    const res = await undiciFetch(oauthUrl, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": "OutpostBot/1.0",
+        "Authorization": `Bearer ${token}`,
+        "Accept": "application/json",
+      },
+    });
+    if (res.status === 401) {
+      oauthToken = null;
+      logger.warn({ oauthUrl }, "fetchRedditApiUrl: 401 — OAuth token invalidated");
+      return { ok: false, status: 401, body: null };
+    }
+    if (!res.ok) return { ok: false, status: res.status, body: null };
+    const body = await res.json();
+    return { ok: true, status: res.status, body };
+  } catch (err) {
+    logger.warn({ err, oauthUrl }, "fetchRedditApiUrl error");
+    return { ok: false, status: 0, body: null };
+  }
 }
 
 export async function getOAuthToken(): Promise<string | null> {
@@ -139,53 +176,16 @@ async function fetchViaOAuth(name: string): Promise<RedditFetchResult | null> {
 
 
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  // ── 1. Try OAuth first (real karma, no IP block, no proxy needed) ──────────
+  // ── 1. Try OAuth (authenticated, no IP block, future-proof) ───────────────
   const oauthResult = await fetchViaOAuth(name);
   if (oauthResult !== null) {
     logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth");
     return oauthResult;
   }
 
-  // ── 2. Try JSON via proxies (bypasses Reddit's server-IP block) ───────────
-  const jsonUrls = [
-    `https://www.reddit.com/user/${name}/about.json?raw_json=1`,
-    `https://old.reddit.com/user/${name}/about.json?raw_json=1`,
-  ];
-  const result = await proxyFetchJson(jsonUrls, { timeoutMs: 4_500 });
-
-  if (!result.ok && result.status === 404) {
-    logger.warn({ name }, "Reddit user not found (404)");
-    return { ok: false, notFound: true };
-  }
-
-  if (result.ok) {
-    const d = result.body?.data ?? {};
-    if (d.is_suspended || d.is_banned) {
-      logger.info({ name }, "Reddit account is suspended/banned");
-      return { ok: false, notFound: true, suspended: true };
-    }
-    if (!d.name) return { ok: false, notFound: false, networkError: true };
-    const createdUtc: number = d.created_utc ?? 0;
-    const ageDays = Math.floor((Date.now() / 1000 - createdUtc) / 86400);
-    return {
-      ok: true,
-      profile: {
-        name: d.name as string,
-        createdUtc,
-        linkKarma: (d.link_karma as number) ?? 0,
-        commentKarma: (d.comment_karma as number) ?? 0,
-        totalKarma: (d.total_karma as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
-        iconImg: stripQuery(d.icon_img as string | undefined),
-        accountAgeDays: ageDays,
-        karmaVerified: true,
-      },
-    };
-  }
-
-  // ── 2. JSON blocked (403/rate-limit) — try user RSS via proxies ───────────
-  // Reddit blocks /user/name/.rss from datacenter IPs, same as JSON.
-  // The same Webshare proxies that unblock post RSS also unblock user RSS.
-  logger.info({ name, status: result.status }, "JSON blocked — trying user RSS via proxies");
+  // ── 2. OAuth not configured — fall back to user RSS via proxies ────────────
+  // Unauthenticated JSON access has been deprecated by Reddit.
+  logger.info({ name }, "OAuth not configured — trying user RSS via proxies");
 
   const rssUrls = [
     `https://www.reddit.com/user/${name}/.rss`,

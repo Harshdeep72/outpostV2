@@ -2,7 +2,8 @@ import type { ChatInputCommandInteraction } from "discord.js";
 import { measureDbLatency } from "@workspace/db";
 import { makeEmbed, hasAdminRole, smokyFooterText } from "../util.js";
 import { COLORS } from "../constants.js";
-import { getProxyMetrics, proxyFetchJson } from "../proxy.js";
+import { getProxyMetrics } from "../proxy.js";
+import { fetchRedditApiUrl } from "../reddit.js";
 import { getAllCacheStats } from "../cache.js";
 import { logger } from "../../lib/logger.js";
 
@@ -37,18 +38,19 @@ export async function handleHealthCommand(interaction: ChatInputCommandInteracti
 
   const dbLatency = await measureDbLatency().catch(() => -1);
 
-  // Live Reddit API probe (cheap)
+  // Live Reddit API probe via OAuth (unauthenticated JSON deprecated by Reddit)
   const probeStart = Date.now();
   let redditStatus = "❓ unknown";
   try {
-    const res = await proxyFetchJson(
-      ["https://www.reddit.com/r/announcements/about.json?raw_json=1"],
-      { timeoutMs: 6_000 }
-    );
+    const res = await fetchRedditApiUrl("https://oauth.reddit.com/r/announcements/about.json?raw_json=1");
     const ms = Date.now() - probeStart;
-    redditStatus = res.ok
-      ? `✅ healthy (${ms}ms via ${res.via})`
-      : `⚠️ HTTP ${res.status} (${ms}ms via ${res.via})`;
+    if (res.status === 0) {
+      redditStatus = `⚠️ OAuth not configured or token fetch failed (${ms}ms)`;
+    } else {
+      redditStatus = res.ok
+        ? `✅ healthy (${ms}ms via OAuth)`
+        : `⚠️ HTTP ${res.status} (${ms}ms via OAuth)`;
+    }
   } catch (err) {
     logger.warn({ err }, "/health Reddit probe failed");
     redditStatus = `❌ unreachable (${Date.now() - probeStart}ms)`;

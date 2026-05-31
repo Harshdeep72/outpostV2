@@ -1,5 +1,5 @@
 import { logger } from "../lib/logger.js";
-import { proxyFetchJson, proxyFetchText } from "./proxy.js";
+import { proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { commentValidationCache } from "./cache.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
@@ -361,13 +361,10 @@ async function runDeepCheck(
   }
 
   // ── Parallel fetch URLs targeting the comment specifically ──────────────────
+  // Unauthenticated JSON access has been deprecated by Reddit. OAuth is now the
+  // sole JSON source; RSS and old.reddit HTML remain as secondary fallbacks.
   const sub = parsed.isUserPost ? `user/${parsed.subreddit.slice(2)}` : `r/${parsed.subreddit}`;
-  
-  const jsonUrls = [
-    `https://www.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}.json?context=3&raw_json=1`,
-    `https://old.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}.json?context=3&raw_json=1`
-  ];
-  
+
   const rssUrls = [
     `https://www.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/.rss`,
     `https://old.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/.rss`
@@ -380,22 +377,16 @@ async function runDeepCheck(
 
   logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
 
-  // Fetch OAuth, JSON proxy, RSS, and HTML all in parallel for resilience.
-  // OAuth (oauth.reddit.com) is the highest-priority source:
-  //  - Authenticated — not subject to datacenter IP blocks.
-  //  - Survives Reddit's deprecation of unauthenticated JSON access.
-  //  - Only active when REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET are configured.
-  const [oauthRes, jsonRes, rssHtml, htmlContent] = await Promise.all([
+  // Unauthenticated JSON access has been deprecated by Reddit. OAuth is now the
+  // sole JSON source; RSS and old.reddit HTML are secondary fallbacks.
+  const [oauthRes, rssHtml, htmlContent] = await Promise.all([
     fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId),
-    proxyFetchJson(jsonUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null)
   ]);
 
-  // Prefer OAuth result — it's authenticated and future-proof.
-  // Fall back to proxied JSON when OAuth isn't configured or failed.
-  const effectiveJsonRes = (oauthRes?.ok) ? oauthRes : jsonRes;
-  const jsonSource: "oauth" | "json_proxy" = (oauthRes?.ok) ? "oauth" : "json_proxy";
+  const effectiveJsonRes = oauthRes;
+  const jsonSource = "oauth" as const;
 
   let authorFound: string | null = null;
   let subredditFound: string | null = null;

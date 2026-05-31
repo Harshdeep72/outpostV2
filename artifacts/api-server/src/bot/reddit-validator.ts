@@ -1,5 +1,6 @@
 import { logger } from "../lib/logger.js";
-import { proxyFetchJson, proxyFetchText } from "./proxy.js";
+import { proxyFetchText } from "./proxy.js";
+import { fetchRedditApiUrl } from "./reddit.js";
 import { fetch as undiciFetch } from "undici";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -565,32 +566,21 @@ export async function validateRedditProof(
     }
   }
 
-  // ── Parallel fetch strategy ────────────────────────────────────────────────
-  // Reddit's public JSON API (reddit.com/r/sub/comments/postId.json) has been
-  // permanently rate-limited / blocked for server IPs. Waiting 6 seconds for
-  // it to 403 before falling back to RSS wastes time on every check.
-  //
-  // New strategy: fire JSON (via proxies, short 3s timeout), RSS, and
-  // old.reddit HTML all at the same time. JSON wins if proxies bypass the
-  // block; otherwise RSS + old.reddit HTML answer within ~2s regardless.
+  // ── Fetch strategy ────────────────────────────────────────────────────────
+  // Unauthenticated JSON access has been deprecated by Reddit. We now use the
+  // authenticated OAuth API (oauth.reddit.com) as the primary source and fall
+  // back to RSS when OAuth is not configured or returns an error.
   const rssUrl = parsed.isUserPost
     ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
     : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
 
-  const jsonUrls = parsed.isUserPost
-    ? [
-        `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-        `https://old.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-      ]
-    : [
-        `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-        `https://old.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-      ];
+  const oauthUrl = parsed.isUserPost
+    ? `https://oauth.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`
+    : `https://oauth.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`;
 
-  // Start all fetches simultaneously.
   const [result, rssBody] = await Promise.all([
-    proxyFetchJson(jsonUrls, { timeoutMs: 8_000 }),   // allow enough time for proxy rotation
-    fetchDirectText(rssUrl, 8_000),                    // RSS via proxy — allows 8s
+    fetchRedditApiUrl(oauthUrl),
+    fetchDirectText(rssUrl, 8_000),
   ]);
 
   let data = result.body;
@@ -976,24 +966,18 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     };
   }
 
-  const urls = parsed.isUserPost
-    ? [
-        `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-        `https://old.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-      ]
-    : [
-        `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-        `https://old.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`,
-      ];
+  // Unauthenticated JSON access has been deprecated by Reddit. Use OAuth API
+  // as the primary source. old.reddit HTML remains a secondary ground-truth
+  // source for comment liveness checks.
+  const oauthUrl = parsed.isUserPost
+    ? `https://oauth.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`
+    : `https://oauth.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`;
 
-  // Run JSON (proxies, longer timeout) and old.reddit HTML check in parallel.
-  // JSON is often 403'd from server IPs; old.reddit HTML is ground truth.
-  // Both now route through the proxy pool for reliability on server IPs.
   const [result, htmlVisible] = await Promise.all([
-    proxyFetchJson(urls, { timeoutMs: 8_000 }),
+    fetchRedditApiUrl(oauthUrl),
     parsed.commentId
       ? isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
-      : Promise.resolve<boolean | null>(null),  // post-only checks use JSON path
+      : Promise.resolve<boolean | null>(null),
   ]);
 
   // ── Comment liveness via old.reddit HTML (most reliable path) ─────────────

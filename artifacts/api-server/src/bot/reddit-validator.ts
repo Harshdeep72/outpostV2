@@ -1044,12 +1044,17 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     ) {
       liveStatus = "deleted";
     } else if (
-      validation.status === "comment_missing" ||
       validation.status === "removed_by_mod" ||
       validation.status === "removed_by_reddit" ||
       validation.status === "removed_by_automod"
     ) {
       liveStatus = "removed";
+    } else if (validation.status === "comment_missing") {
+      // comment_missing means ALL sources (JSON + HTML + RSS) were unreachable/blocked
+      // by Reddit's IP ban — it does NOT mean the comment is actually deleted.
+      // Treat as unknown so the liveness checker retries on the next tick instead of
+      // falsely reversing a payout for a comment that is still live.
+      liveStatus = "unknown";
     }
     return {
       liveStatus,

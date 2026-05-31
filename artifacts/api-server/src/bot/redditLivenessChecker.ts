@@ -11,6 +11,9 @@ const RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // re-check each row no more th
 const MAX_AGE_DAYS = 14;                   // stop checking after 14 days
 const BATCH_SIZE = 30;                     // max rows per pass
 
+/** How long to wait before running the early post-approval check. */
+const EARLY_CHECK_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+
 let started = false;
 let isRunning = false;
 
@@ -52,14 +55,15 @@ function emojiFor(status: LiveStatus): string {
   }
 }
 
-function titleFor(oldStatus: LiveStatus, newStatus: LiveStatus): string {
+function titleFor(oldStatus: LiveStatus, newStatus: LiveStatus, isEarlyCheck = false): string {
+  const prefix = isEarlyCheck ? "⚡ Early Check — " : "";
   if (newStatus === "live") {
-    if (oldStatus === "unknown") return "✅ Submission APPROVED";
-    return "✅ Submission RESTORED (back to live)";
+    if (oldStatus === "unknown") return `${prefix}✅ Submission APPROVED`;
+    return `${prefix}✅ Submission RESTORED (back to live)`;
   }
-  if (newStatus === "removed") return "🛡️ Submission REMOVED";
-  if (newStatus === "deleted") return "🗑️ Submission DELETED";
-  return `${emojiFor(newStatus)} Submission ${newStatus.toUpperCase()}`;
+  if (newStatus === "removed") return `${prefix}🛡️ Submission REMOVED`;
+  if (newStatus === "deleted") return `${prefix}🗑️ Submission DELETED`;
+  return `${prefix}${emojiFor(newStatus)} Submission ${newStatus.toUpperCase()}`;
 }
 
 async function notifyStatusChange(
@@ -67,30 +71,27 @@ async function notifyStatusChange(
   row: SubmissionRow,
   oldStatus: LiveStatus,
   newStatus: LiveStatus,
-  reason: string | undefined
+  reason: string | undefined,
+  isEarlyCheck = false
 ) {
-  // Only skip truly redundant same-status pings — all real transitions notify.
-
   for (const guild of client.guilds.cache.values()) {
     try {
       const { taskLogsChannel } = await setupGuild(guild);
       if (!(taskLogsChannel instanceof TextChannel)) continue;
 
       const embed = new EmbedBuilder()
-        .setTitle(titleFor(oldStatus, newStatus))
+        .setTitle(titleFor(oldStatus, newStatus, isEarlyCheck))
         .setColor(colorFor(newStatus))
         .setDescription(
           [
             `<@${row.discord_id}>'s submission #${row.id} changed from **${oldStatus}** → **${newStatus}**.`,
+            isEarlyCheck ? `_Detected by 5-minute early liveness check._` : null,
             reason ? `Reason: ${reason}` : null,
           ]
             .filter(Boolean)
             .join("\n")
         )
         .addFields(
-          // Direct profile URL so the operator can always reach the
-          // worker (DM, contact) even if the @mention above renders
-          // as a raw ID and refuses to open on mobile.
           { name: "Worker", value: `<@${row.discord_id}>\n[💬 Open Profile / DM](https://discord.com/users/${row.discord_id})${row.workspace_channel_id ? `\n📂 Workspace: <#${row.workspace_channel_id}>` : ""}`, inline: true },
           { name: "Reward", value: `$${row.reward}`, inline: true },
           { name: "Reddit user", value: row.reddit_username ? `u/${row.reddit_username}` : "—", inline: true },
@@ -106,9 +107,6 @@ async function notifyStatusChange(
     }
   }
 
-  // DM the submitter when their post goes removed/deleted so they know what
-  // happened to their submission. Embedded for readability. Wrapped in
-  // try/catch so a closed-DM user never breaks the checker loop.
   try {
     const user = await client.users.fetch(row.discord_id);
     let dmTitle: string;
@@ -129,6 +127,7 @@ async function notifyStatusChange(
       dmTitle = `${emojiFor(newStatus)} Your submission was ${newStatus}`;
       dmDesc = [
         `Your submission **#${row.id}** is no longer live on Reddit.`,
+        isEarlyCheck ? `This was detected shortly after your submission was approved.` : null,
         reason ? `**Reason:** ${reason}` : null,
         `If this was unexpected, check the post on Reddit or reach out to staff.`,
       ].filter(Boolean) as string[];
@@ -147,6 +146,106 @@ async function notifyStatusChange(
   } catch (err) {
     logger.debug({ err, discordId: row.discord_id, submissionId: row.id }, "Liveness checker: DM to user failed (DMs closed?)");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Shared reversal logic — used by both the 12-hour tick and the 5-min early
+// check.  Waits 45 s then runs a confirmation check before clawing back money.
+// Returns true if the reversal was executed, false if aborted (false positive).
+// ---------------------------------------------------------------------------
+async function performReversalWithConfirmation(
+  client: Client,
+  row: SubmissionRow,
+  oldStatus: LiveStatus,
+  firstDetectedStatus: "removed" | "deleted",
+  firstReason: string | undefined,
+  isEarlyCheck: boolean
+): Promise<boolean> {
+  logger.info(
+    { submissionId: row.id, firstDetectedStatus, isEarlyCheck },
+    "Reddit liveness: potential reversal — waiting 45s for confirmation check"
+  );
+  await new Promise((r) => setTimeout(r, 45_000));
+
+  const confirm = await recheckRedditLiveness(row.proof_link);
+
+  if (confirm.liveStatus !== firstDetectedStatus) {
+    logger.warn(
+      {
+        submissionId: row.id,
+        firstStatus: firstDetectedStatus,
+        confirmStatus: confirm.liveStatus,
+        isEarlyCheck,
+      },
+      "Reddit liveness: payout reversal ABORTED — confirmation check disagrees with first observation (likely transient false positive)"
+    );
+
+    const safeStatus: LiveStatus =
+      confirm.liveStatus === "removed" || confirm.liveStatus === "deleted"
+        ? confirm.liveStatus
+        : firstDetectedStatus;
+
+    if (confirm.liveStatus === "live" || confirm.liveStatus === "unknown") {
+      await db.execute(
+        sql`UPDATE submissions
+            SET live_status = ${oldStatus},
+                last_checked_at = now(),
+                removal_reason = NULL
+            WHERE id = ${parseInt(row.id)}`
+      );
+      logger.info({ submissionId: row.id, revertedTo: oldStatus }, "Reddit liveness: reverted status after false-positive detection");
+      return false;
+    }
+
+    await db.execute(
+      sql`UPDATE submissions
+          SET live_status = ${safeStatus},
+              last_checked_at = now(),
+              removal_reason = ${confirm.reason ?? null}
+          WHERE id = ${parseInt(row.id)}`
+    );
+  }
+
+  // Confirmed removed/deleted — execute reversal.
+  const reward = parseFloat(row.reward);
+  await db.execute(
+    sql`UPDATE users
+        SET balance_pending = GREATEST(0, balance_pending - ${reward}),
+            trust_score = GREATEST(0, trust_score - 0.05)
+        WHERE discord_id = ${row.discord_id}`
+  );
+  await db.execute(
+    sql`UPDATE submissions
+        SET moved_to_available = 1,
+            available_at = now()
+        WHERE id = ${parseInt(row.id)}`
+  );
+
+  const userIdRow = await db.execute<{ id: string }>(
+    sql`SELECT id::text AS id FROM users WHERE discord_id = ${row.discord_id} LIMIT 1`
+  );
+  const userIdNum = userIdRow.rows[0]?.id ? parseInt(userIdRow.rows[0].id) : null;
+  if (userIdNum != null) {
+    await db.execute(
+      sql`INSERT INTO trust_logs (user_id, discord_id, delta, reason, related_submission_id, created_at)
+          VALUES (${userIdNum}, ${row.discord_id}, 0,
+                  ${'Payout reversed (-0.05 trust): post ' + firstDetectedStatus + (isEarlyCheck ? ' (early check)' : '') + ' before verify cleared'},
+                  ${parseInt(row.id)}, now())`
+    ).catch((err) => {
+      logger.warn({ err, submissionId: row.id }, "Reddit liveness: trust_logs insert failed (non-fatal)");
+    });
+  }
+
+  logger.warn(
+    { submissionId: row.id, discordId: row.discord_id, reward, firstDetectedStatus, isEarlyCheck },
+    "Reddit liveness: PAYOUT REVERSED (post killed before verify hold cleared)"
+  );
+
+  try { logSubmissionEvent(parseInt(row.id), "removed"); } catch { /* swallowed */ }
+
+  await notifyStatusChange(client, row, oldStatus, firstDetectedStatus, firstReason ?? confirm.reason, isEarlyCheck);
+
+  return true;
 }
 
 async function tick(client: Client) {
@@ -183,7 +282,6 @@ async function tick(client: Client) {
 
     for (const row of rows.rows) {
       if (!isRedditUrl(row.proof_link)) {
-        // Mark as checked so we don't keep selecting it.
         await db.execute(
           sql`UPDATE submissions
               SET last_checked_at = now()
@@ -197,7 +295,6 @@ async function tick(client: Client) {
       const newStatus = result.liveStatus;
 
       if (newStatus === "unknown") {
-        // Transient — only update last_checked so we'll try again later, don't flip status.
         await db.execute(
           sql`UPDATE submissions
               SET last_checked_at = now()
@@ -215,7 +312,7 @@ async function tick(client: Client) {
         continue;
       }
 
-      // Status changed.
+      // Status changed — update DB.
       await db.execute(
         sql`UPDATE submissions
             SET live_status = ${newStatus},
@@ -226,123 +323,20 @@ async function tick(client: Client) {
       );
 
       logger.info(
-        {
-          submissionId: row.id,
-          discordId: row.discord_id,
-          oldStatus,
-          newStatus,
-          reason: result.reason,
-        },
+        { submissionId: row.id, discordId: row.discord_id, oldStatus, newStatus, reason: result.reason },
         "Reddit liveness: status changed"
       );
 
-      // Mirror live-status flips (especially live → removed/deleted) to the
-      // accountant's Google Sheet so they can see exactly when a proof went
-      // dark. Fire-and-forget — never blocks the liveness loop.
       if (newStatus === "removed" || newStatus === "deleted") {
         try { logSubmissionEvent(parseInt(row.id), "removed"); } catch { /* swallowed */ }
       }
 
-      // PAYOUT REVERSAL: if the post was killed BEFORE the verify hold cleared
-      // (i.e. before moved_to_available flipped to 1), claw the reward back
-      // from balance_pending and ding trust score. The SELECT above already
-      // filters out submissions where moved_to_available=1, so we know any row
-      // we're processing is still pending and reversible.
-      // total_earned is NOT decremented here because it's only credited when
-      // funds move to available (which by definition hasn't happened yet for
-      // the rows this checker selects). This keeps "Lifetime Earnings"
-      // monotonically non-decreasing.
-      //
-      // ── False-positive guard ──────────────────────────────────────────────
-      // Before clawing back money, wait 45 s then run one confirmation check.
-      // A single bad proxy response, CAPTCHA interception, or transient Reddit
-      // error must never trigger an irreversible financial action. We only
-      // proceed if the second independent check agrees with the first.
       if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live") {
-        logger.info(
-          { submissionId: row.id, newStatus },
-          "Reddit liveness: potential reversal — waiting 45s for confirmation check"
-        );
-        await new Promise((r) => setTimeout(r, 45_000));
-        const confirm = await recheckRedditLiveness(row.proof_link);
-        if (confirm.liveStatus !== newStatus) {
-          logger.warn(
-            {
-              submissionId: row.id,
-              firstStatus: newStatus,
-              confirmStatus: confirm.liveStatus,
-            },
-            "Reddit liveness: payout reversal ABORTED — confirmation check disagrees with first observation (likely transient false positive)"
-          );
-          // Update status to the confirmed result (or keep live if inconclusive).
-          const safeStatus: typeof newStatus =
-            confirm.liveStatus === "removed" || confirm.liveStatus === "deleted"
-              ? confirm.liveStatus
-              : newStatus; // keep newStatus only if confirm says same removal type
-          // If confirmation says live or unknown, revert the DB status update too.
-          if (confirm.liveStatus === "live" || confirm.liveStatus === "unknown") {
-            await db.execute(
-              sql`UPDATE submissions
-                  SET live_status = ${oldStatus},
-                      last_checked_at = now(),
-                      removal_reason = NULL
-                  WHERE id = ${parseInt(row.id)}`
-            );
-            logger.info({ submissionId: row.id, revertedTo: oldStatus }, "Reddit liveness: reverted status after false-positive detection");
-            await new Promise((r) => setTimeout(r, 250));
-            continue;
-          }
-          // Both removal types differ (removed vs deleted) — use confirmation result.
-          await db.execute(
-            sql`UPDATE submissions
-                SET live_status = ${safeStatus},
-                    last_checked_at = now(),
-                    removal_reason = ${confirm.reason ?? null}
-                WHERE id = ${parseInt(row.id)}`
-          );
-        }
-        const reward = parseFloat(row.reward);
-        await db.execute(
-          sql`UPDATE users
-              SET balance_pending = GREATEST(0, balance_pending - ${reward}),
-                  trust_score = GREATEST(0, trust_score - 0.05)
-              WHERE discord_id = ${row.discord_id}`
-        );
-        // Mark the submission so the pending processor never releases it to
-        // available, and so we stop checking it from now on.
-        await db.execute(
-          sql`UPDATE submissions
-              SET moved_to_available = 1,
-                  available_at = now()
-              WHERE id = ${parseInt(row.id)}`
-        );
-        // trust_logs.delta is INTEGER NOT NULL and the table requires user_id.
-        // The actual trust_score deduction (-0.05) is applied to the users row
-        // above; the audit row records 0 with the precise loss in the reason
-        // text so we never blow up on a type mismatch.
-        const userIdRow = await db.execute<{ id: string }>(
-          sql`SELECT id::text AS id FROM users WHERE discord_id = ${row.discord_id} LIMIT 1`
-        );
-        const userIdNum = userIdRow.rows[0]?.id ? parseInt(userIdRow.rows[0].id) : null;
-        if (userIdNum != null) {
-          await db.execute(
-            sql`INSERT INTO trust_logs (user_id, discord_id, delta, reason, related_submission_id, created_at)
-                VALUES (${userIdNum}, ${row.discord_id}, 0,
-                        ${'Payout reversed (-0.05 trust): post ' + newStatus + ' before verify cleared'},
-                        ${parseInt(row.id)}, now())`
-          ).catch((err) => {
-            logger.warn({ err, submissionId: row.id }, "Reddit liveness: trust_logs insert failed (non-fatal)");
-          });
-        }
-        logger.warn(
-          { submissionId: row.id, discordId: row.discord_id, reward, newStatus },
-          "Reddit liveness: PAYOUT REVERSED (post killed before verify hold cleared)"
-        );
+        await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
+      } else {
+        await notifyStatusChange(client, row, oldStatus, newStatus, result.reason, false);
       }
 
-      await notifyStatusChange(client, row, oldStatus, newStatus, result.reason);
-
-      // Brief pause between Reddit calls to be polite.
       await new Promise((r) => setTimeout(r, 250));
     }
   } catch (err) {
@@ -350,6 +344,139 @@ async function tick(client: Client) {
   } finally {
     isRunning = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Early liveness check — scheduled immediately after auto-approval.
+// Fires once after EARLY_CHECK_DELAY_MS (5 min) to catch workers who delete
+// their comment right after getting auto-validated.
+// ---------------------------------------------------------------------------
+
+export interface EarlyCheckArgs {
+  submissionId: number;
+  proofLink: string;
+  discordId: string;
+  reward: string;
+  redditUsername: string | null;
+  workspaceChannelId: string | null;
+  taskId: string;
+}
+
+async function runEarlyCheck(client: Client, args: EarlyCheckArgs): Promise<void> {
+  logger.info({ submissionId: args.submissionId }, "Early liveness check: starting 5-min post-approval check");
+
+  // Re-fetch submission to confirm it's still in a reversible state.
+  // (The 12-hour checker or a manual action may have already processed it.)
+  const fresh = await db.execute<{ review_status: string; moved_to_available: number; live_status: string }>(
+    sql`SELECT review_status, moved_to_available, live_status
+        FROM submissions
+        WHERE id = ${args.submissionId}
+        LIMIT 1`
+  );
+  const row = fresh.rows[0];
+  if (!row) {
+    logger.warn({ submissionId: args.submissionId }, "Early liveness check: submission not found, skipping");
+    return;
+  }
+  if (row.review_status !== "accepted" || row.moved_to_available !== 0) {
+    logger.info(
+      { submissionId: args.submissionId, reviewStatus: row.review_status, movedToAvailable: row.moved_to_available },
+      "Early liveness check: submission no longer in reversible state, skipping"
+    );
+    return;
+  }
+
+  if (!isRedditUrl(args.proofLink)) {
+    logger.info({ submissionId: args.submissionId }, "Early liveness check: non-Reddit URL, skipping");
+    return;
+  }
+
+  const result = await recheckRedditLiveness(args.proofLink);
+  const oldStatus = row.live_status as LiveStatus;
+  const newStatus = result.liveStatus;
+
+  logger.info(
+    { submissionId: args.submissionId, oldStatus, newStatus },
+    "Early liveness check: result"
+  );
+
+  if (newStatus === "unknown") {
+    // Transient — just bump last_checked_at; 12-hour checker will follow up.
+    await db.execute(
+      sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${args.submissionId}`
+    );
+    return;
+  }
+
+  if (newStatus === oldStatus) {
+    await db.execute(
+      sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${args.submissionId}`
+    );
+    logger.info({ submissionId: args.submissionId, status: newStatus }, "Early liveness check: still live, no action needed");
+    return;
+  }
+
+  // Status changed — update DB immediately.
+  await db.execute(
+    sql`UPDATE submissions
+        SET live_status = ${newStatus},
+            last_checked_at = now(),
+            live_status_changed_at = now(),
+            removal_reason = ${result.reason ?? null}
+        WHERE id = ${args.submissionId}`
+  );
+
+  logger.info(
+    { submissionId: args.submissionId, discordId: args.discordId, oldStatus, newStatus, reason: result.reason },
+    "Early liveness check: status changed"
+  );
+
+  if (newStatus === "removed" || newStatus === "deleted") {
+    const syntheticRow: SubmissionRow = {
+      id: String(args.submissionId),
+      proof_link: args.proofLink,
+      discord_id: args.discordId,
+      task_id: args.taskId,
+      reward: args.reward,
+      live_status: oldStatus,
+      reddit_username: args.redditUsername,
+      workspace_channel_id: args.workspaceChannelId,
+    };
+    await performReversalWithConfirmation(client, syntheticRow, oldStatus, newStatus, result.reason, true);
+  } else {
+    // Went live→unknown or some other non-removal change — notify without reversal.
+    const syntheticRow: SubmissionRow = {
+      id: String(args.submissionId),
+      proof_link: args.proofLink,
+      discord_id: args.discordId,
+      task_id: args.taskId,
+      reward: args.reward,
+      live_status: oldStatus,
+      reddit_username: args.redditUsername,
+      workspace_channel_id: args.workspaceChannelId,
+    };
+    await notifyStatusChange(client, syntheticRow, oldStatus, newStatus, result.reason, true);
+  }
+}
+
+/**
+ * Schedule a one-shot liveness check 5 minutes after a submission is
+ * auto-approved, to catch workers who delete their comment immediately after
+ * getting validated.  Safe to call fire-and-forget — uses the cached Discord
+ * client and re-validates the submission state at check time.
+ */
+export function scheduleEarlyLivenessCheck(args: EarlyCheckArgs): void {
+  setTimeout(() => {
+    if (!cachedClient) {
+      logger.warn({ submissionId: args.submissionId }, "Early liveness check: no Discord client cached, skipping");
+      return;
+    }
+    runEarlyCheck(cachedClient, args).catch((err) => {
+      logger.error({ err, submissionId: args.submissionId }, "Early liveness check: unhandled error");
+    });
+  }, EARLY_CHECK_DELAY_MS).unref();
+
+  logger.info({ submissionId: args.submissionId, delayMs: EARLY_CHECK_DELAY_MS }, "Early liveness check: scheduled");
 }
 
 export function startRedditLivenessChecker(client: Client) {

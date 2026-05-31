@@ -27,6 +27,7 @@ import { validateRedditProof, extractTaskSubreddit, detectAppUrl, appUrlHelpMess
 import { invalidateStreak } from "../streak.js";
 import { randomBytes } from "node:crypto";
 import { normalizeTaskInput, createTaskAndPost, buildSharedTaskEmbed, buildPublicTaskEmbed, buildPublicButtons, formatTaskCreator, buildCampaignProgressEmbed, refreshCampaignSummary } from "../task-creation.js";
+import { scheduleEarlyLivenessCheck } from "../redditLivenessChecker.js";
 
 const buildTaskEmbed = buildSharedTaskEmbed;
 
@@ -1470,6 +1471,19 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     } catch {}
 
     await handleReferralAndLeaderboard(guild, user.discordId, user.id);
+
+    // Schedule a 5-minute early liveness check so we catch workers who
+    // delete their comment immediately after getting auto-validated.
+    scheduleEarlyLivenessCheck({
+      submissionId: sub.id,
+      proofLink,
+      discordId: interaction.user.id,
+      reward: String(sub.reward),
+      redditUsername: validation.authorFound ?? null,
+      workspaceChannelId: user.workspaceChannelId ?? null,
+      taskId: String(task.id),
+    });
+
     return;
   }
 

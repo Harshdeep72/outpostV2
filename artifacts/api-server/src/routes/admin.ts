@@ -2348,42 +2348,50 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     title: string | null;
     createdAt: string | null;
     removalReason: string | null;
+    removalBy: string | null;
     error: string | null;
+  };
+
+  const REMOVAL_BY_LABEL: Record<string, string> = {
+    deleted_by_author: "Deleted by author",
+    removed_by_mod: "Removed by mod",
+    removed_by_reddit: "Removed by Reddit",
+    removed_by_automod: "Filtered by AutoMod",
+    comment_deleted: "Comment deleted",
+    not_found: "Not found (404)",
   };
 
   async function checkOne(url: string): Promise<Row> {
     const base: Row = {
       url, ok: false, liveStatus: "error",
       author: null, subreddit: null, title: null, createdAt: null,
-      removalReason: null, error: null,
+      removalReason: null, removalBy: null, error: null,
     };
     try {
-      // Use recheckRedditLiveness — the same function the periodic liveness
-      // checker uses — so bulk-check results exactly mirror what would happen
-      // in production (multi-source deep check with false-positive guards).
       const result = await recheckRedditLiveness(url);
 
       if (result.liveStatus === "unknown") {
-        // "unknown" means Reddit API was unreachable / all sources blocked.
-        // This is NOT a removal — do NOT report it as removed.
         return { ...base, liveStatus: "error", error: result.reason ?? result.statusLabel ?? "Reddit unreachable — could not determine status" };
       }
 
-      let liveStatus: Row["liveStatus"] = result.liveStatus as Row["liveStatus"];
-      const removalReason = (result.liveStatus === "removed" || result.liveStatus === "deleted")
-        ? (result.reason ?? result.statusLabel ?? null)
+      const liveStatus: Row["liveStatus"] = result.liveStatus as Row["liveStatus"];
+      const isRemoved = result.liveStatus === "removed" || result.liveStatus === "deleted";
+      const removalReason = isRemoved ? (result.reason ?? null) : null;
+      const removalBy = isRemoved && result.detailedStatus
+        ? (REMOVAL_BY_LABEL[result.detailedStatus] ?? result.statusLabel ?? null)
         : null;
 
       return {
         url,
         ok: true,
         liveStatus,
-        author: null,   // recheckRedditLiveness is liveness-only, author not returned
+        author: null,
         subreddit: null,
         title: null,
         createdAt: null,
         removalReason,
-        error: result.reason && result.liveStatus === "live" ? result.reason : null,
+        removalBy,
+        error: null,
       };
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);

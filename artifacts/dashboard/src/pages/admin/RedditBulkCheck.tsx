@@ -11,6 +11,7 @@ interface BulkCheckRow {
   title: string | null;
   createdAt: string | null;
   removalReason: string | null;
+  removalBy: string | null;
   error: string | null;
 }
 
@@ -22,9 +23,18 @@ interface BulkCheckResponse {
 const STATUS_PILL: Record<BulkCheckRow["liveStatus"], { label: string; cls: string }> = {
   live: { label: "Live", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
   removed: { label: "Removed", cls: "bg-red-500/15 text-red-400 border-red-500/30" },
-  deleted: { label: "Deleted", cls: "bg-red-500/15 text-red-400 border-red-500/30" },
+  deleted: { label: "Deleted", cls: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
   not_found: { label: "Not found", cls: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
   error: { label: "Error", cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+};
+
+const REMOVAL_BY_PILL: Record<string, string> = {
+  "Removed by mod":      "bg-red-500/15 text-red-400 border-red-500/30",
+  "Removed by Reddit":   "bg-red-500/15 text-red-400 border-red-500/30",
+  "Filtered by AutoMod": "bg-orange-500/15 text-orange-400 border-orange-500/30",
+  "Deleted by author":   "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  "Comment deleted":     "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+  "Not found (404)":     "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
 };
 
 export default function RedditBulkCheck() {
@@ -48,13 +58,12 @@ export default function RedditBulkCheck() {
   const data = mutation.data;
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <div className="p-6 space-y-6 max-w-6xl">
       <div>
         <h1 className="text-xl font-bold text-foreground">Reddit Bulk URL Checker</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Paste a list of Reddit URLs (one per line, or comma/space-separated) — the bot pulls each
-          one from Reddit and reports whether it&apos;s still live, who posted it, when, and the
-          removal reason if it was taken down.
+          Paste a list of Reddit URLs (one per line, or comma/space-separated) — the bot checks
+          each one and reports whether it&apos;s still live, who removed it, and why.
         </p>
       </div>
 
@@ -114,36 +123,48 @@ export default function RedditBulkCheck() {
               <table className="w-full text-sm">
                 <thead className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-wide">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                    <th className="text-left px-3 py-2 font-medium w-24">Status</th>
                     <th className="text-left px-3 py-2 font-medium">URL</th>
-                    <th className="text-left px-3 py-2 font-medium">Author</th>
-                    <th className="text-left px-3 py-2 font-medium">Subreddit</th>
-                    <th className="text-left px-3 py-2 font-medium">Posted</th>
-                    <th className="text-left px-3 py-2 font-medium">Notes</th>
+                    <th className="text-left px-3 py-2 font-medium w-36">Removed By</th>
+                    <th className="text-left px-3 py-2 font-medium">Reason / Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.results.map((r, i) => {
                     const pill = STATUS_PILL[r.liveStatus] ?? STATUS_PILL.error;
+                    const removalByClass = r.removalBy
+                      ? (REMOVAL_BY_PILL[r.removalBy] ?? "bg-zinc-500/15 text-zinc-400 border-zinc-500/30")
+                      : null;
+                    const notes = r.removalReason ?? r.error ?? null;
                     return (
-                      <tr key={i} className="border-t border-border/60">
+                      <tr key={i} className="border-t border-border/60 hover:bg-muted/20">
                         <td className="px-3 py-2">
-                          <span className={`inline-block rounded-md border px-2 py-0.5 text-xs ${pill.cls}`}>
+                          <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${pill.cls}`}>
                             {pill.label}
                           </span>
                         </td>
-                        <td className="px-3 py-2 max-w-[28ch] truncate">
-                          <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline" title={r.url}>
+                        <td className="px-3 py-2 max-w-[34ch] truncate">
+                          <a
+                            href={r.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline font-mono text-xs"
+                            title={r.url}
+                          >
                             {r.url}
                           </a>
                         </td>
-                        <td className="px-3 py-2">{r.author ? `u/${r.author}` : "—"}</td>
-                        <td className="px-3 py-2">{r.subreddit ? `r/${r.subreddit}` : "—"}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {r.createdAt ? new Date(r.createdAt).toLocaleString() : "—"}
+                        <td className="px-3 py-2">
+                          {removalByClass ? (
+                            <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-medium ${removalByClass}`}>
+                              {r.removalBy}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground max-w-[28ch] truncate" title={r.removalReason ?? r.error ?? ""}>
-                          {r.removalReason ?? r.error ?? "—"}
+                        <td className="px-3 py-2 text-xs text-muted-foreground max-w-[36ch] truncate" title={notes ?? ""}>
+                          {notes ?? "—"}
                         </td>
                       </tr>
                     );

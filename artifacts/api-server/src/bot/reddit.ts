@@ -264,6 +264,185 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
 
 
 /**
+ * Direct JSON probe — try the public about.json endpoint without proxies or auth.
+ *
+ * Reddit "deprecated" unauthenticated API access in mid-2023 but the user-about
+ * endpoint is still reachable from many hosting IPs. Attempt is cheap (< 1 s to
+ * fail) so we always try it before falling back to slower scraping methods.
+ * On success we get real, verified karma. On failure we return null and the
+ * caller falls through to the next method.
+ */
+async function fetchViaDirectJson(name: string): Promise<RedditFetchResult | null> {
+  const candidates = [
+    `https://old.reddit.com/user/${name}/about.json?raw_json=1`,
+    `https://www.reddit.com/user/${name}/about.json?raw_json=1`,
+  ];
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 4_000 }, bodyTimeout: 6_000, headersTimeout: 6_000 });
+
+    for (const url of candidates) {
+      try {
+        const res = await undiciFetch(url, {
+          dispatcher: agent,
+          headers: {
+            "User-Agent": "OutpostBot/1.0 (verification flow)",
+            "Accept": "application/json",
+          },
+        });
+
+        if (res.status === 404) return { ok: false, notFound: true };
+        if (!res.ok) continue; // blocked or rate-limited — try next URL
+
+        let body: any;
+        try { body = await res.json(); } catch { continue; }
+
+        const d = body?.data ?? {};
+        if (!d.name) continue;
+        if (d.is_suspended || d.is_banned) return { ok: false, notFound: true, suspended: true };
+
+        const createdUtc: number = typeof d.created_utc === "number" ? d.created_utc : 0;
+        const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+
+        logger.info({ name: d.name, url }, "Reddit profile via direct JSON endpoint (no auth)");
+        return {
+          ok: true,
+          profile: {
+            name: d.name as string,
+            createdUtc,
+            linkKarma:    (d.link_karma    as number) ?? 0,
+            commentKarma: (d.comment_karma as number) ?? 0,
+            totalKarma:   (d.total_karma   as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
+            iconImg:      stripQuery(d.icon_img as string | undefined),
+            accountAgeDays: ageDays,
+            karmaVerified: true,
+          },
+        };
+      } catch (err) {
+        logger.debug({ err, url }, "fetchViaDirectJson: attempt failed");
+      }
+    }
+  } catch (err) {
+    logger.debug({ err, name }, "fetchViaDirectJson: import failed");
+  }
+
+  return null;
+}
+
+/**
+ * Extract karma from new Reddit's (shreddit) server-rendered page HTML.
+ *
+ * www.reddit.com user-about pages embed user profile JSON inside <script> tags
+ * even on the initial server-side render — no JavaScript execution needed.
+ * The page is generally reachable from datacenter IPs without proxies or auth.
+ *
+ * We look for standard Reddit JSON field names directly in the raw HTML:
+ *   "link_karma":N, "comment_karma":N, "total_karma":N, "created_utc":N
+ * Multiple occurrences are expected (repeated in different script blobs);
+ * we take the first valid (non-zero karma) hit.
+ *
+ * Returns null if we cannot extract meaningful karma data.
+ */
+async function fetchViaNewRedditHtml(name: string): Promise<RedditFetchResult | null> {
+  const url = `https://www.reddit.com/user/${name}/about`;
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 6_000 }, bodyTimeout: 14_000, headersTimeout: 14_000 });
+
+    const res = await undiciFetch(url, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+      },
+    });
+
+    if (res.status === 404) return { ok: false, notFound: true };
+    if (!res.ok) {
+      logger.debug({ name, status: res.status }, "fetchViaNewRedditHtml: non-200 response");
+      return null;
+    }
+
+    const html = await res.text();
+
+    // Suspended / not-found detection
+    if (
+      html.includes("has been suspended") ||
+      html.includes("account-suspended") ||
+      (html.includes("page not found") && !html.includes(name.toLowerCase()))
+    ) {
+      return { ok: false, notFound: true, suspended: true };
+    }
+
+    // ── Extract karma fields from embedded JSON blobs ──────────────────────
+    // Reddit may repeat these fields multiple times in different script tags;
+    // gather ALL occurrences and pick the most credible (highest sum, ≥1).
+
+    function extractAll(pattern: RegExp): number[] {
+      const results: number[] = [];
+      let m: RegExpExecArray | null;
+      const re = new RegExp(pattern.source, "g");
+      while ((m = re.exec(html)) !== null) {
+        const v = parseInt(m[1]!, 10);
+        if (!isNaN(v)) results.push(v);
+      }
+      return results;
+    }
+
+    const linkKarmas    = extractAll(/"link_karma"\s*:\s*(\d+)/);
+    const commentKarmas = extractAll(/"comment_karma"\s*:\s*(\d+)/);
+    const totalKarmas   = extractAll(/"total_karma"\s*:\s*(\d+)/);
+    const createdUtcs   = extractAll(/"created_utc"\s*:\s*(\d+(?:\.\d+)?)/);
+
+    // Prefer the largest value seen (most likely the canonical profile block).
+    const linkKarma    = linkKarmas.length    ? Math.max(...linkKarmas)    : 0;
+    const commentKarma = commentKarmas.length ? Math.max(...commentKarmas) : 0;
+    const totalKarma   = totalKarmas.length   ? Math.max(...totalKarmas)   : linkKarma + commentKarma;
+
+    // Sanity check — if we found nothing useful, this method didn't work.
+    if (linkKarma === 0 && commentKarma === 0 && totalKarma === 0) {
+      logger.debug({ name, htmlLen: html.length }, "fetchViaNewRedditHtml: no karma fields found in embedded HTML");
+      return null;
+    }
+
+    const createdUtc = createdUtcs.length ? Math.min(...createdUtcs) : 0; // oldest timestamp = account creation
+    const ageDays    = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+
+    // Best-effort canonical username extraction
+    const nameMatch = new RegExp(`"name"\\s*:\\s*"(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})"`, "i").exec(html);
+    const resolvedName = nameMatch ? nameMatch[1]! : name;
+
+    // Best-effort avatar
+    const iconMatch = /"icon_img"\s*:\s*"([^"]+https[^"]+)"/.exec(html);
+    const iconImg   = iconMatch ? stripQuery(iconMatch[1]) : undefined;
+
+    logger.info({ name: resolvedName, linkKarma, commentKarma, totalKarma, ageDays }, "Reddit profile via new-Reddit embedded HTML (karmaVerified=true)");
+
+    return {
+      ok: true,
+      profile: {
+        name: resolvedName,
+        createdUtc,
+        linkKarma,
+        commentKarma,
+        totalKarma,
+        iconImg,
+        accountAgeDays: ageDays,
+        karmaVerified: true,
+      },
+    };
+  } catch (err) {
+    logger.warn({ err, name }, "fetchViaNewRedditHtml error");
+    return null;
+  }
+}
+
+/**
  * Scrape old.reddit.com/user/{name}/about HTML to extract karma and account age.
  *
  * old.reddit.com user profile pages are still publicly accessible and contain
@@ -402,30 +581,48 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     return oauthResult;
   }
 
-  // ── 2. Scrape old.reddit.com user profile HTML (karma + age, no auth needed)
-  // old.reddit HTML pages are still publicly accessible and contain karma data
-  // even though the unauthenticated JSON API has been deprecated.
-  // Works when the proxy pool contains residential (non-datacenter) proxies.
-  logger.info({ name }, "OAuth not configured — trying old.reddit HTML scrape via proxies");
+  // ── 2. Direct JSON probe (no auth, no proxy, low latency) ─────────────────
+  // Try old.reddit.com/user/{name}/about.json directly — still reachable from
+  // many server IPs even after Reddit's 2023 API changes.
+  logger.info({ name }, "OAuth not configured — trying direct JSON probe");
+  const directJsonResult = await fetchViaDirectJson(name);
+  if (directJsonResult !== null) {
+    logger.info({ name, ok: directJsonResult.ok }, "Reddit profile via direct JSON");
+    return directJsonResult;
+  }
+
+  // ── 3. new Reddit embedded-JSON scrape (no auth, no proxy needed) ──────────
+  // www.reddit.com/user/{name}/about server-renders user profile data (including
+  // karma) inside <script> tags even from datacenter IPs. Extract with regex.
+  logger.info({ name }, "Direct JSON blocked — trying new-Reddit embedded HTML");
+  const newRedditResult = await fetchViaNewRedditHtml(name);
+  if (newRedditResult !== null) {
+    logger.info({ name, ok: newRedditResult.ok }, "Reddit profile via new-Reddit HTML");
+    return newRedditResult;
+  }
+
+  // ── 4. Scrape old.reddit.com user profile HTML via proxies ────────────────
+  // old.reddit HTML pages contain karma in the sidebar; works when the proxy
+  // pool has residential (non-datacenter) IPs that bypass Reddit's CDN block.
+  logger.info({ name }, "new-Reddit scrape failed — trying old.reddit HTML scrape via proxies");
   const htmlResult = await fetchViaHtmlScrape(name);
   if (htmlResult !== null) {
-    logger.info({ name, ok: htmlResult.ok }, "Reddit profile via HTML scrape");
+    logger.info({ name, ok: htmlResult.ok }, "Reddit profile via old.reddit HTML scrape");
     return htmlResult;
   }
 
-  // ── 3. Arctic Shift public archive API (no auth, no proxy needed) ──────────
+  // ── 5. Arctic Shift public archive API (no auth, no proxy needed) ──────────
   // arctic-shift.photon-reddit.com indexes Reddit posts/comments publicly.
-  // Sums archived scores as a karma floor: if ≥ 100 → auto-approve; if below →
-  // manual review (real karma may be higher than archived floor).
-  // Also gives a confirmed account age lower bound from the oldest archived post.
-  logger.info({ name }, "HTML scrape failed — trying Arctic Shift archive");
+  // Only used for ACCOUNT AGE — archived scores are NOT used as karma because
+  // Reddit karma ≠ sum of post scores (causes significant overestimation).
+  logger.info({ name }, "HTML scrape failed — trying Arctic Shift archive (age only)");
   const arcticResult = await fetchViaArcticShift(name);
   if (arcticResult !== null) {
     logger.info({ name, ok: arcticResult.ok }, "Reddit profile via Arctic Shift archive");
     return arcticResult;
   }
 
-  // ── 4. Last resort: user RSS via proxies (no karma, triggers manual review) ─
+  // ── 6. Last resort: user RSS via proxies (no karma, triggers manual review) ─
   // RSS feeds are still available but do NOT contain karma data.
   logger.info({ name }, "Arctic Shift found nothing — falling back to user RSS (no karma data)");
 

@@ -264,6 +264,115 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
 
 
 /**
+ * Fetch Reddit user profile via public Reddit-frontend proxy instances.
+ *
+ * Teddit and Redlib are open-source Reddit frontends that proxy Reddit's API.
+ * Their servers run proper residential/CDN IPs and forward requests to Reddit
+ * on our behalf — so this works from datacenter IPs (Render/AWS) with no auth.
+ *
+ * Teddit exposes Reddit's raw JSON via `?api&raw_json=1`.
+ * Redlib exposes a JSON API at `/user/{name}/about.json`.
+ *
+ * Multiple instances are tried in parallel; first valid karma response wins.
+ * Returns null if all instances are down or return unexpected data.
+ */
+async function fetchViaPublicFrontend(name: string): Promise<RedditFetchResult | null> {
+  // Public instances — ordered roughly by reliability / uptime history.
+  // Mix of Teddit (?api format) and Redlib (.json format).
+  const candidates: Array<{ url: string; format: "teddit" | "redlib" }> = [
+    { url: `https://teddit.net/user/${name}/about.json`,              format: "teddit"  },
+    { url: `https://teddit.pussthecat.org/user/${name}/about.json`,   format: "teddit"  },
+    { url: `https://redlib.catsarch.com/user/${name}/about.json`,     format: "redlib"  },
+    { url: `https://redlib.privacydev.net/user/${name}/about.json`,   format: "redlib"  },
+    { url: `https://libreddit.kavin.rocks/user/${name}/about.json`,   format: "redlib"  },
+  ];
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 6_000 }, bodyTimeout: 10_000, headersTimeout: 10_000 });
+
+    // Fire all in parallel — first non-null result wins via Promise.any.
+    const attempts = candidates.map(async ({ url, format }): Promise<RedditFetchResult> => {
+      const res = await undiciFetch(url, {
+        dispatcher: agent,
+        headers: {
+          "User-Agent": "OutpostBot/1.0",
+          "Accept": "application/json",
+        },
+      });
+
+      if (res.status === 404) return { ok: false, notFound: true };
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      let body: any;
+      try { body = await res.json(); } catch { throw new Error("invalid JSON"); }
+
+      // Teddit returns Reddit's raw JSON: { kind: "t2", data: { name, link_karma, ... } }
+      // Redlib might use the same format or a different structure.
+      const d = body?.data ?? body;
+      const username = d?.name ?? d?.username;
+      const linkKarma = d?.link_karma ?? d?.linkKarma;
+      const commentKarma = d?.comment_karma ?? d?.commentKarma;
+      const totalKarma = d?.total_karma ?? d?.totalKarma;
+      const createdUtc = d?.created_utc ?? d?.createdUtc;
+
+      // Validate we got real karma data (not a login page or error page masquerading as JSON)
+      if (!username || (typeof linkKarma !== "number" && typeof commentKarma !== "number" && typeof totalKarma !== "number")) {
+        throw new Error(`no karma in response (format=${format})`);
+      }
+
+      if (d?.is_suspended || d?.isSuspended) return { ok: false, notFound: true, suspended: true };
+
+      const lk = typeof linkKarma === "number" ? linkKarma : 0;
+      const ck = typeof commentKarma === "number" ? commentKarma : 0;
+      const tk = typeof totalKarma === "number" ? totalKarma : lk + ck;
+      const cu: number = typeof createdUtc === "number" ? createdUtc : 0;
+      const ageDays = cu ? Math.floor((Date.now() / 1000 - cu) / 86400) : 0;
+
+      logger.info({ name: username, url, format, lk, ck, tk, ageDays }, "Reddit profile via public frontend proxy");
+
+      return {
+        ok: true,
+        profile: {
+          name: username as string,
+          createdUtc: cu,
+          linkKarma: lk,
+          commentKarma: ck,
+          totalKarma: tk,
+          iconImg: stripQuery(d?.icon_img ?? d?.iconImg),
+          accountAgeDays: ageDays,
+          karmaVerified: true,
+        },
+      };
+    });
+
+    // Return the first successful (ok:true) result.
+    const result = await Promise.any(
+      attempts.map(async (p) => {
+        const r = await p;
+        if (!r.ok) throw new Error("not-found");
+        return r;
+      })
+    ).catch(() => null);
+
+    if (result) return result;
+
+    // If all returned not-found (suspended/banned), that's still a valid answer.
+    const allResults = await Promise.allSettled(attempts);
+    for (const r of allResults) {
+      if (r.status === "fulfilled" && !r.value.ok && "notFound" in r.value && r.value.notFound) {
+        return r.value;
+      }
+    }
+  } catch (err) {
+    logger.debug({ err, name }, "fetchViaPublicFrontend: unexpected error");
+  }
+
+  logger.warn({ name }, "fetchViaPublicFrontend: all instances failed or returned no karma");
+  return null;
+}
+
+/**
  * Direct JSON probe — try the public about.json endpoint without proxies or auth.
  *
  * Reddit "deprecated" unauthenticated API access in mid-2023 but the user-about
@@ -581,17 +690,28 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     return oauthResult;
   }
 
-  // ── 2. Direct JSON probe (no auth, no proxy, low latency) ─────────────────
+  // ── 2. Public Reddit-frontend proxies (Teddit / Redlib) ────────────────────
+  // These open-source frontends run on residential/CDN IPs and proxy Reddit's
+  // API — so they work from datacenter IPs (Render/AWS) with no auth required.
+  // Multiple instances tried in parallel; first with real karma data wins.
+  logger.info({ name }, "OAuth not configured — trying public Reddit-frontend proxies");
+  const frontendResult = await fetchViaPublicFrontend(name);
+  if (frontendResult !== null) {
+    logger.info({ name, ok: frontendResult.ok }, "Reddit profile via public frontend proxy");
+    return frontendResult;
+  }
+
+  // ── 3. Direct JSON probe (no auth, no proxy, low latency) ─────────────────
   // Try old.reddit.com/user/{name}/about.json directly — still reachable from
   // many server IPs even after Reddit's 2023 API changes.
-  logger.info({ name }, "OAuth not configured — trying direct JSON probe");
+  logger.info({ name }, "Public frontends failed — trying direct JSON probe");
   const directJsonResult = await fetchViaDirectJson(name);
   if (directJsonResult !== null) {
     logger.info({ name, ok: directJsonResult.ok }, "Reddit profile via direct JSON");
     return directJsonResult;
   }
 
-  // ── 3. new Reddit embedded-JSON scrape (no auth, no proxy needed) ──────────
+  // ── 4. new Reddit embedded-JSON scrape (no auth, no proxy needed) ──────────
   // www.reddit.com/user/{name}/about server-renders user profile data (including
   // karma) inside <script> tags even from datacenter IPs. Extract with regex.
   logger.info({ name }, "Direct JSON blocked — trying new-Reddit embedded HTML");
@@ -601,7 +721,7 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     return newRedditResult;
   }
 
-  // ── 4. Scrape old.reddit.com user profile HTML via proxies ────────────────
+  // ── 5. Scrape old.reddit.com user profile HTML via proxies ────────────────
   // old.reddit HTML pages contain karma in the sidebar; works when the proxy
   // pool has residential (non-datacenter) IPs that bypass Reddit's CDN block.
   logger.info({ name }, "new-Reddit scrape failed — trying old.reddit HTML scrape via proxies");

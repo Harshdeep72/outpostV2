@@ -312,6 +312,20 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDescription("Show community stats — total earnings, tasks completed, top earner this week")
     .setDMPermission(true);
 
+  const testurl = new SlashCommandBuilder()
+    .setName("testurl")
+    .setDescription("Run a Reddit proof URL through the full validation system and show the result (admin only)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption((o) =>
+      o.setName("url").setDescription("Full Reddit comment or post URL to test").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("reddit_username")
+        .setDescription("Reddit username to check authorship against (leave blank to skip author check)")
+        .setRequired(false)
+        .setMaxLength(20)
+    );
+
   const health = new SlashCommandBuilder()
     .setName("health")
     .setDescription("Deep health check — DB latency, proxy success rate, Reddit API status (admin only)")
@@ -353,7 +367,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     addmod, removemod, addadmin, flag, unflag,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
-    ping, stats, health, addbalance, removebalance,
+    ping, stats, health, testurl, addbalance, removebalance,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

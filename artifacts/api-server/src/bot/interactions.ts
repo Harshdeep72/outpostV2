@@ -23,6 +23,7 @@ import { handlePingCommand } from "./handlers/ping.js";
 import { handleStatsCommand } from "./handlers/stats.js";
 import { handleHealthCommand } from "./handlers/health.js";
 import { handleCancelTaskCommand, handleCancelCampaignCommand } from "./handlers/canceltask.js";
+import { handleTestUrlCommand } from "./handlers/testurl.js";
 
 const SLOW_HANDLER_MS = 800;
 
@@ -80,6 +81,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "adminpayouthistory") return timed(name, () => handleAdminPayoutHistoryCommand(interaction));
         if (name === "stats") return timed(name, () => handleStatsCommand(interaction));
         if (name === "health") return timed(name, () => handleHealthCommand(interaction));
+        if (name === "testurl") return timed(name, () => handleTestUrlCommand(interaction));
         if (name === "addbalance") return timed(name, () => handleAddBalance(interaction));
         if (name === "removebalance") return timed(name, () => handleRemoveBalance(interaction));
         logger.warn({ name }, "Unknown command");

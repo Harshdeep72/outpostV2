@@ -1,6 +1,5 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
-import { fetchRedditApiUrl } from "./reddit.js";
 import { fetch as undiciFetch } from "undici";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -567,47 +566,27 @@ export async function validateRedditProof(
   }
 
   // ── Fetch strategy ────────────────────────────────────────────────────────
-  // Unauthenticated JSON access has been deprecated by Reddit. We now use the
-  // authenticated OAuth API (oauth.reddit.com) as the primary source and fall
-  // back to RSS when OAuth is not configured or returns an error.
+  // Unauthenticated JSON is deprecated. RSS is the primary source.
   const rssUrl = parsed.isUserPost
     ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
     : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
 
-  const oauthUrl = parsed.isUserPost
-    ? `https://oauth.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`
-    : `https://oauth.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`;
+  const rssBody = await fetchDirectText(rssUrl, 8_000);
 
-  const [result, rssBody] = await Promise.all([
-    fetchRedditApiUrl(oauthUrl),
-    fetchDirectText(rssUrl, 8_000),
-  ]);
-
-  let data = result.body;
+  let data: any = null;
   let isRss = false;
 
-  if (!result.ok) {
-    if (result.status === 404) {
-      return {
-        passed: false, autoApproved: false, status: "not_found",
-        failures: ["Reddit post not found or has been deleted (404)."],
-        postLive: false,
-        ...meta("not_found"),
-      };
-    }
-    // JSON failed (most likely 403). Fall back to RSS which we already fetched.
-    if (rssBody && rssBody.includes("<feed")) {
-      isRss = true;
-      data = rssBody;
-      logger.info({ proofUrl }, "JSON blocked — using RSS + old.reddit HTML path");
-    } else {
-      logger.warn({ status: result.status, proofUrl }, "Both JSON and RSS failed — manual review");
-      return {
-        passed: false, autoApproved: false, status: "api_unreachable",
-        failures: ["Reddit API unreachable — queued for manual review."],
-        ...meta("api_unreachable"),
-      };
-    }
+  if (rssBody && rssBody.includes("<feed")) {
+    isRss = true;
+    data = rssBody;
+    logger.info({ proofUrl }, "RSS fetch succeeded");
+  } else {
+    logger.warn({ proofUrl }, "RSS fetch failed — manual review");
+    return {
+      passed: false, autoApproved: false, status: "api_unreachable",
+      failures: ["Reddit API unreachable — queued for manual review."],
+      ...meta("api_unreachable"),
+    };
   }
 
   if (isRss) {
@@ -966,19 +945,13 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     };
   }
 
-  // Unauthenticated JSON access has been deprecated by Reddit. Use OAuth API
-  // as the primary source. old.reddit HTML remains a secondary ground-truth
-  // source for comment liveness checks.
-  const oauthUrl = parsed.isUserPost
-    ? `https://oauth.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}.json?limit=500&raw_json=1`
-    : `https://oauth.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}.json?limit=500&raw_json=1`;
-
-  const [result, htmlVisible] = await Promise.all([
-    fetchRedditApiUrl(oauthUrl),
-    parsed.commentId
-      ? isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
-      : Promise.resolve<boolean | null>(null),
-  ]);
+  // Unauthenticated JSON is deprecated. Use old.reddit HTML as the primary
+  // liveness source. result is a stub so the existing HTML-path logic below
+  // works unchanged (HTML-says-removed without JSON corroboration → unknown).
+  const result = { ok: false as const, status: 0, body: null as any };
+  const htmlVisible = parsed.commentId
+    ? await isCommentVisibleOnOldReddit(parsed.subreddit, parsed.postId, parsed.commentId, parsed.isUserPost)
+    : null;
 
   // ── Comment liveness via old.reddit HTML (most reliable path) ─────────────
   if (parsed.commentId && htmlVisible !== null) {

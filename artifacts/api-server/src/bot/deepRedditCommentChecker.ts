@@ -377,15 +377,14 @@ async function runDeepCheck(
 
   logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
 
-  // Unauthenticated JSON access has been deprecated by Reddit. OAuth is now the
-  // sole JSON source; RSS and old.reddit HTML are secondary fallbacks.
-  const [oauthRes, rssHtml, htmlContent] = await Promise.all([
-    fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId),
+  // Unauthenticated JSON is deprecated and OAuth is not yet configured.
+  // RSS and old.reddit HTML are the primary sources.
+  const [rssHtml, htmlContent] = await Promise.all([
     proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null)
   ]);
 
-  const effectiveJsonRes = oauthRes;
+  const effectiveJsonRes = null;
   const jsonSource = "oauth" as const;
 
   let authorFound: string | null = null;

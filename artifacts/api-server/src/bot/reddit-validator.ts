@@ -1011,23 +1011,154 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     };
   }
 
-  // ── Post-only liveness via RSS ────────────────────────────────────────────
+  // ── Post-only liveness via RSS + old.reddit HTML ─────────────────────────
   // Comment URLs are handled above by deepCheckComment.
   // Unauthenticated JSON is deprecated and OAuth is not yet configured, so
-  // RSS is the sole source for post liveness checks.
-  const postRssUrl = parsed.isUserPost
-    ? `https://www.reddit.com/user/${parsed.subreddit.slice(2)}/comments/${parsed.postId}/.rss`
-    : `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/.rss`;
+  // RSS and old.reddit HTML are the sources for post liveness checks.
 
-  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post RSS");
-  const postRssText = await fetchDirectText(postRssUrl, 8_000);
+  const subPrefix = parsed.isUserPost
+    ? `user/${parsed.subreddit.slice(2)}`
+    : `r/${parsed.subreddit}`;
+  const postRssUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/.rss`;
 
+  // Fetch RSS and old.reddit HTML in parallel for speed.
+  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post RSS + old.reddit HTML in parallel");
+  const [postRssText, oldRedditHtml] = await Promise.all([
+    fetchDirectText(postRssUrl, 8_000),
+    proxyFetchText(
+      [
+        `https://old.reddit.com/${subPrefix}/comments/${parsed.postId}/`,
+        `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/`,
+      ],
+      { timeoutMs: 8_000, acceptHeader: "text/html, */*" }
+    ).catch(() => null),
+  ]);
+
+  // ── 1. Parse old.reddit HTML ──────────────────────────────────────────────
+  // old.reddit is fully server-rendered: a removed post still loads but
+  // the thing div carries removal markers we can read without JS or OAuth.
+  type HtmlPostResult = "live" | "removed" | "deleted" | "inconclusive";
+  let htmlPostResult: HtmlPostResult = "inconclusive";
+
+  if (oldRedditHtml) {
+    const isOldRedditPage =
+      oldRedditHtml.includes('class="commentarea"') ||
+      oldRedditHtml.includes('id="siteTable"') ||
+      oldRedditHtml.includes('data-subreddit=') ||
+      oldRedditHtml.includes('class="thing"');
+
+    if (isOldRedditPage) {
+      const thingId = `id="thing_t3_${parsed.postId}"`;
+      const thingIdLower = `id="thing_t3_${parsed.postId.toLowerCase()}"`;
+      const thingIdx = oldRedditHtml.indexOf(thingId) !== -1
+        ? oldRedditHtml.indexOf(thingId)
+        : oldRedditHtml.indexOf(thingIdLower);
+
+      if (thingIdx !== -1) {
+        // Post container found — extract class attrs and selftext to detect removal.
+        const fragmentStart = Math.max(0, thingIdx - 100);
+        const fragment = oldRedditHtml.substring(fragmentStart, thingIdx + 800);
+
+        // Detect removal via CSS class on the thing div (old.reddit adds
+        // "deleted" or "spam" class for author-deleted / spam-removed posts).
+        const thingClassMatch = fragment.match(/class="([^"]+)"\s[^>]*id="thing_t3_/i) ||
+          fragment.match(/class="([^"]+)"/);
+        const thingClass = thingClassMatch ? thingClassMatch[1] : "";
+        const isDeletedByClass = /\bdeleted\b/.test(thingClass) || /\bspam\b/.test(thingClass);
+        const hasDataDeleted = /\bdata-deleted="true"/i.test(fragment);
+
+        // Detect removal via selftext body content.
+        let selftextRemoved = false;
+        const selftextIdx = oldRedditHtml.indexOf('class="usertext-body', thingIdx);
+        if (selftextIdx !== -1 && selftextIdx - thingIdx < 4000) {
+          const mdIdx = oldRedditHtml.indexOf('class="md"', selftextIdx);
+          if (mdIdx !== -1) {
+            const pStart = oldRedditHtml.indexOf("<p>", mdIdx);
+            const pEnd = oldRedditHtml.indexOf("</p>", pStart);
+            if (pStart !== -1 && pEnd !== -1 && pEnd - pStart < 500) {
+              const bodyText = oldRedditHtml.substring(pStart + 3, pEnd).replace(/<[^>]*>/g, "").trim();
+              const bodyNorm = bodyText.toLowerCase().replace(/\s+/g, "");
+              selftextRemoved =
+                bodyText === "[removed]" ||
+                bodyText === "[deleted]" ||
+                bodyNorm === "[removedbyreddit]" ||
+                bodyNorm === "[deletedbyuser]" ||
+                /^\[[\s\w]*(?:removed|deleted)[\s\w]*\]$/i.test(bodyText);
+            }
+          }
+        }
+
+        if (isDeletedByClass || hasDataDeleted) {
+          htmlPostResult = "deleted";
+          logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML shows post deleted (class/data-deleted)");
+        } else if (selftextRemoved) {
+          htmlPostResult = "removed";
+          logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML shows post selftext [removed]");
+        } else {
+          htmlPostResult = "live";
+          logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML confirms post live");
+        }
+      } else {
+        // Post container absent from a valid old.reddit page → not found.
+        htmlPostResult = "deleted";
+        logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post container absent from old.reddit HTML — treating as removed/deleted");
+      }
+    } else {
+      // Page doesn't look like old.reddit (CAPTCHA, Cloudflare, shreddit).
+      // Check shreddit for removal signals in the initial HTML.
+      const isShredditPage =
+        oldRedditHtml.includes("<shreddit-post") ||
+        oldRedditHtml.includes("<shreddit-app") ||
+        oldRedditHtml.includes("shreddit-");
+
+      if (isShredditPage) {
+        // Shreddit lazy-loads content — absence is inconclusive. But if the
+        // post tag is present with a removed attribute, trust it.
+        const postTagMatch = oldRedditHtml.match(new RegExp(`<shreddit-post[^>]+postid="${parsed.postId}"[^>]*>`, "i"));
+        if (postTagMatch) {
+          const tag = postTagMatch[0];
+          if (tag.includes('removed="true"') || tag.includes('deleted="true"')) {
+            htmlPostResult = "removed";
+            logger.info({ postId: parsed.postId }, "recheckRedditLiveness: shreddit-post tag shows removed");
+          } else {
+            htmlPostResult = "live";
+            logger.info({ postId: parsed.postId }, "recheckRedditLiveness: shreddit-post tag found, not removed");
+          }
+        }
+        // else: shreddit page loaded but postId not in initial HTML — inconclusive
+      }
+      // else: unrecognised page — leave as inconclusive
+    }
+  }
+
+  // If HTML gave us a clear answer, return it now without touching RSS.
+  if (htmlPostResult === "live") {
+    return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+  }
+  if (htmlPostResult === "removed") {
+    return {
+      liveStatus: "removed",
+      detailedStatus: "removed_by_mod",
+      statusLabel: "Post removed",
+      reason: "Post content is [removed] in old.reddit HTML.",
+    };
+  }
+  if (htmlPostResult === "deleted") {
+    return {
+      liveStatus: "deleted",
+      detailedStatus: "deleted_by_author",
+      statusLabel: "Post deleted",
+      reason: "Post not found or deleted in old.reddit HTML.",
+    };
+  }
+
+  // ── 2. RSS fallback (HTML was inconclusive) ───────────────────────────────
   if (!postRssText || !postRssText.includes("<feed")) {
-    logger.warn({ postId: parsed.postId }, "recheckRedditLiveness: post RSS unavailable — inconclusive");
+    logger.warn({ postId: parsed.postId }, "recheckRedditLiveness: post RSS unavailable and HTML inconclusive — unknown");
     return { liveStatus: "unknown", detailedStatus: "api_unreachable", statusLabel: "Reddit API unreachable" };
   }
 
-  // Search for the post entry (kind t3) in the RSS feed
+  // Search for the post entry (kind t3) in the RSS feed.
   const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
   let entryMatch: RegExpExecArray | null;
   let postFound = false;
@@ -1052,43 +1183,42 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   }
 
   if (!postFound) {
-    // Before declaring the post deleted, verify the feed actually covers this
-    // post. Reddit's thread RSS for link-posts or posts with 0 comments may
-    // return a valid <feed> whose <entry> list contains only t1_ comments
-    // (or is empty) — the post itself doesn't appear as a t3_ entry.
-    // In that case the feed's own <link> will contain the postId (Reddit
-    // always puts the thread URL in the feed header), confirming existence.
+    // No t3_ entry in the RSS. This is ambiguous: link-posts and posts
+    // with 0 comments sometimes omit the t3_ entry from the feed.
+    // Removed posts also omit the t3_ entry.
     //
-    // Pattern: <link ... href="https://www.reddit.com/r/sub/comments/POSTID/..."/>
-    const feedLinkMatch = /<link[^>]+href="([^"]+)"/i.exec(postRssText);
-    const feedLink = feedLinkMatch?.[1] ?? "";
-    const postIdLower = parsed.postId.toLowerCase();
+    // We cannot rely on the feed <link> to prove existence because we always
+    // request that specific thread's RSS URL — the feed link will always
+    // contain the postId regardless of whether the post is live or removed.
+    //
+    // Check the feed title for a [removed] signal as a last resort.
+    const feedTitleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(postRssText);
+    const feedTitle = decodeRssContent(feedTitleMatch?.[1] ?? "").trim();
+    if (/\[removed\]|\[deleted\]/i.test(feedTitle)) {
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: RSS feed title shows [removed] — post removed");
+      return {
+        liveStatus: "removed",
+        detailedStatus: "removed_by_mod",
+        statusLabel: "Post removed",
+        reason: "Post is marked [removed] in the RSS feed title.",
+      };
+    }
 
-    if (feedLink.toLowerCase().includes(postIdLower)) {
-      // Feed is for this post — existence confirmed. Check feed-level title
-      // for a [removed] or [deleted] signal.
-      const feedTitleMatch = /<title[^>]*>([^<]*)<\/title>/i.exec(postRssText);
-      const feedTitle = decodeRssContent(feedTitleMatch?.[1] ?? "").trim();
-      if (/\[removed\]|\[deleted\]/i.test(feedTitle)) {
-        logger.info({ postId: parsed.postId }, "recheckRedditLiveness: feed title shows [removed] — post removed");
-        return {
-          liveStatus: "removed",
-          detailedStatus: "removed_by_mod",
-          statusLabel: "Post removed",
-          reason: "Post is marked [removed] in the RSS feed.",
-        };
-      }
-      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post confirmed live via feed header (no t3_ entry — link-post or 0 comments)");
+    // Has t1_ comment entries? If so the post must exist (comments imply a post).
+    const hasComments = postRssText.includes("<id>t1_");
+    if (hasComments) {
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: no t3_ entry but t1_ comments present — post exists");
       return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
     }
 
-    // Feed link doesn't reference this postId — genuinely not found.
-    logger.info({ postId: parsed.postId }, "recheckRedditLiveness: post not found in RSS — likely deleted");
+    // No t3_, no comments, no [removed] in title — truly inconclusive.
+    // Return unknown rather than guessing live/deleted.
+    logger.warn({ postId: parsed.postId }, "recheckRedditLiveness: no t3_ entry and no comments in RSS, HTML inconclusive — unknown");
     return {
-      liveStatus: "deleted",
-      detailedStatus: "not_found",
-      statusLabel: "Post not found",
-      reason: "Post no longer appears in the RSS feed.",
+      liveStatus: "unknown",
+      detailedStatus: "api_unreachable",
+      statusLabel: "Reddit API unreachable",
+      reason: "Could not determine post status from RSS or HTML.",
     };
   }
 

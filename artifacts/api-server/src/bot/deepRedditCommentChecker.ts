@@ -176,17 +176,6 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
       }
     }
 
-    // Fallback: if body extraction failed, do a raw search for the sentinel
-    // strings in the ~5000 chars immediately after the thing div opens. This
-    // catches cases where the usertext-body is unusually far away or the page
-    // structure differs from the expected old.reddit layout.
-    if (body === null) {
-      const rawWindow = html.substring(idx, idx + 5000);
-      if (rawWindow.includes(">[removed]<") || rawWindow.includes(">[deleted]<")) {
-        body = rawWindow.includes(">[removed]<") ? "[removed]" : "[deleted]";
-      }
-    }
-
     // Check the thing div's own class attribute for removal markers.
     // Old.reddit adds 'deleted' to the class of the thing div for author-deleted
     // comments even when data-author fails to parse as "[deleted]". This catches

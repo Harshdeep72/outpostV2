@@ -438,44 +438,56 @@ async function runDeepCheck(
 
   logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
 
-  let [rssHtml, htmlContent, oauthRes] = await Promise.all([
+  // ── Phase 1: fire all sources in parallel ─────────────────────────────────
+  // Python JSON runs alongside OAuth so there is no extra serial hop when
+  // OAuth is not configured (the common case). Proxy HTML+RSS also run at
+  // the same time so every network source starts at t=0.
+  let [rssHtml, htmlContent, oauthRes, pythonJsonRes] = await Promise.all([
     proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null),
     fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId).catch(() => null),
+    fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null),
   ]);
 
-  let pythonRes: { ok: boolean; body: any } | null = null;
-  if (!oauthRes || !oauthRes.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth comment fetch failed/unavailable — trying Python client");
-    pythonRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
+  // Pick the best JSON result: OAuth > Python (prefer whichever actually worked).
+  const pythonRes = pythonJsonRes;
+  const effectiveJsonRes = oauthRes?.ok ? oauthRes : pythonRes;
+  const jsonSource = oauthRes?.ok ? ("oauth" as const) : ("json_proxy" as const);
+
+  if (oauthRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth JSON succeeded");
+  } else if (pythonRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: Python curl_cffi JSON succeeded (OAuth unavailable/failed)");
+  } else {
+    logger.info({ commentId: parsed.commentId }, "Deep check: both OAuth and Python JSON failed — falling back to HTML+RSS");
   }
 
-  const effectiveJsonRes = oauthRes || pythonRes;
-  const jsonSource = oauthRes ? ("oauth" as const) : ("json_proxy" as const);
+  // ── Phase 2: parallel Python fallbacks for any source that proxy missed ───
+  // Both fallbacks fire simultaneously — only one round of Python latency
+  // regardless of how many sources need it.
+  const needPyHtml = !htmlContent;
+  const needPyRss  = !rssHtml;
 
-  if (!htmlContent) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: HTML proxy fetch returned null — trying Python client fallback");
-    const pyHtmlRes = await executePythonRedditClient({
-      url: htmlUrls[0],
-      isJson: false,
-      useProxy: true,
-      timeout: 8,
-    }).catch(() => null);
-    if (pyHtmlRes && pyHtmlRes.ok && typeof pyHtmlRes.body === "string") {
+  if (needPyHtml || needPyRss) {
+    logger.info(
+      { commentId: parsed.commentId, needPyHtml, needPyRss },
+      "Deep check: proxy missed sources — running Python curl_cffi fallbacks in parallel"
+    );
+    const [pyHtmlRes, pyRssRes] = await Promise.all([
+      needPyHtml
+        ? executePythonRedditClient({ url: htmlUrls[0]!, isJson: false, useProxy: true, timeout: 8 }).catch(() => null)
+        : Promise.resolve(null),
+      needPyRss
+        ? executePythonRedditClient({ url: rssUrls[0]!, isJson: false, useProxy: true, timeout: 8 }).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+    if (needPyHtml && pyHtmlRes?.ok && typeof pyHtmlRes.body === "string") {
       htmlContent = pyHtmlRes.body;
+      logger.info({ commentId: parsed.commentId }, "Deep check: Python client supplied HTML");
     }
-  }
-
-  if (!rssHtml) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: RSS proxy fetch returned null — trying Python client fallback");
-    const pyRssRes = await executePythonRedditClient({
-      url: rssUrls[0],
-      isJson: false,
-      useProxy: true,
-      timeout: 8,
-    }).catch(() => null);
-    if (pyRssRes && pyRssRes.ok && typeof pyRssRes.body === "string") {
+    if (needPyRss && pyRssRes?.ok && typeof pyRssRes.body === "string") {
       rssHtml = pyRssRes.body;
+      logger.info({ commentId: parsed.commentId }, "Deep check: Python client supplied RSS");
     }
   }
 

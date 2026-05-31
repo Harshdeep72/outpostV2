@@ -631,174 +631,84 @@ export async function validateRedditProof(
       };
     }
 
-    // 2. Author and Comment Check
+    // 2. Post author check (comment submissions are handled by deepCheckComment
+    //    before this point and never reach the RSS fallback path).
     let authorFound = "";
-    let targetCommentText = "";
-    
-    if (parsed.commentId) {
-      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-      let match;
-      while ((match = entryRegex.exec(data)) !== null) {
-        const entryContent = match[1];
-        if (entryContent.includes(`<id>t1_${parsed.commentId}</id>`) || entryContent.includes(`<id>t1_${parsed.commentId.toLowerCase()}</id>`)) {
-          const authMatch = /<author>\s*<name>\/u\/([A-Za-z0-9_-]+)<\/name>/i.exec(entryContent);
-          if (authMatch) {
-            authorFound = authMatch[1].toLowerCase();
-            targetCommentText = entryContent;
-            break;
-          }
+    let targetPostEntryContent = "";
+
+    // Try the post's own RSS feed first.
+    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+    let match;
+    while ((match = entryRegex.exec(data)) !== null) {
+      const entryContent = match[1];
+      if (entryContent.includes(`<id>t3_${parsed.postId}</id>`) || entryContent.includes(`<id>t3_${parsed.postId.toLowerCase()}</id>`)) {
+        const authMatch = /<author>\s*<name>\/u\/([A-Za-z0-9_-]+)<\/name>/i.exec(entryContent);
+        if (authMatch) {
+          authorFound = authMatch[1].toLowerCase();
+          targetPostEntryContent = entryContent;
+          break;
         }
       }
+    }
 
-      if (!authorFound) {
-        logger.info({ proofUrl }, "Comment not found in Post RSS feed — attempting User RSS feed fallback");
-        for (const user of expectedLowerList) {
-          try {
-            const userRssUrl = `https://www.reddit.com/user/${user}/.rss`;
-            const rssBody = await fetchDirectText(userRssUrl, 6000);
-            if (rssBody && rssBody.includes("<feed")) {
-              const uEntries = rssBody.split("<entry>");
-              for (const uEntry of uEntries) {
-                if (uEntry.includes(`<id>t1_${parsed.commentId}</id>`) || uEntry.includes(`<id>t1_${parsed.commentId.toLowerCase()}</id>`)) {
-                  authorFound = user;
-                  targetCommentText = uEntry;
-                  logger.info({ user, proofUrl }, "Comment found in User RSS feed!");
-                  break;
-                }
+    // Fallback: check the user's own RSS feed.
+    if (!authorFound) {
+      for (const user of expectedLowerList) {
+        try {
+          const userRssUrl = `https://www.reddit.com/user/${user}/.rss`;
+          const userRssBody = await fetchDirectText(userRssUrl, 6000);
+          if (userRssBody && userRssBody.includes("<feed")) {
+            const uEntries = userRssBody.split("<entry>");
+            for (const uEntry of uEntries) {
+              if (uEntry.includes(`<id>t3_${parsed.postId}</id>`) || uEntry.includes(`<id>t3_${parsed.postId.toLowerCase()}</id>`)) {
+                authorFound = user;
+                targetPostEntryContent = uEntry;
+                logger.info({ user, proofUrl }, "Post found in User RSS feed!");
+                break;
               }
             }
-          } catch (err) {
-            logger.warn({ err, user }, "User RSS check failed");
           }
-          if (authorFound) break;
+        } catch (err) {
+          logger.warn({ err, user }, "User RSS check failed");
         }
+        if (authorFound) break;
       }
+    }
 
-      if (!authorFound) {
-        failures.push(`Comment ID "${parsed.commentId}" not found on the post — it was likely removed by Reddit/Automod.`);
-        return {
-          passed: false, autoApproved: false, status: "comment_missing",
-          failures, subredditFound, postLive: true,
-          ...meta("comment_missing"),
-        };
-      }
+    if (!authorFound) {
+      failures.push("Could not determine the author of the post (post not found in post or user feed).");
+      return {
+        passed: false, autoApproved: false, status: "author_mismatch",
+        failures, subredditFound, postLive: true,
+        ...meta("author_mismatch"),
+      };
+    }
 
-      // ── RSS False-Positive Guard (old.reddit HTML cross-check) ────────────────
-      // Reddit's RSS feeds cache removed comments and continue serving their XML
-      // entries even after mods delete or spam-filter them. We must cross-verify
-      // with old.reddit.com HTML, which is highly rate-limit-resistant and
-      // accurately reflects the real public visibility of the comment.
-      const htmlVisible = await isCommentVisibleOnOldReddit(
-        parsed.subreddit,
-        parsed.postId,
-        parsed.commentId,
-        parsed.isUserPost
-      );
-      if (htmlVisible === false) {
-        failures.push(`Comment "${parsed.commentId}" is no longer visible on Reddit — it was likely removed by a moderator or Reddit's spam filter.`);
-        return {
-          passed: false, autoApproved: false, status: "comment_missing",
-          failures, subredditFound, postLive: true,
-          ...meta("comment_missing"),
-        };
-      }
-      if (htmlVisible === null) {
-        logger.warn({ proofUrl }, "old.reddit HTML check inconclusive — proceeding with RSS result");
-      }
-
-      // ── Freshness check (RSS <published>) ─────────────────────────────────────
-      // A comment must have been posted AFTER the task was created (with a
-      // grace period). This blocks users from recycling old comments they
-      // left on the right post months ago.
-      // We extract the <published> date from the specific comment's RSS <entry>.
-      if (options?.taskCreatedAt && targetCommentText) {
-        const pubMatch = /<(?:published|updated)>([\s\S]*?)<\/(?:published|updated)>/i.exec(targetCommentText);
-        if (pubMatch) {
-          const commentDate = new Date(pubMatch[1].trim());
-          if (isFinite(commentDate.getTime())) {
-            const earliest = options.taskCreatedAt.getTime() - TASK_GRACE_MS;
-            if (commentDate.getTime() < earliest) {
-              failures.push(
-                `Your comment was posted before this task was created — recycled old comments are not accepted. ` +
-                `Comment date: ${commentDate.toUTCString()}. Task created: ${options.taskCreatedAt.toUTCString()}.`
-              );
-              return {
-                passed: false, autoApproved: false, status: "stale_proof",
-                failures, authorFound, subredditFound, postLive: true,
-                ...meta("stale_proof"),
-              };
-            }
-          }
+    // ── RSS Post Removal Guard ──────────────────────────────────────────────────
+    // Reddit's RSS feeds continue to serve removed/deleted posts for some time
+    // after removal. Check the <content> of the matched entry for the standard
+    // "[removed]" / "[deleted]" selftext markers that Reddit injects on removal.
+    // This mirrors the classifyPost() check applied on the JSON path (line ~865).
+    if (targetPostEntryContent) {
+      const rssContentMatch = /<content[^>]*>([\s\S]*?)<\/content>/i.exec(targetPostEntryContent);
+      if (rssContentMatch) {
+        const plain = decodeRssContent(rssContentMatch[1]).trim();
+        if (/^\[removed\]$/i.test(plain)) {
+          failures.push("Reddit post has been **removed by moderators** (detected via RSS feed).");
+          return {
+            passed: false, autoApproved: false, status: "removed_by_mod",
+            failures, subredditFound, postLive: false,
+            ...meta("removed_by_mod"),
+          };
         }
-      }
-
-      // ── Minimum comment length (RSS <content>) ────────────────────────────────
-      // Blocks trivial spam comments ("Nice!", "👍", single words).
-      // We decode HTML entities and strip tags from the RSS <content> field.
-      const minChars = options?.minCommentChars ?? MIN_COMMENT_CHARS;
-      if (minChars > 0 && targetCommentText) {
-        const contentMatch = /<content[^>]*>([\s\S]*?)<\/content>/i.exec(targetCommentText);
-        if (contentMatch) {
-          const plain = decodeRssContent(contentMatch[1]);
-          if (plain.length < minChars) {
-            failures.push(
-              `Comment is too short (${plain.length} characters). ` +
-              `This task requires a genuine comment of at least ${minChars} characters.`
-            );
-            return {
-              passed: false, autoApproved: false, status: "comment_too_short",
-              failures, authorFound, subredditFound, postLive: true,
-              ...meta("comment_too_short"),
-            };
-          }
+        if (/^\[deleted\]$/i.test(plain)) {
+          failures.push("Reddit post has been **deleted** (detected via RSS feed).");
+          return {
+            passed: false, autoApproved: false, status: "deleted_by_author",
+            failures, subredditFound, postLive: false,
+            ...meta("deleted_by_author"),
+          };
         }
-      }
-    } else {
-      // 1. Try to extract the post author directly from the post's RSS feed (data).
-      // The post entry has id matching `t3_${parsed.postId}`.
-      const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-      let match;
-      while ((match = entryRegex.exec(data)) !== null) {
-        const entryContent = match[1];
-        if (entryContent.includes(`<id>t3_${parsed.postId}</id>`) || entryContent.includes(`<id>t3_${parsed.postId.toLowerCase()}</id>`)) {
-          const authMatch = /<author>\s*<name>\/u\/([A-Za-z0-9_-]+)<\/name>/i.exec(entryContent);
-          if (authMatch) {
-            authorFound = authMatch[1].toLowerCase();
-            break;
-          }
-        }
-      }
-
-      // 2. Fallback to User RSS feed if we couldn't find it in the post feed
-      if (!authorFound) {
-        for (const user of expectedLowerList) {
-          try {
-            const userRssUrl = `https://www.reddit.com/user/${user}/.rss`;
-            const rssBody = await fetchDirectText(userRssUrl, 6000);
-            if (rssBody && rssBody.includes("<feed")) {
-              const uEntries = rssBody.split("<entry>");
-              for (const uEntry of uEntries) {
-                if (uEntry.includes(`<id>t3_${parsed.postId}</id>`) || uEntry.includes(`<id>t3_${parsed.postId.toLowerCase()}</id>`)) {
-                  authorFound = user;
-                  logger.info({ user, proofUrl }, "Post found in User RSS feed!");
-                  break;
-                }
-              }
-            }
-          } catch (err) {
-            logger.warn({ err, user }, "User RSS check failed");
-          }
-          if (authorFound) break;
-        }
-      }
-
-      if (!authorFound) {
-        failures.push("Could not determine the author of the post (post not found in post or user feed).");
-        return {
-          passed: false, autoApproved: false, status: "author_mismatch",
-          failures, subredditFound, postLive: true,
-          ...meta("author_mismatch"),
-        };
       }
     }
 

@@ -1,6 +1,7 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
+import { executePythonRedditClient } from "./pythonClient.js";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -12,7 +13,19 @@ const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
  */
 async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | null> {
   try {
-    const text = await proxyFetchText([url], { timeoutMs, acceptHeader: "application/xml, text/xml, text/html, */*" });
+    let text = await proxyFetchText([url], { timeoutMs, acceptHeader: "application/xml, text/xml, text/html, */*" });
+    if (!text) {
+      logger.info({ url }, "fetchDirectText: proxy fetch returned null, trying Python client fallback");
+      const pyRes = await executePythonRedditClient({
+        url,
+        isJson: false,
+        useProxy: true,
+        timeout: Math.floor(timeoutMs / 1000),
+      }).catch(() => null);
+      if (pyRes && pyRes.ok && typeof pyRes.body === "string") {
+        text = pyRes.body;
+      }
+    }
     return text;
   } catch (err) {
     logger.warn({ url, err }, "fetchDirectText proxy fetch unexpected error");
@@ -31,6 +44,11 @@ async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | 
  * Returns the resolved URL string, or null on failure.
  */
 export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Promise<string | null> {
+  const cookieHeaders: Record<string, string> = {};
+  if (process.env.REDDIT_SESSION_COOKIE) {
+    cookieHeaders["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+  }
+
   // ── Strategy 1: HEAD + redirect:manual (fastest, reads Location header) ───
   // Works when the server receives a proper 301/302 from Reddit's CDN.
   try {
@@ -39,7 +57,7 @@ export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Prom
     try {
       const res = await undiciFetch(shareUrl, {
         method: "HEAD",
-        headers: { "User-Agent": DEFAULT_UA },
+        headers: { "User-Agent": DEFAULT_UA, ...cookieHeaders },
         signal: ctrl1.signal,
         redirect: "manual",
       });
@@ -71,6 +89,7 @@ export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Prom
         headers: {
           "User-Agent": DEFAULT_UA,
           "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+          ...cookieHeaders,
         },
         signal: ctrl2.signal,
         redirect: "follow",
@@ -790,177 +809,14 @@ export async function validateRedditProof(
     };
   }
 
-  data = result.body;
-  const postListing = Array.isArray(data) ? data[0] : null;
-  const postData = postListing?.data?.children?.[0]?.data;
-
-  if (!postData) {
-    return {
-      passed: false, autoApproved: false, status: "not_found",
-      failures: ["Could not retrieve post data from Reddit."],
-      ...meta("not_found"),
-    };
-  }
-
-  const subredditFound = (postData.subreddit ?? "").toLowerCase();
-  if (taskSubreddit && subredditFound !== taskSubreddit) {
-    failures.push(`Post is in r/${subredditFound} but task requires r/${taskSubreddit}.`);
-    return {
-      passed: false, autoApproved: false, status: "wrong_subreddit",
-      failures, subredditFound, postLive: false,
-      ...meta("wrong_subreddit"),
-    };
-  }
-
-  const upvotes: number = typeof postData.ups === "number" ? postData.ups : (postData.score ?? 0);
-  const numComments: number = postData.num_comments ?? 0;
-  const ageMinutes = postData.created_utc
-    ? Math.floor((Date.now() / 1000 - postData.created_utc) / 60)
-    : undefined;
-
-  // Post-level removal/deletion check
-  const postState = classifyPost(postData);
-  if (postState) {
-    const m = STATUS_META[postState];
-    failures.push(`Reddit post is **${m.label.toLowerCase()}**.`);
-    return {
-      passed: false, autoApproved: false, status: postState,
-      failures, subredditFound, postLive: false, upvotes, numComments, ageMinutes,
-      ...meta(postState),
-    };
-  }
-
-  if (postData.locked === true) {
-    failures.push("Reddit post is locked — comments disabled.");
-    return {
-      passed: false, autoApproved: false, status: "locked",
-      failures, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-      ...meta("locked"),
-    };
-  }
-
-  let authorFound = "";
-  let commentUpvotes: number | undefined;
-  let commentAgeMinutes: number | undefined;
-
-  if (parsed.commentId) {
-    const commentsListing = Array.isArray(data) ? data[1] : null;
-    const allComments: any[] = [];
-
-    function flattenComments(children: any[]) {
-      for (const child of children ?? []) {
-        if (child.kind === "t1") {
-          allComments.push(child.data);
-          if (child.data.replies?.data?.children) {
-            flattenComments(child.data.replies.data.children);
-          }
-        }
-      }
-    }
-
-    flattenComments(commentsListing?.data?.children ?? []);
-    const targetComment = allComments.find((c) => c.id === parsed.commentId);
-
-    if (!targetComment) {
-      failures.push(`Comment ID "${parsed.commentId}" not found on the post — it was likely removed by Reddit/Automod.`);
-      return {
-        passed: false, autoApproved: false, status: "comment_missing",
-        failures, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-        ...meta("comment_missing"),
-      };
-    }
-
-    const commentState = classifyComment(targetComment);
-    if (commentState) {
-      const m = STATUS_META[commentState];
-      failures.push(`Your comment is **${m.label.toLowerCase()}**.`);
-      const status: SubmissionStatus = commentState === "deleted_by_author" ? "comment_deleted" : commentState;
-      return {
-        passed: false, autoApproved: false, status,
-        failures, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-        ...meta(status),
-      };
-    }
-
-    authorFound = (targetComment.author ?? "").toLowerCase();
-    commentUpvotes = typeof targetComment.ups === "number" ? targetComment.ups : (targetComment.score ?? 0);
-    if (targetComment.created_utc) {
-      commentAgeMinutes = Math.floor((Date.now() / 1000 - targetComment.created_utc) / 60);
-    }
-
-    // ── JSON path: freshness check ────────────────────────────────────────────
-    if (options?.taskCreatedAt && targetComment.created_utc) {
-      const commentMs = targetComment.created_utc * 1000;
-      const earliest = options.taskCreatedAt.getTime() - TASK_GRACE_MS;
-      if (commentMs < earliest) {
-        failures.push(
-          `Your comment was posted before this task was created — recycled old comments are not accepted. ` +
-          `Comment date: ${new Date(commentMs).toUTCString()}. Task created: ${options.taskCreatedAt.toUTCString()}.`
-        );
-        return {
-          passed: false, autoApproved: false, status: "stale_proof",
-          failures, authorFound, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-          ...meta("stale_proof"),
-        };
-      }
-    }
-
-    // ── JSON path: minimum comment length ────────────────────────────────────
-    const minCharsJson = options?.minCommentChars ?? MIN_COMMENT_CHARS;
-    if (minCharsJson > 0) {
-      const body = (targetComment.body ?? "").replace(/\s+/g, " ").trim();
-      if (body.length < minCharsJson) {
-        failures.push(
-          `Comment is too short (${body.length} characters). ` +
-          `This task requires a genuine comment of at least ${minCharsJson} characters.`
-        );
-        return {
-          passed: false, autoApproved: false, status: "comment_too_short",
-          failures, authorFound, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-          ...meta("comment_too_short"),
-        };
-      }
-    }
-  } else {
-    authorFound = (postData.author ?? "").toLowerCase();
-  }
-
-  if (authorFound && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
-    const expectedDisplay = expectedLowerList.length === 1
-      ? `u/${expectedLowerList[0]}`
-      : expectedLowerList.map((u) => `u/${u}`).join(" or ");
-    failures.push(`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`);
-    return {
-      passed: false, autoApproved: false, status: "author_mismatch",
-      failures, authorFound, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-      ...meta("author_mismatch"),
-    };
-  }
-  if (!authorFound) {
-    failures.push("Could not determine the author of the post/comment.");
-    return {
-      passed: false, autoApproved: false, status: "author_mismatch",
-      failures, subredditFound, postLive: true, upvotes, numComments, ageMinutes,
-      ...meta("author_mismatch"),
-    };
-  }
-
+  // Unreachable — the rssBody check above always returns early if RSS fails.
   return {
-    passed: true,
-    autoApproved: true,
-    status: "live",
-    failures: [],
-    authorFound,
-    subredditFound,
-    postLive: true,
-    upvotes: parsed.commentId ? commentUpvotes : upvotes,
-    numComments,
-    ageMinutes: parsed.commentId ? commentAgeMinutes : ageMinutes,
-    title: postData?.title ?? undefined,
-    createdAt: postData?.created_utc ? new Date(postData.created_utc * 1000).toISOString() : undefined,
-    ...meta("live"),
+    passed: false, autoApproved: false, status: "api_unreachable",
+    failures: ["Reddit API unreachable — queued for manual review."],
+    ...meta("api_unreachable"),
   };
 }
+
 
 /**
  * Lightweight liveness re-check for an existing submission. Returns one of:

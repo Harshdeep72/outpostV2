@@ -3,6 +3,7 @@ import { proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { commentValidationCache } from "./cache.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
+import { executePythonRedditClient } from "./pythonClient.js";
 
 const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
 const TASK_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -119,6 +120,31 @@ async function fetchCommentThreadViaOAuth(
     logger.warn({ err }, "Reddit OAuth comment thread fetch error");
     return null;
   }
+}
+
+async function fetchCommentThreadViaPythonClient(
+  sub: string,
+  postId: string,
+  commentId: string
+): Promise<{ ok: boolean; body: any } | null> {
+  try {
+    const url = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?context=3&raw_json=1`;
+    const visitFirst = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}/`;
+
+    const result = await executePythonRedditClient({
+      url,
+      visitFirst,
+      isJson: true,
+      useProxy: true,
+    });
+
+    if (result.ok && result.body) {
+      return { ok: true, body: result.body };
+    }
+  } catch (err) {
+    logger.warn({ err, sub, postId, commentId }, "fetchCommentThreadViaPythonClient failed");
+  }
+  return null;
 }
 
 export interface ParsedHtmlComment {
@@ -412,14 +438,46 @@ async function runDeepCheck(
 
   logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
 
-  const [rssHtml, htmlContent, oauthRes] = await Promise.all([
+  let [rssHtml, htmlContent, oauthRes] = await Promise.all([
     proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
     proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null),
     fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId).catch(() => null),
   ]);
 
-  const effectiveJsonRes = oauthRes;
-  const jsonSource = "oauth" as const;
+  let pythonRes: { ok: boolean; body: any } | null = null;
+  if (!oauthRes || !oauthRes.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth comment fetch failed/unavailable — trying Python client");
+    pythonRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
+  }
+
+  const effectiveJsonRes = oauthRes || pythonRes;
+  const jsonSource = oauthRes ? ("oauth" as const) : ("json_proxy" as const);
+
+  if (!htmlContent) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: HTML proxy fetch returned null — trying Python client fallback");
+    const pyHtmlRes = await executePythonRedditClient({
+      url: htmlUrls[0],
+      isJson: false,
+      useProxy: true,
+      timeout: 8,
+    }).catch(() => null);
+    if (pyHtmlRes && pyHtmlRes.ok && typeof pyHtmlRes.body === "string") {
+      htmlContent = pyHtmlRes.body;
+    }
+  }
+
+  if (!rssHtml) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: RSS proxy fetch returned null — trying Python client fallback");
+    const pyRssRes = await executePythonRedditClient({
+      url: rssUrls[0],
+      isJson: false,
+      useProxy: true,
+      timeout: 8,
+    }).catch(() => null);
+    if (pyRssRes && pyRssRes.ok && typeof pyRssRes.body === "string") {
+      rssHtml = pyRssRes.body;
+    }
+  }
 
   let authorFound: string | null = null;
   let subredditFound: string | null = null;

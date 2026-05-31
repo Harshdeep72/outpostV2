@@ -1,5 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText, proxyFetchJson } from "./proxy.js";
+import { executePythonRedditClient } from "./pythonClient.js";
 
 export interface RedditProfile {
   name: string;
@@ -449,16 +450,21 @@ async function fetchViaNewRedditHtml(name: string): Promise<RedditFetchResult | 
     const { fetch: undiciFetch, Agent } = await import("undici");
     const agent = new Agent({ connect: { timeout: 6_000 }, bodyTimeout: 14_000, headersTimeout: 14_000 });
 
+    const headers: Record<string, string> = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+    };
+    if (process.env.REDDIT_SESSION_COOKIE) {
+      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    }
+
     const res = await undiciFetch(url, {
       dispatcher: agent,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-      },
+      headers,
     });
 
     if (res.status === 404) return { ok: false, notFound: true };
@@ -672,12 +678,66 @@ async function fetchViaHtmlScrape(name: string): Promise<RedditFetchResult | nul
 }
 
 
+async function fetchViaPythonClient(name: string): Promise<RedditFetchResult | null> {
+  try {
+    const url = `https://www.reddit.com/user/${name}/about.json?raw_json=1`;
+    const visitFirst = `https://www.reddit.com/user/${name}/`;
+
+    const result = await executePythonRedditClient({
+      url,
+      visitFirst,
+      isJson: true,
+      useProxy: true,
+    });
+
+    if (!result.ok) return null;
+
+    const body = result.body;
+    if (body?.kind === "t2" && body?.data?.name === undefined) return null;
+
+    if (body?.error === 404 || body?.message === "Not Found") return { ok: false, notFound: true };
+
+    const d = body?.data ?? {};
+    if (!d.name) return null;
+    if (d.is_suspended || d.is_banned) return { ok: false, notFound: true, suspended: true };
+
+    const createdUtc: number = typeof d.created_utc === "number" ? d.created_utc : 0;
+    const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+
+    logger.info({ name: d.name, via: result.via }, "Reddit profile via Python curl_cffi client");
+    return {
+      ok: true,
+      profile: {
+        name: d.name as string,
+        createdUtc,
+        linkKarma:    (d.link_karma    as number) ?? 0,
+        commentKarma: (d.comment_karma as number) ?? 0,
+        totalKarma:   (d.total_karma   as number) ?? (((d.link_karma as number) ?? 0) + ((d.comment_karma as number) ?? 0)),
+        iconImg:      stripQuery(d.icon_img as string | undefined),
+        accountAgeDays: ageDays,
+        karmaVerified: true,
+      },
+    };
+  } catch (err) {
+    logger.warn({ err, name }, "fetchViaPythonClient failed");
+  }
+  return null;
+}
+
+
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
   // ── 1. Try OAuth (authenticated, no IP block, future-proof) ───────────────
   const oauthResult = await fetchViaOAuth(name);
   if (oauthResult !== null) {
     logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth");
     return oauthResult;
+  }
+
+  // ── 1b. Try Impersonated Python curl_cffi with Cookie (bypasses Cloudflare) ───
+  const pythonResult = await fetchViaPythonClient(name);
+  if (pythonResult !== null) {
+    logger.info({ name, ok: pythonResult.ok }, "Reddit profile via Python curl_cffi client");
+    return pythonResult;
   }
 
   // ── 2. Public Reddit-frontend proxies (Teddit / Redlib) ────────────────────
@@ -753,7 +813,11 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
       ...rssUrls.map(async (url): Promise<string | null> => {
         try {
           const agent = new Agent({ connect: { timeout: 4_000 }, bodyTimeout: 6_000, headersTimeout: 6_000 });
-          const res = await undiciFetch(url, { dispatcher: agent, headers: { "User-Agent": UA, "Accept": "text/xml, */*" } });
+          const headers: Record<string, string> = { "User-Agent": UA, "Accept": "text/xml, */*" };
+          if (process.env.REDDIT_SESSION_COOKIE) {
+            headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+          }
+          const res = await undiciFetch(url, { dispatcher: agent, headers });
           if (!res.ok) return null;
           const text = await res.text();
           return text.includes("<feed") ? text : null;
@@ -764,7 +828,11 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
         proxyList.slice(0, 3).map(async (proxyUrl): Promise<string | null> => {
           try {
             const agent = new ProxyAgent({ uri: proxyUrl, connectTimeout: 4_000, bodyTimeout: 6_000, headersTimeout: 6_000 });
-            const res = await undiciFetch(url, { dispatcher: agent, headers: { "User-Agent": UA, "Accept": "text/xml, */*" } });
+            const headers: Record<string, string> = { "User-Agent": UA, "Accept": "text/xml, */*" };
+            if (process.env.REDDIT_SESSION_COOKIE) {
+              headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+            }
+            const res = await undiciFetch(url, { dispatcher: agent, headers });
             if (!res.ok) return null;
             const text = await res.text();
             return text.includes("<feed") ? text : null;

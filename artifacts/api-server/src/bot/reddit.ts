@@ -177,6 +177,90 @@ async function fetchViaOAuth(name: string): Promise<RedditFetchResult | null> {
 
 
 /**
+ * Fetch Reddit profile data from the Arctic Shift public archive API.
+ *
+ * Arctic Shift (https://arctic-shift.photon-reddit.com) is a Reddit data archive
+ * that indexes posts and comments. It is publicly accessible without authentication.
+ *
+ * Strategy:
+ *   - Sum all archived post + comment scores as a karma FLOOR (real karma ≥ this).
+ *   - If the floor meets the minimum requirement, karmaVerified=true → auto-approve.
+ *   - If below, karmaVerified=false → manual review (but with real score data as context).
+ *   - The oldest archived created_utc gives an account age lower bound.
+ *
+ * Returns null only if the archive has zero entries for this user (new/unknown user).
+ */
+async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | null> {
+  const BASE = "https://arctic-shift.photon-reddit.com/api";
+  const fields = "score,created_utc";
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 6_000 }, bodyTimeout: 12_000, headersTimeout: 12_000 });
+    const headers = { "User-Agent": "OutpostBot/1.0", "Accept": "application/json" };
+
+    const [postsRes, commentsRes] = await Promise.all([
+      undiciFetch(`${BASE}/posts/search?author=${encodeURIComponent(name)}&limit=100&fields=${fields}`, { dispatcher: agent, headers }),
+      undiciFetch(`${BASE}/comments/search?author=${encodeURIComponent(name)}&limit=100&fields=${fields}`, { dispatcher: agent, headers }),
+    ]);
+
+    if (!postsRes.ok || !commentsRes.ok) {
+      logger.warn({ name, postStatus: postsRes.status, commentStatus: commentsRes.status }, "Arctic Shift API error");
+      return null;
+    }
+
+    const [postsJson, commentsJson] = await Promise.all([
+      postsRes.json() as Promise<{ data?: Array<{ score?: number; created_utc?: number }> }>,
+      commentsRes.json() as Promise<{ data?: Array<{ score?: number; created_utc?: number }> }>,
+    ]);
+
+    const posts    = postsJson.data    ?? [];
+    const comments = commentsJson.data ?? [];
+    const all      = [...posts, ...comments];
+
+    if (all.length === 0) {
+      logger.info({ name }, "Arctic Shift: no archived entries for user — skipping");
+      return null;
+    }
+
+    // Karma floor: sum of all positive scores (archive is incomplete, so this underestimates)
+    const linkKarma    = posts.reduce((s, p)    => s + Math.max(0, p.score    ?? 0), 0);
+    const commentKarma = comments.reduce((s, c) => s + Math.max(0, c.score    ?? 0), 0);
+    const totalKarma   = linkKarma + commentKarma;
+
+    // Account age: oldest archived created_utc is a confirmed lower bound
+    const allUtcs   = all.map(i => i.created_utc).filter((v): v is number => typeof v === "number" && v > 0);
+    const oldestUtc = allUtcs.length > 0 ? Math.min(...allUtcs) : 0;
+    const ageDays   = oldestUtc ? Math.floor((Date.now() / 1000 - oldestUtc) / 86400) : 0;
+
+    logger.info(
+      { name, posts: posts.length, comments: comments.length, totalKarma, ageDays },
+      "Reddit profile via Arctic Shift archive"
+    );
+
+    return {
+      ok: true,
+      profile: {
+        name,
+        createdUtc: oldestUtc,
+        linkKarma,
+        commentKarma,
+        totalKarma,
+        iconImg: undefined,
+        accountAgeDays: ageDays,
+        // karmaVerified=true only when the archive floor already meets the requirement.
+        // If below the threshold the real karma may still qualify — manual review decides.
+        karmaVerified: totalKarma >= 100,
+      },
+    };
+  } catch (err) {
+    logger.warn({ err, name }, "fetchViaArcticShift error");
+    return null;
+  }
+}
+
+
+/**
  * Scrape old.reddit.com/user/{name}/about HTML to extract karma and account age.
  *
  * old.reddit.com user profile pages are still publicly accessible and contain
@@ -318,6 +402,7 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
   // ── 2. Scrape old.reddit.com user profile HTML (karma + age, no auth needed)
   // old.reddit HTML pages are still publicly accessible and contain karma data
   // even though the unauthenticated JSON API has been deprecated.
+  // Works when the proxy pool contains residential (non-datacenter) proxies.
   logger.info({ name }, "OAuth not configured — trying old.reddit HTML scrape via proxies");
   const htmlResult = await fetchViaHtmlScrape(name);
   if (htmlResult !== null) {
@@ -325,9 +410,21 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     return htmlResult;
   }
 
-  // ── 3. Last resort: user RSS via proxies (no karma, triggers manual review) ─
+  // ── 3. Arctic Shift public archive API (no auth, no proxy needed) ──────────
+  // arctic-shift.photon-reddit.com indexes Reddit posts/comments publicly.
+  // Sums archived scores as a karma floor: if ≥ 100 → auto-approve; if below →
+  // manual review (real karma may be higher than archived floor).
+  // Also gives a confirmed account age lower bound from the oldest archived post.
+  logger.info({ name }, "HTML scrape failed — trying Arctic Shift archive");
+  const arcticResult = await fetchViaArcticShift(name);
+  if (arcticResult !== null) {
+    logger.info({ name, ok: arcticResult.ok }, "Reddit profile via Arctic Shift archive");
+    return arcticResult;
+  }
+
+  // ── 4. Last resort: user RSS via proxies (no karma, triggers manual review) ─
   // RSS feeds are still available but do NOT contain karma data.
-  logger.info({ name }, "HTML scrape failed — falling back to user RSS (no karma data)");
+  logger.info({ name }, "Arctic Shift found nothing — falling back to user RSS (no karma data)");
 
   const rssUrls = [
     `https://www.reddit.com/user/${name}/.rss`,

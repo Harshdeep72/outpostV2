@@ -12,6 +12,7 @@ import { invalidateUser } from "../cache.js";
 import { makeEmbed, formatMoney, hasAdminRole, hasModRole } from "../util.js";
 import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
+import { checkSubmissionNow } from "../redditLivenessChecker.js";
 
 export async function handleSetupCommand(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
@@ -521,4 +522,91 @@ export async function handleNotifyWalletMigration(interaction: ChatInputCommandI
   });
 
   logger.info({ sent, failed, total, sender: interaction.user.id }, "notifywalletmigration completed");
+}
+
+export async function handleCheckSubmission(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can use `/checksubmission`.")],
+    });
+  }
+
+  const submissionId = interaction.options.getInteger("id", true);
+
+  // Show a "checking…" state immediately while the Reddit fetch runs.
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.WARNING)
+        .setTitle("🔍 Checking submission…")
+        .setDescription(`Fetching Reddit liveness for submission **#${submissionId}**. This takes a few seconds.`),
+    ],
+  });
+
+  let result;
+  try {
+    result = await checkSubmissionNow(submissionId);
+  } catch (err) {
+    logger.error({ err, submissionId }, "handleCheckSubmission: checkSubmissionNow threw");
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Unexpected error while checking submission #${submissionId}.`)],
+    });
+  }
+
+  // ── Error cases ────────────────────────────────────────────────────────────
+  if (result.errorMessage) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ ${result.errorMessage}`)],
+    });
+  }
+
+  // ── Build result embed ─────────────────────────────────────────────────────
+  const statusEmoji: Record<string, string> = {
+    live: "✅", removed: "🛡️", deleted: "🗑️",
+  };
+  const statusColor: Record<string, number> = {
+    live: COLORS.SUCCESS, removed: COLORS.DANGER, deleted: COLORS.DANGER,
+  };
+
+  const currentStatus = result.newStatus ?? result.previousStatus ?? "unknown";
+  const color = statusColor[currentStatus] ?? COLORS.WARNING;
+  const emoji = statusEmoji[currentStatus] ?? "❔";
+
+  const lines: string[] = [];
+
+  if (result.statusChanged) {
+    lines.push(`Status changed: **${result.previousStatus}** → **${currentStatus}**`);
+  } else {
+    lines.push(`Status unchanged: **${currentStatus}**`);
+  }
+
+  if (result.reason) lines.push(`Reason: ${result.reason}`);
+
+  if (result.reversalTriggered) {
+    lines.push(
+      "",
+      "⏳ **Reversal in progress** — running 45-second confirmation check.",
+      "If confirmed removed, the payout will be clawed back and a notice posted to task-logs."
+    );
+  } else if (
+    (currentStatus === "removed" || currentStatus === "deleted") &&
+    !result.isReversible
+  ) {
+    lines.push("", "ℹ️ Payout already processed or submission already reversed — no financial action taken.");
+  }
+
+  const embed = makeEmbed(color)
+    .setTitle(`${emoji} Submission #${submissionId} — ${currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1)}`)
+    .setDescription(lines.join("\n"));
+
+  if (result.proofLink) {
+    embed.addFields({ name: "Proof", value: `[Open Reddit post](${result.proofLink})`, inline: false });
+  }
+
+  embed.setFooter({ text: `Checked by ${interaction.user.tag} • ${new Date().toUTCString()}` });
+
+  return interaction.editReply({ embeds: [embed] });
 }

@@ -337,6 +337,16 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     )
     .addStringOption((o) => o.setName("reason").setDescription("Reason (shown to user in DM)"));
 
+  const checksubmission = new SlashCommandBuilder()
+    .setName("checksubmission")
+    .setDescription("Manually re-check a submission's Reddit liveness right now (mod/admin only)")
+    .addIntegerOption((o) =>
+      o.setName("id")
+        .setDescription("Submission ID to check (the number shown in task-logs, e.g. 1255)")
+        .setRequired(true)
+        .setMinValue(1)
+    );
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -344,6 +354,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
+    checksubmission,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

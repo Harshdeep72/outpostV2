@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetWallet, handleSetPaypal } from "./handlers/wallet.js";
-import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration } from "./handlers/admin.js";
+import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission } from "./handlers/admin.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
 import { handleWdApprove, handleWdCreatorPay, handleWdReject, handleWdRejectReason } from "./handlers/withdrawals.js";
 import { handleBulkTaskCommand, handleBulkTaskCsvModal } from "./handlers/bulktask.js";
@@ -84,6 +84,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "testurl") return timed(name, () => handleTestUrlCommand(interaction));
         if (name === "addbalance") return timed(name, () => handleAddBalance(interaction));
         if (name === "removebalance") return timed(name, () => handleRemoveBalance(interaction));
+        if (name === "checksubmission") return timed(name, () => handleCheckSubmission(interaction));
         logger.warn({ name }, "Unknown command");
         return;
       }

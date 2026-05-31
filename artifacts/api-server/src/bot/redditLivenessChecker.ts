@@ -479,6 +479,141 @@ export function scheduleEarlyLivenessCheck(args: EarlyCheckArgs): void {
   logger.info({ submissionId: args.submissionId, delayMs: EARLY_CHECK_DELAY_MS }, "Early liveness check: scheduled");
 }
 
+// ---------------------------------------------------------------------------
+// On-demand single-submission check — called by /checksubmission command.
+// ---------------------------------------------------------------------------
+
+export interface SubmissionCheckResult {
+  found: boolean;
+  submissionId: number;
+  proofLink: string | null;
+  previousStatus: LiveStatus | null;
+  newStatus: LiveStatus | null;
+  statusChanged: boolean;
+  isReversible: boolean;
+  reversalTriggered: boolean;
+  reason: string | null;
+  errorMessage: string | null;
+}
+
+interface FullSubmissionRow extends Record<string, unknown> {
+  id: string;
+  proof_link: string;
+  discord_id: string;
+  task_id: string;
+  reward: string;
+  live_status: string;
+  review_status: string;
+  moved_to_available: number;
+  reddit_username: string | null;
+  workspace_channel_id: string | null;
+}
+
+/**
+ * Immediately re-checks a single submission by ID.
+ * If the check finds it removed/deleted and the payout is still reversible,
+ * the 45-second confirmation + reversal is fired in the background.
+ * Returns a result object the Discord command handler can turn into an embed.
+ */
+export async function checkSubmissionNow(submissionId: number): Promise<SubmissionCheckResult> {
+  const base: SubmissionCheckResult = {
+    found: false, submissionId, proofLink: null,
+    previousStatus: null, newStatus: null,
+    statusChanged: false, isReversible: false, reversalTriggered: false,
+    reason: null, errorMessage: null,
+  };
+
+  const rows = await db.execute<FullSubmissionRow>(
+    sql`SELECT s.id::text              AS id,
+               s.proof_link            AS proof_link,
+               s.discord_id            AS discord_id,
+               s.task_id::text         AS task_id,
+               s.reward::text          AS reward,
+               s.live_status           AS live_status,
+               s.review_status         AS review_status,
+               s.moved_to_available    AS moved_to_available,
+               u.reddit_username       AS reddit_username,
+               u.workspace_channel_id  AS workspace_channel_id
+        FROM submissions s
+        LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.id = ${submissionId}
+        LIMIT 1`
+  );
+
+  const row = rows.rows[0];
+  if (!row) return { ...base, errorMessage: `Submission #${submissionId} not found.` };
+
+  if (!isRedditUrl(row.proof_link)) {
+    return {
+      ...base, found: true, proofLink: row.proof_link,
+      errorMessage: "This submission's proof link is not a Reddit URL — nothing to check.",
+    };
+  }
+
+  const previousStatus = row.live_status as LiveStatus;
+  const isReversible = row.review_status === "accepted" && Number(row.moved_to_available) === 0;
+
+  const result = await recheckRedditLiveness(row.proof_link);
+  const newStatus = result.liveStatus;
+
+  // Always update last_checked_at. Only flip live_status if it changed and
+  // wasn't just a transient unknown.
+  if (newStatus !== "unknown" && newStatus !== previousStatus) {
+    await db.execute(
+      sql`UPDATE submissions
+          SET live_status = ${newStatus},
+              last_checked_at = now(),
+              live_status_changed_at = now(),
+              removal_reason = ${result.reason ?? null}
+          WHERE id = ${submissionId}`
+    );
+    logger.info(
+      { submissionId, previousStatus, newStatus, reason: result.reason },
+      "checkSubmissionNow: status changed"
+    );
+  } else {
+    await db.execute(
+      sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${submissionId}`
+    );
+  }
+
+  let reversalTriggered = false;
+  if (
+    (newStatus === "removed" || newStatus === "deleted") &&
+    isReversible &&
+    cachedClient
+  ) {
+    const syntheticRow: SubmissionRow = {
+      id: row.id,
+      proof_link: row.proof_link,
+      discord_id: row.discord_id,
+      task_id: row.task_id,
+      reward: row.reward,
+      live_status: previousStatus,
+      reddit_username: row.reddit_username,
+      workspace_channel_id: row.workspace_channel_id,
+    };
+    const client = cachedClient;
+    // Fire-and-forget — the interaction reply is already sent by this point.
+    performReversalWithConfirmation(client, syntheticRow, previousStatus, newStatus, result.reason, false)
+      .catch((err) => logger.error({ err, submissionId }, "checkSubmissionNow: reversal error"));
+    reversalTriggered = true;
+  }
+
+  return {
+    found: true,
+    submissionId,
+    proofLink: row.proof_link,
+    previousStatus,
+    newStatus: newStatus === "unknown" ? null : newStatus,
+    statusChanged: newStatus !== "unknown" && newStatus !== previousStatus,
+    isReversible,
+    reversalTriggered,
+    reason: result.reason ?? null,
+    errorMessage: null,
+  };
+}
+
 export function startRedditLivenessChecker(client: Client) {
   if (started) return;
   started = true;

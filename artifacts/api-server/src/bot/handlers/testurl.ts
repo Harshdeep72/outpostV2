@@ -86,6 +86,10 @@ export async function handleTestUrlCommand(interaction: ChatInputCommandInteract
     if (result.postLive !== undefined) {
       fields.push({ name: "📄 Post live?", value: result.postLive ? "Yes" : "No", inline: true });
     }
+    if (result.bodyText) {
+      const bodyPreview = result.bodyText.replace(/[\r\n]+/g, " ").slice(0, 200);
+      fields.push({ name: "💬 Body (first 200 chars)", value: `\`${bodyPreview}\``, inline: false });
+    }
 
     const failureText = result.failures?.length
       ? result.failures.map((f: string) => `• ${f}`).join("\n")

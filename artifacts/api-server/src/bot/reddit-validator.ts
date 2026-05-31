@@ -177,6 +177,8 @@ export interface ValidationResult {
   createdAt?: string;
   /** Which source confirmed the comment was live: 'oauth' | 'json_proxy' | 'html' | 'rss' */
   verifiedVia?: "oauth" | "json_proxy" | "html" | "rss";
+  /** Raw comment body text as read by the checker — useful for debugging deletion detection */
+  bodyText?: string;
 }
 
 // Minimum chars a comment body must contain (after stripping HTML tags).

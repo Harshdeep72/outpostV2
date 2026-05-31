@@ -160,10 +160,12 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
     const tsMatch = fragment.match(/data-timestamp="(\d+)"/i);
     const createdAt = tsMatch ? new Date(parseInt(tsMatch[1], 10)).toISOString() : null;
 
-    // Extract body text
+    // Extract body text.
+    // Search range is 6000 chars (up from 3000) — context permalink pages can
+    // include parent comments before the target, pushing usertext-body further.
     let body: string | null = null;
     const bodyIdx = html.indexOf('class="usertext-body', idx);
-    if (bodyIdx !== -1 && bodyIdx - idx < 3000) {
+    if (bodyIdx !== -1 && bodyIdx - idx < 6000) {
       const mdIdx = html.indexOf('class="md"', bodyIdx);
       if (mdIdx !== -1) {
         const pStart = html.indexOf('<p>', mdIdx);
@@ -173,7 +175,34 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
         }
       }
     }
-    
+
+    // Fallback: if body extraction failed, do a raw search for the sentinel
+    // strings in the ~5000 chars immediately after the thing div opens. This
+    // catches cases where the usertext-body is unusually far away or the page
+    // structure differs from the expected old.reddit layout.
+    if (body === null) {
+      const rawWindow = html.substring(idx, idx + 5000);
+      if (rawWindow.includes(">[removed]<") || rawWindow.includes(">[deleted]<")) {
+        body = rawWindow.includes(">[removed]<") ? "[removed]" : "[deleted]";
+      }
+    }
+
+    // Check the thing div's own class attribute for removal markers.
+    // Old.reddit adds 'deleted' to the class of the thing div for author-deleted
+    // comments even when data-author fails to parse as "[deleted]". This catches
+    // cases where body extraction fails AND the author attribute is absent/blank.
+    //
+    // Match the class that appears on the same div as our id attribute.
+    // The fragment starts 300 chars before idx, so the opening tag is in range.
+    const thingClassMatch =
+      fragment.match(/class="([^"]*)"\s[^>]*id="thing_t1_/i) ||
+      fragment.match(/class="([^"]*)"/);
+    const thingClass = thingClassMatch ? thingClassMatch[1] : "";
+    const isDeletedByClass = /\bdeleted\b/.test(thingClass) || /\bspam\b/.test(thingClass);
+
+    // Check for data-deleted attribute (set by old.reddit for author-deleted).
+    const hasDataDeleted = /\bdata-deleted="true"/i.test(fragment);
+
     // Note: we deliberately exclude `!author` here. A missing data-author
     // attribute means we couldn't parse the author — it does NOT mean the
     // comment was removed. Treating it as removed caused false positives where
@@ -193,7 +222,9 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
       author === "[deleted]" ||
       author === "[removed]" ||
       bodyTrimmed === "[removed]" ||
-      bodyTrimmed === "[deleted]";
+      bodyTrimmed === "[deleted]" ||
+      isDeletedByClass ||
+      hasDataDeleted;
     
     return {
       found: true,
@@ -635,6 +666,7 @@ async function runDeepCheck(
     postLive: true,
     createdAt: createdAt ?? undefined,
     verifiedVia,
+    bodyText: bodyText ?? undefined,
     ...meta("live"),
   };
 }

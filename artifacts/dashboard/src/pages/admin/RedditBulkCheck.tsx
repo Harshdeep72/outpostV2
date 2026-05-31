@@ -5,7 +5,7 @@ import { post } from "@/lib/api";
 interface BulkCheckRow {
   url: string;
   ok: boolean;
-  liveStatus: "live" | "removed" | "deleted" | "not_found" | "error";
+  liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
   author: string | null;
   subreddit: string | null;
   title: string | null;
@@ -17,15 +17,16 @@ interface BulkCheckRow {
 
 interface BulkCheckResponse {
   results: BulkCheckRow[];
-  summary: { total: number; live: number; removed: number; errored: number };
+  summary: { total: number; live: number; removed: number; noComment: number; errored: number };
 }
 
 const STATUS_PILL: Record<BulkCheckRow["liveStatus"], { label: string; cls: string }> = {
-  live: { label: "Live", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
-  removed: { label: "Removed", cls: "bg-red-500/15 text-red-400 border-red-500/30" },
-  deleted: { label: "Deleted", cls: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
-  not_found: { label: "Not found", cls: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
-  error: { label: "Error", cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+  live:       { label: "Live",           cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+  removed:    { label: "Removed",        cls: "bg-red-500/15 text-red-400 border-red-500/30" },
+  deleted:    { label: "Deleted",        cls: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
+  not_found:  { label: "Not found",      cls: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
+  error:      { label: "Error",          cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+  no_comment: { label: "No comment URL", cls: "bg-purple-500/15 text-purple-400 border-purple-500/30" },
 };
 
 const REMOVAL_BY_PILL: Record<string, string> = {
@@ -113,6 +114,11 @@ export default function RedditBulkCheck() {
             <span className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-red-400">
               Removed/deleted: <strong>{data.summary.removed}</strong>
             </span>
+            {data.summary.noComment > 0 && (
+              <span className="rounded-md border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-purple-400">
+                No comment URL: <strong>{data.summary.noComment}</strong>
+              </span>
+            )}
             <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-amber-400">
               Errors: <strong>{data.summary.errored}</strong>
             </span>

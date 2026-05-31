@@ -12,7 +12,7 @@ import { runLivenessTickNow } from "../bot/redditLivenessChecker.js";
 import { invalidateUser } from "../bot/cache.js";
 import { getCooldownConfig, setCooldownConfig, getAutoBumpConfig, setAutoBumpConfig, getMaxRedditAccounts, setMaxRedditAccounts, getProxies, setProxies } from "../lib/settings.js";
 import { reloadProxiesNow, getProxyMetrics } from "../bot/proxy.js";
-import { validateRedditProof, recheckRedditLiveness } from "../bot/reddit-validator.js";
+import { validateRedditProof, recheckRedditLiveness, parseRedditProofUrl, detectAppUrl, resolveShareLink } from "../bot/reddit-validator.js";
 
 const router = Router();
 
@@ -2342,7 +2342,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
   type Row = {
     url: string;
     ok: boolean;
-    liveStatus: "live" | "removed" | "deleted" | "not_found" | "error";
+    liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
     author: string | null;
     subreddit: string | null;
     title: string | null;
@@ -2361,17 +2361,40 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     not_found: "Not found (404)",
   };
 
-  async function checkOne(url: string): Promise<Row> {
+  async function checkOne(rawUrl: string): Promise<Row> {
     const base: Row = {
-      url, ok: false, liveStatus: "error",
+      url: rawUrl, ok: false, liveStatus: "error",
       author: null, subreddit: null, title: null, createdAt: null,
       removalReason: null, removalBy: null, error: null,
     };
     try {
+      // Resolve share links (reddit.com/r/sub/s/XXXX) before parsing.
+      let url = rawUrl;
+      const appKind = detectAppUrl(rawUrl);
+      if (appKind === "share_link_resolvable") {
+        const resolved = await resolveShareLink(rawUrl);
+        if (resolved) url = resolved;
+      }
+
+      // ── Early exit: post URL with no comment ID ───────────────────────────
+      // If the URL points to a post but has no specific comment ID, we cannot
+      // verify any comment. Return "no_comment" immediately so it is clearly
+      // flagged rather than silently reported as "live" (the post being live
+      // tells us nothing about whether a comment exists or was removed).
+      const parsed = parseRedditProofUrl(url);
+      if (parsed && !parsed.commentId) {
+        return {
+          ...base,
+          url,
+          liveStatus: "no_comment",
+          error: "Post URL — no comment ID. A valid comment proof URL should contain the comment ID, e.g. reddit.com/r/sub/comments/POST_ID/title/COMMENT_ID/",
+        };
+      }
+
       const result = await recheckRedditLiveness(url);
 
       if (result.liveStatus === "unknown") {
-        return { ...base, liveStatus: "error", error: result.reason ?? result.statusLabel ?? "Reddit unreachable — could not determine status" };
+        return { ...base, url, liveStatus: "error", error: result.reason ?? result.statusLabel ?? "Reddit unreachable — could not determine status" };
       }
 
       const liveStatus: Row["liveStatus"] = result.liveStatus as Row["liveStatus"];
@@ -2417,6 +2440,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     total: results.length,
     live: results.filter((r) => r.liveStatus === "live").length,
     removed: results.filter((r) => r.liveStatus === "removed" || r.liveStatus === "deleted").length,
+    noComment: results.filter((r) => r.liveStatus === "no_comment").length,
     errored: results.filter((r) => r.liveStatus === "error" || r.liveStatus === "not_found").length,
   };
 

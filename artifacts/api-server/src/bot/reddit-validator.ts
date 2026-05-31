@@ -1085,12 +1085,15 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
         const fragmentStart = Math.max(0, thingIdx - 100);
         const fragment = oldRedditHtml.substring(fragmentStart, thingIdx + 800);
 
-        // Detect removal via CSS class on the thing div (old.reddit adds
-        // "deleted" or "spam" class for author-deleted / spam-removed posts).
+        // Detect removal via CSS class on the thing div.
+        // old.reddit adds:
+        //   "deleted" / "spam"     → author-deleted or spam-removed
+        //   "removed"              → moderator-removed (link posts + text posts)
         const thingClassMatch = fragment.match(/class="([^"]+)"\s[^>]*id="thing_t3_/i) ||
           fragment.match(/class="([^"]+)"/);
         const thingClass = thingClassMatch ? thingClassMatch[1] : "";
         const isDeletedByClass = /\bdeleted\b/.test(thingClass) || /\bspam\b/.test(thingClass);
+        const isRemovedByClass = /\bremoved\b/.test(thingClass);
         const hasDataDeleted = /\bdata-deleted="true"/i.test(fragment);
 
         // Detect removal via selftext body content.
@@ -1117,9 +1120,13 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
         if (isDeletedByClass || hasDataDeleted) {
           htmlPostResult = "deleted";
           logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML shows post deleted (class/data-deleted)");
-        } else if (selftextRemoved) {
+        } else if (isRemovedByClass || selftextRemoved) {
+          // isRemovedByClass catches link posts removed by a moderator — they
+          // have no selftext to check, but old.reddit adds class="removed" to
+          // the thing div. selftextRemoved catches text posts whose body
+          // content was replaced with "[removed]" by moderators.
           htmlPostResult = "removed";
-          logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML shows post selftext [removed]");
+          logger.info({ postId: parsed.postId, via: isRemovedByClass ? "class" : "selftext" }, "recheckRedditLiveness: old.reddit HTML shows post removed by mod");
         } else {
           htmlPostResult = "live";
           logger.info({ postId: parsed.postId }, "recheckRedditLiveness: old.reddit HTML confirms post live");

@@ -564,6 +564,31 @@ export async function handleCheckSubmission(interaction: ChatInputCommandInterac
   }
 
   // ── Build result embed ─────────────────────────────────────────────────────
+
+  // newStatus is null when recheckRedditLiveness returned "unknown" (network
+  // error, blocked proxy, comment_missing treated as inconclusive, etc.).
+  // In that case we must NOT fall back to previousStatus and show "Live" —
+  // we should clearly communicate that the check was inconclusive.
+  if (result.newStatus === null) {
+    const embed = makeEmbed(COLORS.WARNING)
+      .setTitle(`❔ Submission #${submissionId} — Inconclusive`)
+      .setDescription(
+        [
+          `Last known status: **${result.previousStatus ?? "unknown"}**`,
+          result.reason ? `Reason: ${result.reason}` : null,
+          "",
+          "Reddit was unreachable or returned an inconclusive result. " +
+          "Try again in a few minutes, or check the proof link manually.",
+        ].filter((l) => l !== null).join("\n")
+      );
+
+    if (result.proofLink) {
+      embed.addFields({ name: "Proof", value: `[Open Reddit post](${result.proofLink})`, inline: false });
+    }
+    embed.setFooter({ text: `Checked by ${interaction.user.tag} • ${new Date().toUTCString()}` });
+    return interaction.editReply({ embeds: [embed] });
+  }
+
   const statusEmoji: Record<string, string> = {
     live: "✅", removed: "🛡️", deleted: "🗑️",
   };
@@ -571,7 +596,7 @@ export async function handleCheckSubmission(interaction: ChatInputCommandInterac
     live: COLORS.SUCCESS, removed: COLORS.DANGER, deleted: COLORS.DANGER,
   };
 
-  const currentStatus = result.newStatus ?? result.previousStatus ?? "unknown";
+  const currentStatus = result.newStatus;
   const color = statusColor[currentStatus] ?? COLORS.WARNING;
   const emoji = statusEmoji[currentStatus] ?? "❔";
 

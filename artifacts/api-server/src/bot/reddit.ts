@@ -223,19 +223,22 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
       return null;
     }
 
-    // Karma floor: sum of all positive scores (archive is incomplete, so this underestimates)
-    const linkKarma    = posts.reduce((s, p)    => s + Math.max(0, p.score    ?? 0), 0);
-    const commentKarma = comments.reduce((s, c) => s + Math.max(0, c.score    ?? 0), 0);
-    const totalKarma   = linkKarma + commentKarma;
+    // ⚠ Do NOT use archived scores as karma.
+    // Reddit karma ≠ sum of post/comment scores:
+    //   - score=1 means only the author's own upvote (net 0 karma contribution)
+    //   - Reddit applies internal deduplication and anti-manipulation adjustments
+    // Using raw archive scores produces wildly inaccurate karma (e.g. 67 vs actual 4).
+    // We only trust Arctic Shift for ACCOUNT AGE, not karma.
 
-    // Account age: oldest archived created_utc is a confirmed lower bound
+    // Account age: oldest archived created_utc is a confirmed lower bound.
+    // An account cannot have a post older than its creation date.
     const allUtcs   = all.map(i => i.created_utc).filter((v): v is number => typeof v === "number" && v > 0);
     const oldestUtc = allUtcs.length > 0 ? Math.min(...allUtcs) : 0;
     const ageDays   = oldestUtc ? Math.floor((Date.now() / 1000 - oldestUtc) / 86400) : 0;
 
     logger.info(
-      { name, posts: posts.length, comments: comments.length, totalKarma, ageDays },
-      "Reddit profile via Arctic Shift archive"
+      { name, posts: posts.length, comments: comments.length, ageDays },
+      "Reddit profile via Arctic Shift archive (age only — karma requires OAuth or HTML scrape)"
     );
 
     return {
@@ -243,14 +246,14 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
       profile: {
         name,
         createdUtc: oldestUtc,
-        linkKarma,
-        commentKarma,
-        totalKarma,
+        // Karma deliberately set to 0 / unverified — archive scores are not accurate karma.
+        // The caller (verification.ts) will route to manual review when karmaVerified=false.
+        linkKarma: 0,
+        commentKarma: 0,
+        totalKarma: 0,
         iconImg: undefined,
         accountAgeDays: ageDays,
-        // karmaVerified=true only when the archive floor already meets the requirement.
-        // If below the threshold the real karma may still qualify — manual review decides.
-        karmaVerified: totalKarma >= 100,
+        karmaVerified: false,
       },
     };
   } catch (err) {

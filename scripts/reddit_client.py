@@ -63,68 +63,85 @@ def main():
             pass
 
     # Select proxy if requested
-    proxy = None
-    if use_proxy:
-        proxies = get_proxies()
-        if proxies:
-            # We can pick a random proxy or try direct fallback
-            # In our python helper, we can pick a random proxy for this request
+    proxies = get_proxies() if use_proxy else []
+    max_attempts = 4 if use_proxy and proxies else 1
+
+    for attempt in range(max_attempts):
+        proxy = None
+        if use_proxy and proxies:
             proxy = random.choice(proxies)
 
-    session = requests.Session(impersonate="chrome120")
-    if proxy:
-        session.proxies = {"http": proxy, "https": proxy}
+        session = requests.Session(impersonate="chrome120")
+        if proxy:
+            session.proxies = {"http": proxy, "https": proxy}
 
-    headers = {
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "referer": "https://www.reddit.com/",
-    }
-    if cookie:
-        headers["cookie"] = cookie
-
-    # 1. Visit HTML first if it is a JSON request and a visit URL is specified
-    if visit_first:
-        try:
-            session.get(visit_first, headers=headers, timeout=timeout)
-        except Exception as e:
-            # Non-fatal, try fetching JSON anyway but we log or keep track of it
-            pass
-
-    # 2. Perform the main fetch
-    if is_json:
-        headers["accept"] = "application/json"
-        if visit_first:
-            headers["referer"] = visit_first
-
-    try:
-        r = session.get(url, headers=headers, timeout=timeout)
-        
-        # Check if the output is JSON
-        body_content = None
-        if is_json and r.status_code == 200:
-            try:
-                body_content = r.json()
-            except Exception:
-                body_content = r.text
-        else:
-            body_content = r.text
-
-        response_data = {
-            "ok": r.status_code == 200,
-            "status": r.status_code,
-            "headers": dict(r.headers),
-            "body": body_content,
-            "via": "proxy" if proxy else "direct"
+        headers = {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "referer": "https://www.reddit.com/",
         }
-        print(json.dumps(response_data))
+        if cookie:
+            headers["cookie"] = cookie
 
-    except Exception as e:
-        print(json.dumps({
-            "ok": False,
-            "status": 0,
-            "error": str(e),
-            "via": "proxy" if proxy else "direct"
-        }))
+        # 1. Visit HTML first if it is a JSON request and a visit URL is specified
+        if visit_first:
+            try:
+                session.get(visit_first, headers=headers, timeout=timeout)
+            except Exception:
+                pass
+
+        # 2. Perform the main fetch
+        if is_json:
+            headers["accept"] = "application/json"
+            if visit_first:
+                headers["referer"] = visit_first
+
+        try:
+            r = session.get(url, headers=headers, timeout=timeout)
+            
+            body_content = None
+            is_blocked = False
+            
+            if r.status_code == 200:
+                if is_json:
+                    try:
+                        body_content = r.json()
+                        if not isinstance(body_content, (dict, list)):
+                            is_blocked = True
+                    except Exception:
+                        body_content = r.text
+                        is_blocked = True
+                else:
+                    body_content = r.text
+                    if "blocked by network security" in body_content or "CAPTCHA" in body_content:
+                        is_blocked = True
+            else:
+                body_content = r.text
+                is_blocked = True
+
+            if is_blocked:
+                if attempt < max_attempts - 1:
+                    continue
+
+            response_data = {
+                "ok": not is_blocked,
+                "status": r.status_code,
+                "headers": dict(r.headers),
+                "body": body_content,
+                "via": "proxy" if proxy else "direct"
+            }
+            print(json.dumps(response_data))
+            return
+
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                continue
+            print(json.dumps({
+                "ok": False,
+                "status": 0,
+                "error": str(e),
+                "via": "proxy" if proxy else "direct"
+            }))
+            return
 
 if __name__ == "__main__":
     main()

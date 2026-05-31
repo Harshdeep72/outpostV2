@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { logger } from "../lib/logger.js";
 
 export interface PythonFetchOptions {
@@ -19,15 +21,45 @@ export interface PythonFetchResult {
   via: string;
 }
 
+function findWorkspaceFile(relativePath: string): string {
+  // 1. Try relative to process.cwd()
+  let candidate = resolve(process.cwd(), relativePath);
+  if (existsSync(candidate)) return candidate;
+
+  // 2. Try going up from process.cwd()
+  let currentDir = process.cwd();
+  for (let i = 0; i < 4; i++) {
+    candidate = resolve(currentDir, relativePath);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(currentDir);
+    if (parent === currentDir) break;
+    currentDir = parent;
+  }
+
+  // 3. Try relative to the current module file (import.meta.url)
+  try {
+    let moduleDir = dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 5; i++) {
+      candidate = resolve(moduleDir, relativePath);
+      if (existsSync(candidate)) return candidate;
+      const parent = dirname(moduleDir);
+      if (parent === moduleDir) break;
+      moduleDir = parent;
+    }
+  } catch {}
+
+  // Fallback to process.cwd() resolved path
+  return resolve(process.cwd(), relativePath);
+}
+
 /**
  * Execute the python curl_cffi client to perform high-fidelity Reddit requests.
  * Impersonates a modern Chrome browser to bypass Cloudflare/TLS blocks.
  */
 export async function executePythonRedditClient(opts: PythonFetchOptions): Promise<PythonFetchResult> {
   return new Promise((res, rej) => {
-    // Resolve paths relative to the process working directory (workspace root).
-    const pythonPath = resolve(process.cwd(), "venv/bin/python");
-    const scriptPath = resolve(process.cwd(), "scripts/reddit_client.py");
+    const pythonPath = findWorkspaceFile("venv/bin/python");
+    const scriptPath = findWorkspaceFile("scripts/reddit_client.py");
 
     const inputData = {
       url: opts.url,
@@ -37,7 +69,7 @@ export async function executePythonRedditClient(opts: PythonFetchOptions): Promi
       timeout: opts.timeout ?? 8,
     };
 
-    logger.debug({ url: opts.url, visitFirst: opts.visitFirst, useProxy: opts.useProxy }, "Spawning python curl_cffi Reddit client");
+    logger.debug({ url: opts.url, visitFirst: opts.visitFirst, useProxy: opts.useProxy, pythonPath, scriptPath }, "Spawning python curl_cffi Reddit client");
 
     const child = spawn(pythonPath, [scriptPath]);
 

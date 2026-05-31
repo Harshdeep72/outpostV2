@@ -58,8 +58,22 @@ function findWorkspaceFile(relativePath: string): string {
  */
 export async function executePythonRedditClient(opts: PythonFetchOptions): Promise<PythonFetchResult> {
   return new Promise((res, rej) => {
-    const pythonPath = findWorkspaceFile("venv/bin/python");
+    // Allow explicit override via PYTHON_PATH env var (useful for Docker / Render).
+    // Fall back to venv/bin/python (workspace-relative), then system python3.
+    let pythonPath: string;
+    if (process.env.PYTHON_PATH) {
+      pythonPath = process.env.PYTHON_PATH;
+    } else {
+      const venvPython = findWorkspaceFile("venv/bin/python");
+      pythonPath = existsSync(venvPython) ? venvPython : "python3";
+    }
     const scriptPath = findWorkspaceFile("scripts/reddit_client.py");
+
+    // If neither the script nor the interpreter is available, skip cleanly.
+    if (!existsSync(scriptPath)) {
+      logger.warn({ scriptPath }, "Python Reddit client script not found — skipping");
+      return res({ ok: false, status: 0, error: `Script not found: ${scriptPath}`, via: "direct", body: null });
+    }
 
     const inputData = {
       url: opts.url,

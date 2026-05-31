@@ -36,8 +36,20 @@ services:
         value: production
       - key: NODE_VERSION
         value: 20
+      # PYTHON_PATH tells the bot exactly where the venv Python is on Render.
+      # This avoids path-resolution failures when process.cwd() differs from
+      # the workspace root at runtime. Adjust if your Render project path differs.
+      - key: PYTHON_PATH
+        value: /opt/render/project/src/venv/bin/python
       # The following must be set manually in the Render dashboard
       # (Settings → Environment) — they are NOT committed here:
       #   DATABASE_URL, SESSION_SECRET, DISCORD_TOKEN, DISCORD_CLIENT_ID,
       #   DISCORD_CLIENT_SECRET, DISCORD_GUILD_ID, ADMIN_*, etc.
+      #
+      # For reliable Reddit karma fetching, also set:
+      #   REDDIT_SESSION_COOKIE — a valid Reddit session cookie (reddit_session=...
+      #   or cookie header string). The Python curl_cffi client sends this with
+      #   every request so Reddit's API allows the fetch even from datacenter IPs.
+      #   Obtain from your browser's DevTools → Network → any reddit.com request →
+      #   Copy the "Cookie" header value. Refresh periodically (every few weeks).
 

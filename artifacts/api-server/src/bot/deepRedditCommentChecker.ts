@@ -1,5 +1,5 @@
 import { logger } from "../lib/logger.js";
-import { proxyFetchText } from "./proxy.js";
+import { proxyFetchText, proxyFetchJson } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { commentValidationCache } from "./cache.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
@@ -117,6 +117,36 @@ async function fetchCommentThreadViaOAuth(
     return { ok: true, body };
   } catch (err) {
     logger.warn({ err }, "Reddit OAuth comment thread fetch error");
+    return null;
+  }
+}
+
+/**
+ * Fetch a comment thread via Reddit's unauthenticated .json endpoint through
+ * the proxy pool. Works without OAuth credentials — residential proxies bypass
+ * Reddit's datacenter IP blocks and the browser UA gets past basic bot checks.
+ *
+ * Returns the parsed Reddit JSON array body, or null on failure.
+ */
+async function fetchCommentThreadViaProxyJson(
+  sub: string,
+  postId: string,
+  commentId: string
+): Promise<{ ok: boolean; body: any } | null> {
+  const urls = [
+    `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`,
+    `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`,
+  ];
+  try {
+    const result = await proxyFetchJson(urls, { timeoutMs: 8000, acceptHeader: "application/json" });
+    if (!result.ok || !Array.isArray(result.body)) {
+      logger.warn({ status: result.status, sub, postId, commentId }, "Proxy JSON comment fetch: non-array response");
+      return null;
+    }
+    logger.info({ sub, postId, commentId }, "Proxy JSON comment fetch succeeded");
+    return { ok: true, body: result.body };
+  } catch (err) {
+    logger.warn({ err, sub, postId, commentId }, "Proxy JSON comment thread fetch failed");
     return null;
   }
 }

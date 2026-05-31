@@ -326,8 +326,20 @@ app.use("/api", router);
 // unset, so this block is a no-op. On a VPS / Hostinger / Contabo deploy, set
 // DASHBOARD_DIST_PATH=/absolute/path/to/artifacts/dashboard/dist/public and the
 // API server will also serve the SPA — one process, no nginx required.
-const dashboardDistPath = process.env.DASHBOARD_DIST_PATH;
+let dashboardDistPath = process.env.DASHBOARD_DIST_PATH;
 if (dashboardDistPath) {
+  // If the path points to a local directory structure containing 'Outpost-sucks1-main'
+  // but doesn't exist (e.g. copied from local env to Render), automatically resolve
+  // it relative to the container CWD.
+  if (!fs.existsSync(path.join(dashboardDistPath, "index.html")) && dashboardDistPath.includes("Outpost-sucks1-main/")) {
+    const parts = dashboardDistPath.split("Outpost-sucks1-main/");
+    if (parts[1]) {
+      const candidate = path.resolve(process.cwd(), parts[1]);
+      if (fs.existsSync(path.join(candidate, "index.html"))) {
+        dashboardDistPath = candidate;
+      }
+    }
+  }
   const resolvedDist = path.resolve(dashboardDistPath);
   const indexHtmlPath = path.join(resolvedDist, "index.html");
   if (!fs.existsSync(indexHtmlPath)) {

@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import { COLORS, PAYOUT_DAY_UTC, ROLES } from "./constants.js";
 
-export const SMOKY_TAG = "⚡ coded by smoky";
+export const SMOKY_TAG = "⚡ coded by SKYY";
 
 export function formatMoney(val: string | number | null | undefined): string {
   const n = typeof val === "string" ? parseFloat(val) : (val ?? 0);

@@ -84,7 +84,7 @@ export async function startBot() {
     logger.info({ tag: client.user?.tag, proxies: getProxyCount() }, "Discord bot ready (v2 Flash Edition)");
 
     const presences = [
-      { name: "⚡ v2 Flash | by smoky", type: ActivityType.Playing },
+      { name: "⚡ v2 Flash | by SKYY", type: ActivityType.Playing },
       { name: "/ping for live stats", type: ActivityType.Watching },
       { name: "tasks fly by ⚡", type: ActivityType.Watching },
       { name: "your earnings grow 💰", type: ActivityType.Watching },

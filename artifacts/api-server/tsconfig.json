@@ -4,6 +4,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node"],
+    "lib": ["es2022", "DOM"],
     "noImplicitReturns": false
   },
   "include": ["src"],

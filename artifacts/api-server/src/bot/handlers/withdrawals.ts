@@ -21,7 +21,7 @@ import { tryPostWeeklyPayoutAnnouncement } from "./weeklyPayoutAnnouncement.js";
 
 // ───────────────────── creator-payout helpers ─────────────────────
 
-interface CreatorPayoutRow {
+interface CreatorPayoutRow extends Record<string, unknown> {
   id: number;
   withdrawal_id: number;
   creator_discord_id: string;

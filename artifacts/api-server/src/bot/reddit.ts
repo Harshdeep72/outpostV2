@@ -389,9 +389,15 @@ async function fetchViaDirectJson(name: string): Promise<RedditFetchResult | nul
   ];
 
   try {
+    const headers: Record<string, string> = {};
+    if (process.env.REDDIT_SESSION_COOKIE) {
+      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    }
+
     const result = await proxyFetchJson(candidates, {
       timeoutMs: 10_000,
       acceptHeader: "application/json",
+      headers,
     });
 
     if (!result.ok) return null;
@@ -569,7 +575,15 @@ async function fetchViaHtmlScrape(name: string): Promise<RedditFetchResult | nul
 
   let html: string | null = null;
   try {
-    html = await proxyFetchText(profileUrls, { timeoutMs: 12_000, acceptHeader: "text/html, */*" });
+    const headers: Record<string, string> = {};
+    if (process.env.REDDIT_SESSION_COOKIE) {
+      headers["Cookie"] = process.env.REDDIT_SESSION_COOKIE;
+    }
+    html = await proxyFetchText(profileUrls, {
+      timeoutMs: 12_000,
+      acceptHeader: "text/html, */*",
+      headers,
+    });
   } catch (err) {
     logger.warn({ err, name }, "fetchViaHtmlScrape: proxyFetchText threw");
     return null;

@@ -398,7 +398,7 @@ export async function handleSendStatsCommand(interaction: ChatInputCommandIntera
         // Resolve the workspace channel; silently skip if missing/deleted.
         let channel: TextChannel | null = null;
         try {
-          const fetched = await guild.channels.fetch(target.workspace_channel_id);
+          const fetched = await guild!.channels.fetch(target.workspace_channel_id);
           if (fetched && fetched.type === ChannelType.GuildText) {
             channel = fetched as TextChannel;
           }
@@ -420,7 +420,7 @@ export async function handleSendStatsCommand(interaction: ChatInputCommandIntera
             // if we can't resolve anything at all).
             let displayName = "Member";
             try {
-              const member = await guild.members.fetch(target.discord_id);
+              const member = await guild!.members.fetch(target.discord_id);
               displayName = member.displayName || member.user.username || displayName;
             } catch { /* member may have left — just use fallback */ }
 

@@ -19,7 +19,7 @@ import { renderPayoutWeeklyCard, type PayoutWeeklyRow } from "../card-renderer.j
 
 const ANNOUNCED_KEY = "weekly_payout_announced";
 
-interface BatchRow {
+interface BatchRow extends Record<string, unknown> {
   wd_id: number;
   user_discord_id: string;
   user_username: string | null;
@@ -135,7 +135,7 @@ export async function tryPostWeeklyPayoutAnnouncement(guild: Guild): Promise<voi
   //    handler already claimed it, abort silently.
   const claimed = await claimAnnounceSlot(anchorIso);
   if (!claimed) {
-    logger.debug("Weekly payout announcement: already announced for anchor", { anchorIso });
+    logger.debug({ anchorIso }, "Weekly payout announcement: already announced for anchor");
     return;
   }
 

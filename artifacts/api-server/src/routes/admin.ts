@@ -813,6 +813,10 @@ router.post("/users/:id/send-stats", requireAdminRole, async (req, res) => {
   let guild;
   try {
     guild = getPrimaryGuild();
+    if (!guild) {
+      res.status(502).json({ error: "Discord bot not connected to a server right now." });
+      return;
+    }
   } catch (err) {
     req.log?.error?.({ err }, "send-stats: no primary guild");
     res.status(502).json({ error: "Discord bot not connected to a server right now." });

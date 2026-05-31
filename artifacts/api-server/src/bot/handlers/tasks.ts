@@ -616,13 +616,13 @@ export async function handleTaskClaim(
           RETURNING *`
     );
     if (updated.rowCount === 0) return null;
-    const activeInTxn = await tx.execute<{ count: string }>(
+    const activeInTxn = await tx.execute(
       sql`SELECT COUNT(*)::text AS count
             FROM claims
            WHERE discord_id = ${discordId}
              AND status = 'claimed'
              AND (expires_at IS NULL OR expires_at > NOW())`
-    );
+    ) as any;
     if (parseInt(activeInTxn.rows[0]?.count ?? "0") >= MAX_CONCURRENT_CLAIMS) {
       throw new Error("CONCURRENT_CAP_EXCEEDED");
     }

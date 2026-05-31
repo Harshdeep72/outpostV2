@@ -233,7 +233,7 @@ export async function backfillCampaignSheet(
 // Joined-row shape returned by both logSubmissionEvent's SELECT and the
 // retention SELECT. Shared so payload/row builders work for both call sites.
 // ---------------------------------------------------------------------------
-export interface JoinedSubmissionRow {
+export interface JoinedSubmissionRow extends Record<string, unknown> {
   id: string;
   task_id: string;
   discord_id: string;

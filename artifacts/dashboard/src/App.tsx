@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import SetupPassword from "@/pages/SetupPassword";
 import Overview from "@/pages/admin/Overview";
 import Users from "@/pages/admin/Users";
 import VerifiedUsers from "@/pages/admin/VerifiedUsers";
@@ -54,6 +55,7 @@ function ProtectedApp() {
       <Switch>
         <Route path="/register" component={Register} />
         <Route path="/login" component={Login} />
+        <Route path="/setup-password" component={SetupPassword} />
         <Route component={Login} />
       </Switch>
     );

@@ -22,7 +22,7 @@ import { invalidateUser } from "./cache.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
 const TICK_MS = 15 * 60 * 1000;   // run every 15 minutes
-const WINDOW_HOURS = 24;           // only look at payouts within the last 24h
+const WINDOW_HOURS = 168;          // only look at payouts within the last 1 week
 const BATCH_SIZE = 20;             // max rows per pass
 const CONFIRM_DELAY_MS = 30_000;   // 30-second wait before confirming a clawback
 
@@ -328,6 +328,7 @@ async function tick(client: Client): Promise<void> {
           WHERE s.review_status      = 'accepted'
             AND s.moved_to_available = 1
             AND s.live_status        IN ('removed', 'deleted')
+            AND s.paid_at           >= ${cutoff}
             AND s.proof_link ILIKE '%reddit.com%'
           ORDER BY s.paid_at DESC
           LIMIT ${BATCH_SIZE}`

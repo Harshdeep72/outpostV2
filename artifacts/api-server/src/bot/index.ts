@@ -133,7 +133,8 @@ export async function startBot() {
       // (no trust penalty). Skips non-Reddit URLs (Twitter/Quora always manual).
       startPendingReviewSweeper(client);
       startCampaignQueueProcessor(client);
-      startPostPayoutChecker(client);
+      // Post-payout clawbacks disabled per admin request (once paid, it's permanent).
+      // startPostPayoutChecker(client);
       // Daily cleanup: deletes submissions > 22 days old after mirroring each
       // to its Google Sheet (cost control for Neon). Sheet is the long-term
       // archive. See submissionRetention.ts for the safety design.

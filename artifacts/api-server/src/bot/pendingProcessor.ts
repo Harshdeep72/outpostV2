@@ -229,31 +229,133 @@ export function startPendingProcessor(client: Client) {
           await notifySubmissionCleared(client, row);
 
           logger.info({ subId, discordId: row.discord_id, reward: row.reward }, "Hold processor: comment still live — payout issued");
-        } else {
-          // Comment was removed or deleted during the hold period — reject.
-          const liveStatus = liveness.status === "deleted" ? "deleted" : "removed";
 
+        } else if (liveness.status === "unknown") {
+          // Transient / inconclusive first reading — Reddit API blip, proxy
+          // block, or AutoMod temporary filter window. Do NOT reject on a
+          // single inconclusive result. Send to manual review so no valid
+          // work is silently discarded.
+          logger.warn({ subId, proofLink: row.proof_link }, "Hold processor: first check returned unknown — sending to manual review");
           await db.execute(
             sql`UPDATE submissions
-                   SET review_status  = 'rejected',
-                       live_status    = ${liveStatus},
+                   SET review_status  = 'pending',
                        last_checked_at = NOW(),
-                       removal_reason = ${liveness.reason ?? null},
-                       review_reason  = ${"Hold-end check: comment " + liveStatus + " before hold cleared"}
+                       review_reason  = 'Hold-end liveness check inconclusive (unknown) — needs manual review'
                  WHERE id = ${subId} AND review_status = 'checking'`
           );
 
-          // Small trust deduction for deleting the comment during the hold.
-          await db.execute(
-            sql`UPDATE users
-                SET trust_score = GREATEST(0, trust_score - 3)
-                WHERE id = ${userId}`
-          );
-          invalidateUser(row.discord_id, userId);
-          logSubmissionEvent(subId, "removed");
-          await notifyHoldRejected(client, { ...row, live_status: liveStatus });
+        } else {
+          // First check says removed or deleted. Run a 45-second confirmation
+          // pass before making any permanent decision — a single bad reading
+          // (transient AutoMod window, Reddit API inconsistency, proxy blip)
+          // must never permanently reject a valid submission.
+          const firstDetected = liveness.status === "deleted" ? "deleted" : "removed";
+          const firstReason = liveness.reason;
 
-          logger.warn({ subId, discordId: row.discord_id, liveStatus }, "Hold processor: comment not live at hold end — submission rejected");
+          logger.warn(
+            { subId, firstDetected, proofLink: row.proof_link },
+            "Hold processor: first check says removed/deleted — waiting 45s for confirmation"
+          );
+
+          await new Promise((r) => setTimeout(r, 45_000));
+
+          let confirmation: Awaited<ReturnType<typeof recheckRedditLiveness>>;
+          try {
+            confirmation = await recheckRedditLiveness(row.proof_link);
+          } catch (err) {
+            // Confirmation check threw — can't be certain. Manual review.
+            logger.warn({ err, subId }, "Hold processor: confirmation check threw — sending to manual review");
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'pending',
+                         last_checked_at = NOW(),
+                         review_reason  = 'Hold-end liveness confirmation check errored — needs manual review'
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+            continue;
+          }
+
+          if (confirmation.status === "live") {
+            // Confirmation says live — the first reading was a false positive
+            // (transient remove / AutoMod temporary filter). Pay out.
+            logger.info(
+              { subId, discordId: row.discord_id, firstDetected },
+              "Hold processor: confirmation check says LIVE — false positive detected, paying out"
+            );
+
+            const accepted = await db.execute<{ id: string }>(
+              sql`UPDATE submissions
+                     SET review_status     = 'accepted',
+                         moved_to_available = 1,
+                         paid_at           = NOW(),
+                         live_status       = 'live',
+                         last_checked_at   = NOW(),
+                         review_reason     = ${'Hold cleared live (confirmation overrode transient ' + firstDetected + ' reading)'}
+                   WHERE id = ${subId} AND review_status = 'checking'
+                   RETURNING id`
+            );
+            if (accepted.rows.length === 0) continue;
+
+            await db.execute(
+              sql`UPDATE users
+                  SET balance_available = balance_available + ${row.reward}::numeric,
+                      total_earned      = total_earned + ${row.reward}::numeric,
+                      trust_score       = LEAST(1000, trust_score + 2),
+                      last_task_completed_at = NOW()
+                  WHERE id = ${userId}`
+            );
+            invalidateUser(row.discord_id, userId);
+            safeSyncEarnerRoles(row.discord_id);
+            logSubmissionEvent(subId, "paid");
+            await notifySubmissionCleared(client, row);
+
+          } else if (confirmation.status === "unknown") {
+            // Both reads inconclusive enough that we can't be certain.
+            // Manual review is the only safe outcome.
+            logger.warn(
+              { subId, firstDetected },
+              "Hold processor: confirmation inconclusive — sending to manual review"
+            );
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'pending',
+                         live_status    = ${firstDetected},
+                         last_checked_at = NOW(),
+                         removal_reason = ${firstReason ?? null},
+                         review_reason  = ${'Hold-end check inconclusive after confirmation (first: ' + firstDetected + ') — needs manual review'}
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+
+          } else {
+            // Both reads agree: removed or deleted. Now it is safe to reject.
+            const confirmedStatus = confirmation.status === "deleted" ? "deleted" : "removed";
+
+            logger.warn(
+              { subId, discordId: row.discord_id, confirmedStatus },
+              "Hold processor: confirmed removed/deleted — rejecting submission"
+            );
+
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'rejected',
+                         live_status    = ${confirmedStatus},
+                         last_checked_at = NOW(),
+                         removal_reason = ${confirmation.reason ?? firstReason ?? null},
+                         review_reason  = ${"Hold-end check (confirmed): comment " + confirmedStatus + " before hold cleared"}
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+
+            // Trust deduction only on confirmed removal — not on transient
+            // or inconclusive first reads.
+            await db.execute(
+              sql`UPDATE users
+                  SET trust_score = GREATEST(0, trust_score - 3)
+                  WHERE id = ${userId}`
+            );
+            invalidateUser(row.discord_id, userId);
+            logSubmissionEvent(subId, "removed");
+            await notifyHoldRejected(client, { ...row, live_status: confirmedStatus });
+          }
         }
       }
 

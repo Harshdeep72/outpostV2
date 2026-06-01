@@ -375,7 +375,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
 
   const mystatus = new SlashCommandBuilder()
     .setName("mystatus")
-    .setDescription("Check your submissions currently in the verification hold — see reward, live status, and time until payout")
+    .setDescription("View your pending submissions — reward, live status, and time until payout")
     .setDMPermission(true);
 
   return [

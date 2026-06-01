@@ -1,0 +1,398 @@
+Skip to content
+
+AI
+
+outpostV2
+
+
+100%
+
+Upgrade
+
+
+Invite
+
+Publish
+
+
+
+
+
+Library
+
+File tree
+Search
+
+New
+Other
+Artifact
+Website
+
+Images
+Option 1 — Watchtower
+Option 1 — Watchtower
+Image
+
+Option 2 — Shield
+Option 2 — Shield
+Image
+
+Option 3 — Radar Ring
+Option 3 — Radar Ring
+Image
+
+Option 1 — Tower Glow (no text)
+Option 1 — Tower Glow (no text)
+Image
+
+Option 2 — Tower + Text
+Option 2 — Tower + Text
+Image
+
+Outpost Marketing Banner
+Outpost Marketing Banner
+Image
+
+Outpost Marketing — Minimal
+Outpost Marketing — Minimal
+Image
+
+outpost bot pfp tower
+outpost bot pfp tower
+Image
+
+outpost bot pfp shield
+outpost bot pfp shield
+Image
+
+outpost bot pfp radar
+outpost bot pfp radar
+Image
+
+outpost bot banner tower wide
+outpost bot banner tower wide
+Image
+
+outpost bot banner with text
+outpost bot banner with text
+Image
+
+outpost marketing banner
+outpost marketing banner
+Image
+
+outpost marketing minimal banner
+outpost marketing minimal banner
+Image
+
+
+
+main
+
+
+Remote Updates
+Harshdeep72/outpostV2
+origin/main•upstream
+last fetched 6 min ago
+
+
+Sync Changes
+
+Pull
+
+Push
+Commit
+There are no changes to commit.
+Add a command to check submission status and payout countdowns
+
+
+15 messages & 19 actions
+
+Checkpoint made
+37 minutes ago
+
+Worked for 3 minutes
+
+Pasted--Outpost-Bot-Full-Technical-Walkthrough-This-document-e_1780309160307.txt
+this is the working of the bot
+
+37 minutes ago
+
+Show less
+
+Requesting DISCORD_BOT_TOKEN secret
+Thanks for sharing the walkthrough! The app is a Discord-integrated Reddit task platform. The build is working — I just need a few secrets to get it running. Let me request them now:
+
+
+2 actions
+The database is already connected. I just need your Discord bot token to start the app:
+
+
+Requested DISCORD_BOT_TOKEN
+Please add your Discord Bot Token. You can find it at discord.com/developers/applications → your app → Bot → Token.
+
+Secrets
+Key
+Value
+DISCORD_BOT_TOKEN
+
+
+Continue
+
+Worked for 23 seconds
+now the thing is when theproof are submitted they should be going into pending state
+right if the time has been defined for how long the comment should be live
+
+36 minutes ago
+
+Show less
+
+Planning proof submission workflow (7 seconds)
+Let me look at the current submission and validation flow to understand what's in place and what needs adjusting:
+
+
+6 actions
+Let me read the key files to understand the current submission flow and pending state logic:
+
+
+3 actions
+Let me read the submission handler and the reddit validator to understand the current flow:
+
+
+3 actions
+Let me find the submission modal handler to understand the current flow:
+
+
+3 actions
+Let me read the exact submission flow in the handler:
+
+
+3 actions
+Now I have a clear picture of the full flow. Let me understand exactly what you want:
+
+Current behavior: Proof passes validation → immediately marked accepted → reward sits in balance_pending for the hold period → then paid out.
+
+What you want: Proof passes validation → stays in pending for the hold period (comment must remain live that whole time) → re-checked at the end → only then accepted and paid out.
+
+Let me implement this properly:
+
+
+3 actions
+Let me read the early liveness check and admin route to understand all the places that need updating:
+
+
+4 actions
+Now I have everything I need. Let me implement this. The change is:
+
+Proof passes validation → pending_hold status (comment must stay live for the hold period)
+After the hold time, the pending processor re-checks Reddit — still live → pays out; removed/deleted → rejects
+I'll update 3 files in parallel:
+
+
+3 actions
+I have everything I need. Now I'll implement all three changes in parallel:
+
+
+2 actions
+Now let me update the pending processor to handle pending_hold submissions, and fix the admin stats — both in parallel:
+
+
+3 actions
+Now let me write the updated pendingProcessor.ts and fix the admin stats in parallel:
+
+
+2 actions
+Now let me fix the admin stats queries to include pending_hold, then rebuild:
+
+
+5 actions
+Now let me fix all the admin stats references to include pending_hold, then rebuild:
+
+
+5 actions
+Let me also check for any remaining references to the old pending filter in the submissions list endpoint, then rebuild:
+
+
+2 actions
+Good, all status references are clean. Now let me rebuild and restart:
+
+
+2 actions
+Build succeeded. Let me restart the workflow and check logs:
+
+
+3 actions
+The build succeeds but the app still needs your DISCORD_BOT_TOKEN to start. Let me update the progress tracker to reflect what's been implemented:
+
+
+Requesting Discord bot token
+The feature is built and the code is ready. The app just can't start without your Discord bot token. Once you add it, the workflow will come right up.
+
+
+Requested DISCORD_BOT_TOKEN
+Please add your Discord Bot Token to start the app. Find it at: discord.com/developers/applications → your app → Bot → Token
+
+Secrets
+Key
+Value
+DISCORD_BOT_TOKEN
+
+
+Continue
+
+Checkpoint made
+29 minutes ago
+
+Worked for 6 minutes
+
+Attached Image
+does the money gets removed from the ussers wallet when the 5 minute checks this
+
+26 minutes ago
+
+Show less
+
+Deciding on pending hold logic (20 seconds)
+Good question. Let me look at exactly what the early check does vs the new flow:
+
+
+2 actions
+With the new pending_hold flow I just implemented — no. Here's exactly why:
+
+Old flow (what the screenshot shows):
+
+Proof validated → money immediately added to balance_pending
+Early check fires at 5 min → comment deleted → reversal: balance_pending -= reward
+Money was in the wallet, had to be taken back
+New flow (what's live now):
+
+Proof validated → pending_hold status → zero money added anywhere
+The early check code at line 389 explicitly skips anything that isn't review_status = 'accepted' — so pending_hold rows are ignored entirely
+After the hold period ends → pendingProcessor re-checks Reddit → if still live → pays out; if deleted → rejected with nothing to reverse
+There's nothing to remove because nothing was ever put in. Let me also clean up the now-unused early check import in tasks.ts:
+
+
+2 actions
+The import is now unused — let me remove it:
+
+
+2 actions
+Let me rebuild with the cleaned-up import and confirm everything is ready:
+
+
+2 actions
+Build is clean. To summarize exactly how the flow works now:
+
+The 5-minute early check is completely bypassed for new submissions. Here's the full lifecycle:
+
+User submits proof → Reddit is checked immediately
+Comment is live → pending_hold status set, available_at = now + holdHours — no money goes into the wallet at all
+Hold period ends → pendingProcessor re-checks Reddit one final time:
+Still live → pays directly to balance_available + total_earned + trust +2
+Removed/deleted → rejected + trust -3 + DM sent to user — nothing to reverse because nothing was ever credited
+The old flow (shown in your screenshot) put money into balance_pending upfront and then had to claw it back if the early check caught a deletion. The new flow never credits anything until the comment survives the full hold window — much cleaner.
+
+The app is built and ready. It just needs your Discord bot token to start running. Once you add that to the Secrets panel (DISCORD_BOT_TOKEN), the workflow will come up automatically.
+
+Next, I can add a /mystatus Discord command that lets users check the live status of their pending submissions — showing how long until each hold period ends and whether the comment is still being tracked. Would you like me to do that?
+
+
+Checkpoint made
+25 minutes ago
+
+Worked for 1 minute
+oki add that
+
+16 minutes ago
+
+Show less
+
+Planning slash command implementation
+Let me look at the command registration and an existing simple command as a pattern reference:
+
+
+3 actions
+Let me read the commands index and an existing simple handler in parallel:
+
+
+3 actions
+I have everything I need. I'll create the handler, add the command definition, wire it into interactions, and rebuild — all in parallel:
+
+
+2 actions
+Now wire it into the commands index and interactions handler in parallel:
+
+
+5 actions
+Now add the route in interactions.ts and rebuild in parallel:
+
+
+3 actions
+Build is clean. Everything is ready — the bot just needs the DISCORD_BOT_TOKEN to start. Once that's added, /mystatus will be registered automatically when the bot boots (the registerCommands function runs on startup).
+
+Here's what /mystatus shows:
+
+Each submission in hold — task name, reward amount, live status (✅ Live / 🛡️ Removed / 🗑️ Deleted), and a Discord timestamp showing exactly when the hold ends (both relative "in 6 hours" and absolute)
+A clickable proof link shortened to just the reddit.com path for readability
+Footer showing the total reward amount across all pending submissions as a reminder of what's at stake
+Works in DMs too, so users can check without being in the server
+The command is ephemeral (only visible to the person who ran it). Once your DISCORD_BOT_TOKEN is in the Secrets panel, the workflow will start and the command will be live.
+
+Next, I can add an admin /holdstatus command that shows all submissions currently in pending hold across all users — filtered by how close they are to expiring — so admins can monitor the hold queue. Would you like me to do that?
+
+
+Checkpoint made
+14 minutes ago
+
+Worked for 1 minute
+what is the default time for every task given to users ?
+
+like every comment should be checked after 7 days that is the time when the comment should be live
+
+7 minutes ago
+
+2 actions
+Let me quickly check where the default hold value is set in the task creation code:
+
+
+2 actions
+There are actually two defaults in play — let me clarify exactly what happens:
+
+When /createtask is used (the normal path):
+
+artifacts/api-server/src/bot/handlers/tasks.ts, line 99:
+const holdHours = interaction.options.getInteger("hold_hours") ?? 168;
+
+If the admin doesn't fill in hold_hours, it defaults to 168 hours = 7 days. ✅ This matches what you want.
+
+The database column default:
+
+bootstrapSchema.ts, line 44:
+"pending_delay_hours" INTEGER NOT NULL DEFAULT 24
+
+This is the raw PostgreSQL column default — it only kicks in if a row is inserted directly into the DB without specifying the value (which never happens in normal usage). In practice every task goes through the bot, so it always gets 168.
+
+Summary of what happens today:
+
+Path	Hold default
+/createtask (no hold_hours specified)	168h = 7 days ✅
+/bulktask CSV (no hold_hours column)	168h = 7 days ✅
+Raw DB insert (edge case)	24h ⚠️
+The 7-day behavior you described is already in place. The DB column default of 24h is a leftover from an earlier version — would you like me to update it to 168 so it's consistent everywhere?
+
+Next, I can add an admin /holdstatus command that shows all submissions currently in the hold queue, sorted by how soon they expire — useful for monitoring who's at risk of rejection. Would you like me to do that?
+
+
+Worked for 35 seconds
+
+Scroll to latest
+You're out of credits.
+Upgrade to Core
+
+Make, test, iterate…
+
+
+Economy
+
+
+Loading... - Replit

@@ -83,3 +83,9 @@ id = "M9M30ddAQHFF9obNrd-m-"
 uri = "file://attached_assets/outpost_marketing_banner_minimal.png"
 type = "image"
 title = "Outpost Marketing — Minimal"
+
+[[outputs]]
+id = "lZRCanNyiW4zjl3B1e7yz"
+uri = "file://OUTPOST_BOT_GUIDE.md"
+type = "text"
+title = "Outpost Bot — Full Technical Guide"

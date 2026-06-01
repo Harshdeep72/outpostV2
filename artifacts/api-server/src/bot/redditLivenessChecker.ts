@@ -683,6 +683,46 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
         reddit_username: row.reddit_username,
         workspace_channel_id: row.workspace_channel_id,
       };
+
+      // When money was already moved to available and is now clawed back,
+      // send a specific DM so the user knows their available balance was reduced.
+      if (clawbackTriggered && movedToAvailable === 1 && cachedClient) {
+        const reward = parseFloat(row.reward);
+        const statusLabel = newStatus === "deleted" ? "deleted" : "removed";
+        const emoji = newStatus === "deleted" ? "🗑️" : "🛡️";
+        const clawbackEmbed = new EmbedBuilder()
+          .setColor(0xed4245)
+          .setTitle(`${emoji} Payout Reversed — Comment ${statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}`)
+          .setDescription(
+            [
+              `Your submission **#${row.id}** was re-checked by a moderator and your comment was found **${statusLabel}**.`,
+              ``,
+              `**$${reward.toFixed(2)}** has been deducted from your available balance.`,
+              result.reason ? `Reason: ${result.reason}` : null,
+              ``,
+              `Comments must remain live indefinitely to keep their reward. Deleting or having your comment removed after payout is a violation of the rules.`,
+            ].filter((l) => l !== null).join("\n")
+          )
+          .addFields({ name: "Proof", value: `[Open Reddit post](${row.proof_link})`, inline: false })
+          .setTimestamp(new Date());
+
+        try {
+          const discordUser = await cachedClient.users.fetch(row.discord_id);
+          await discordUser.send({ embeds: [clawbackEmbed] });
+        } catch {
+          // DMs closed — fall through to workspace channel
+        }
+
+        try {
+          if (row.workspace_channel_id) {
+            const ch = await cachedClient.channels.fetch(row.workspace_channel_id).catch(() => null);
+            if (ch && ch.isTextBased() && "send" in ch) {
+              await (ch as TextChannel).send({ embeds: [clawbackEmbed] }).catch(() => {});
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
+
       notifyStatusChange(cachedClient, notifyRow, previousStatus, newStatus, result.reason, false)
         .catch(() => {});
     }

@@ -180,12 +180,15 @@ async function clawback(
 
   // Atomic clawback guard: use a CAS on live_status so two concurrent ticks
   // (e.g. two workers racing on restart) can't double-clawback the same row.
+  const clawbackReviewReason = `Auto-rejected: comment ${confirmedStatus} after payout (post-payout check).${confirmedReason ? " Reason: " + confirmedReason : ""}`;
   const cas = await db.execute<{ id: string }>(
     sql`UPDATE submissions
         SET live_status            = ${confirmedStatus},
             removal_reason         = ${confirmedReason ?? null},
             last_checked_at        = now(),
-            live_status_changed_at = now()
+            live_status_changed_at = now(),
+            review_status          = 'rejected',
+            review_reason          = ${clawbackReviewReason}
         WHERE id = ${parseInt(row.id)}
           AND live_status NOT IN ('removed', 'deleted')
         RETURNING id`

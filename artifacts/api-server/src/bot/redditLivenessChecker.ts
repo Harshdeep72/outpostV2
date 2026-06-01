@@ -220,12 +220,16 @@ async function performReversalWithConfirmation(
             trust_score       = GREATEST(0, trust_score - 0.05)
         WHERE discord_id = ${row.discord_id}`
   );
+  const removalReason = (firstReason ?? confirm.reason) ?? null;
+  const reviewReason = `Auto-rejected: comment ${firstDetectedStatus}${isEarlyCheck ? " (detected by early 5-min check)" : ""}.${removalReason ? " Reason: " + removalReason : ""}`;
   await db.execute(
     sql`UPDATE submissions
         SET moved_to_available = 1,
-            available_at = COALESCE(available_at, now()),
-            live_status = ${firstDetectedStatus},
-            removal_reason = ${(firstReason ?? confirm.reason) ?? null}
+            available_at       = COALESCE(available_at, now()),
+            live_status        = ${firstDetectedStatus},
+            removal_reason     = ${removalReason},
+            review_status      = 'rejected',
+            review_reason      = ${reviewReason}
         WHERE id = ${parseInt(row.id)}`
   );
 

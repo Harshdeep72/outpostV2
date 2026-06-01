@@ -652,3 +652,140 @@ export async function runLivenessTickNow(): Promise<{ ok: boolean; reason?: stri
   await tick(cachedClient);
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Bulk all-time liveness scan — no age cutoff, no recheck interval filter.
+// Checks every accepted submission currently showing live_status='live'.
+// Fires in the background; the HTTP response returns immediately with a count.
+// ---------------------------------------------------------------------------
+
+let bulkScanRunning = false;
+
+export interface BulkScanResult {
+  ok: boolean;
+  reason?: string;
+  total: number;
+  checked: number;
+  removed: number;
+  deleted: number;
+}
+
+export async function startBulkLivenessScanAllTime(): Promise<{ ok: boolean; reason?: string; total: number }> {
+  if (!cachedClient) return { ok: false, reason: "Liveness checker not started yet", total: 0 };
+  if (bulkScanRunning) return { ok: false, reason: "A bulk scan is already in progress", total: 0 };
+
+  // Count how many we'll scan so the UI can show a meaningful message.
+  const countRes = await db.execute<{ n: string }>(
+    sql`SELECT COUNT(*)::text AS n
+        FROM submissions
+        WHERE review_status = 'accepted'
+          AND moved_to_available = 0
+          AND live_status = 'live'
+          AND proof_link ILIKE '%reddit.com%'`
+  );
+  const total = parseInt(countRes.rows[0]?.n ?? "0");
+
+  // Fire the scan in the background without awaiting.
+  void runBulkScan(cachedClient, total);
+
+  logger.info({ total }, "Bulk liveness scan: started in background");
+  return { ok: true, total };
+}
+
+async function runBulkScan(client: Client, total: number): Promise<void> {
+  bulkScanRunning = true;
+  let checked = 0;
+  let removed = 0;
+  let deleted = 0;
+
+  try {
+    logger.info({ total }, "Bulk liveness scan: beginning full scan of all live accepted submissions");
+
+    // Process in pages of BATCH_SIZE so we don't hold a huge result set in memory.
+    while (true) {
+      const rows = await db.execute<SubmissionRow>(
+        sql`SELECT s.id::text          AS id,
+                   s.proof_link        AS proof_link,
+                   s.discord_id        AS discord_id,
+                   s.task_id::text     AS task_id,
+                   s.reward::text      AS reward,
+                   s.live_status       AS live_status,
+                   u.reddit_username   AS reddit_username,
+                   u.workspace_channel_id AS workspace_channel_id
+            FROM submissions s
+            LEFT JOIN users u ON u.id = s.user_id
+            WHERE s.review_status = 'accepted'
+              AND s.moved_to_available = 0
+              AND s.live_status = 'live'
+              AND s.proof_link ILIKE '%reddit.com%'
+              AND (s.bulk_scan_checked_at IS NULL OR s.bulk_scan_checked_at < now() - interval '1 hour')
+            ORDER BY s.id ASC
+            LIMIT ${BATCH_SIZE}`
+      );
+
+      if (rows.rows.length === 0) break;
+
+      for (const row of rows.rows) {
+        // Immediately mark as scanned so we don't revisit in this run if we loop.
+        await db.execute(
+          sql`UPDATE submissions SET bulk_scan_checked_at = now() WHERE id = ${parseInt(row.id)}`
+        ).catch(() => { /* non-fatal */ });
+
+        const result = await recheckRedditLiveness(row.proof_link);
+        const oldStatus = row.live_status as LiveStatus;
+        const newStatus = result.liveStatus;
+        checked++;
+
+        if (newStatus === "unknown") {
+          // Transient — skip
+          await new Promise((r) => setTimeout(r, 300));
+          continue;
+        }
+
+        if (newStatus === oldStatus) {
+          await new Promise((r) => setTimeout(r, 300));
+          continue;
+        }
+
+        // Status changed — update DB.
+        await db.execute(
+          sql`UPDATE submissions
+              SET live_status = ${newStatus},
+                  last_checked_at = now(),
+                  live_status_changed_at = now(),
+                  removal_reason = ${result.reason ?? null}
+              WHERE id = ${parseInt(row.id)}`
+        );
+
+        logger.info(
+          { submissionId: row.id, discordId: row.discord_id, oldStatus, newStatus, reason: result.reason },
+          "Bulk liveness scan: status changed"
+        );
+
+        if (newStatus === "removed") removed++;
+        if (newStatus === "deleted") deleted++;
+
+        if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live") {
+          // Perform reversal with confirmation (45-second check + clawback).
+          await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
+        } else {
+          await notifyStatusChange(client, row, oldStatus, newStatus, result.reason, false);
+        }
+
+        // Courtesy delay to avoid hammering Reddit proxies.
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+
+    logger.info({ total, checked, removed, deleted }, "Bulk liveness scan: completed");
+  } catch (err) {
+    logger.error({ err }, "Bulk liveness scan: failed");
+  } finally {
+    bulkScanRunning = false;
+  }
+}
+
+/** Returns whether a bulk scan is currently in progress. */
+export function isBulkScanRunning(): boolean {
+  return bulkScanRunning;
+}

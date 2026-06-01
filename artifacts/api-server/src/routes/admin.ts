@@ -8,7 +8,7 @@ import { getPrimaryGuild } from "../bot/discord-client.js";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../bot/setup.js";
 import { makeEmbed } from "../bot/util.js";
 import { COLORS } from "../bot/constants.js";
-import { runLivenessTickNow } from "../bot/redditLivenessChecker.js";
+import { runLivenessTickNow, startBulkLivenessScanAllTime, isBulkScanRunning } from "../bot/redditLivenessChecker.js";
 import { invalidateUser } from "../bot/cache.js";
 import { getCooldownConfig, setCooldownConfig, getAutoBumpConfig, setAutoBumpConfig, getMaxRedditAccounts, setMaxRedditAccounts, getProxies, setProxies } from "../lib/settings.js";
 import { reloadProxiesNow, getProxyMetrics } from "../bot/proxy.js";
@@ -2274,6 +2274,19 @@ router.post("/liveness/run-now", requireAuth, async (req, res) => {
   const result = await runLivenessTickNow();
   if (!result.ok) return res.status(503).json(result);
   res.json(result);
+});
+
+// Bulk all-time liveness scan — checks every accepted live submission regardless
+// of age. Starts in the background and returns immediately with the total count.
+router.post("/liveness/bulk-scan-all", requireAdminRole, async (_req, res) => {
+  const result = await startBulkLivenessScanAllTime();
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
+});
+
+// Returns whether a bulk scan is currently running.
+router.get("/liveness/bulk-scan-status", requireAuth, (_req, res) => {
+  res.json({ running: isBulkScanRunning() });
 });
 
 router.post("/sweep/run-now", requireAuth, async (req, res) => {

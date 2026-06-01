@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { get, patch } from "@/lib/api";
+import { get, patch, post } from "@/lib/api";
 import { cn, formatCurrency, timeAgo, statusColor } from "@/lib/utils";
 
 type LiveStatus = "live" | "removed" | "deleted" | "unknown";
@@ -84,8 +84,36 @@ export default function Submissions() {
   const [statusTab, setStatusTab] = useState("all");
   const [selected, setSelected] = useState<AdminSubmission | null>(null);
   const [reason, setReason] = useState("");
+  const [scanStatus, setScanStatus] = useState<{ running: boolean; total?: number; toast?: string } | null>(null);
   const qc = useQueryClient();
   const limit = 20;
+
+  // Poll scan status while a bulk scan is in progress
+  useEffect(() => {
+    if (!scanStatus?.running) return;
+    const id = setInterval(async () => {
+      try {
+        const s = await get<{ running: boolean }>("/admin/liveness/bulk-scan-status");
+        if (!s.running) {
+          setScanStatus(prev => ({ running: false, total: prev?.total, toast: "Scan complete — table updating…" }));
+          qc.invalidateQueries({ queryKey: ["admin-submissions"] });
+          setTimeout(() => setScanStatus(null), 4000);
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [scanStatus?.running, qc]);
+
+  const bulkScan = useMutation({
+    mutationFn: () => post<{ ok: boolean; total: number }>("/admin/liveness/bulk-scan-all", {}),
+    onSuccess: (data) => {
+      setScanStatus({ running: true, total: data.total });
+    },
+    onError: () => {
+      setScanStatus({ running: false, toast: "Could not start scan — try again." });
+      setTimeout(() => setScanStatus(null), 4000);
+    },
+  });
 
   const { data, isLoading, isFetching, dataUpdatedAt } = useQuery<SubmissionListResponse>({
     queryKey: ["admin-submissions", page, statusTab],
@@ -122,11 +150,50 @@ export default function Submissions() {
           <h1 className="text-xl font-bold text-foreground">Submissions</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{data?.total ?? "..."} total</p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" title="Auto-refreshes every 15s. Live status comes from the Reddit checker.">
-          <span className={cn("inline-block w-1.5 h-1.5 rounded-full", isFetching ? "bg-green-400 animate-pulse" : "bg-green-400/40")} />
-          Live · refreshed {dataUpdatedAt ? timeAgo(new Date(dataUpdatedAt).toISOString()) : "—"}
+        <div className="flex items-center gap-3">
+          {/* Bulk liveness scan */}
+          <button
+            onClick={() => bulkScan.mutate()}
+            disabled={bulkScan.isPending || scanStatus?.running}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+              scanStatus?.running
+                ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300 cursor-not-allowed"
+                : "border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary"
+            )}
+            title="Check every accepted 'Live' submission on Reddit — regardless of age"
+          >
+            {scanStatus?.running ? (
+              <>
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                Scanning{scanStatus.total ? ` ${scanStatus.total}` : ""}…
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+                Scan All Live
+              </>
+            )}
+          </button>
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground" title="Auto-refreshes every 15s. Live status comes from the Reddit checker.">
+            <span className={cn("inline-block w-1.5 h-1.5 rounded-full", isFetching ? "bg-green-400 animate-pulse" : "bg-green-400/40")} />
+            Live · refreshed {dataUpdatedAt ? timeAgo(new Date(dataUpdatedAt).toISOString()) : "—"}
+          </div>
         </div>
       </div>
+
+      {/* Scan toast */}
+      {scanStatus?.toast && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-500/30 bg-green-500/10 text-green-300 text-xs font-medium w-fit">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          {scanStatus.toast}
+        </div>
+      )}
 
       <div className="flex gap-1 p-1 bg-secondary/50 rounded-lg w-fit">
         {STATUS_TABS.map(tab => (

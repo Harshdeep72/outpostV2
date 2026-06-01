@@ -370,8 +370,8 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
     prewrittenComment = (input.prewrittenComment ?? "").trim() || null;
   }
 
-  if (prewrittenComment && prewrittenComment.length > 1500) {
-    prewrittenComment = prewrittenComment.slice(0, 1500);
+  if (prewrittenComment && prewrittenComment.length > 5000) {
+    prewrittenComment = prewrittenComment.slice(0, 5000);
   }
 
   return {

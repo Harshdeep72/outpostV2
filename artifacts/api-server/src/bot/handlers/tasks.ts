@@ -171,7 +171,7 @@ export async function handleCreateTaskCommand(interaction: ChatInputCommandInter
         new TextInputBuilder().setCustomId("instructions").setLabel("Instructions (optional)").setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000)
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("comment").setLabel(commentLabel).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1500)
+        new TextInputBuilder().setCustomId("comment").setLabel(commentLabel).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(4000)
       )
     );
   }

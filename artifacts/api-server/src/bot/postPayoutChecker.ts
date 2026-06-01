@@ -190,7 +190,7 @@ async function clawback(
             review_status          = 'rejected',
             review_reason          = ${clawbackReviewReason}
         WHERE id = ${parseInt(row.id)}
-          AND live_status NOT IN ('removed', 'deleted')
+          AND review_status = 'accepted'
         RETURNING id`
   );
 

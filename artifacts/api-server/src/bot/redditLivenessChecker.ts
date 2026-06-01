@@ -504,6 +504,8 @@ export interface SubmissionCheckResult {
   statusChanged: boolean;
   isReversible: boolean;
   reversalTriggered: boolean;
+  autoRejected: boolean;
+  clawbackTriggered: boolean;
   reason: string | null;
   errorMessage: string | null;
 }
@@ -518,6 +520,7 @@ interface FullSubmissionRow extends Record<string, unknown> {
   live_status: string;
   review_status: string;
   moved_to_available: number;
+  user_id: string | null;
   reddit_username: string | null;
   workspace_channel_id: string | null;
 }
@@ -532,7 +535,8 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
   const base: SubmissionCheckResult = {
     found: false, submissionId, proofLink: null,
     previousStatus: null, newStatus: null,
-    statusChanged: false, isReversible: false, reversalTriggered: false,
+    statusChanged: false, isReversible: false,
+    reversalTriggered: false, autoRejected: false, clawbackTriggered: false,
     reason: null, errorMessage: null,
   };
 
@@ -541,6 +545,7 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
                s.proof_link            AS proof_link,
                s.discord_id            AS discord_id,
                s.task_id::text         AS task_id,
+               s.user_id::text         AS user_id,
                s.reward::text          AS reward,
                s.live_status           AS live_status,
                s.review_status         AS review_status,
@@ -582,7 +587,10 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
   }
 
   const previousStatus = row.live_status as LiveStatus;
-  const isReversible = row.review_status === "accepted" && Number(row.moved_to_available) === 0;
+  const reviewStatus = row.review_status;
+  const movedToAvailable = Number(row.moved_to_available);
+  // Reversible = accepted + not yet paid out (balance is still in balance_pending)
+  const isReversible = reviewStatus === "accepted" && movedToAvailable === 0;
 
   const result = await recheckRedditLiveness(row.proof_link);
   const newStatus = result.liveStatus;
@@ -609,26 +617,122 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
   }
 
   let reversalTriggered = false;
-  if (
-    (newStatus === "removed" || newStatus === "deleted") &&
-    isReversible &&
-    cachedClient
-  ) {
-    const syntheticRow: SubmissionRow = {
-      id: row.id,
-      proof_link: row.proof_link,
-      discord_id: row.discord_id,
-      task_id: row.task_id,
-      reward: row.reward,
-      live_status: previousStatus,
-      reddit_username: row.reddit_username,
-      workspace_channel_id: row.workspace_channel_id,
-    };
-    const client = cachedClient;
-    // Fire-and-forget — the interaction reply is already sent by this point.
-    performReversalWithConfirmation(client, syntheticRow, previousStatus, newStatus, result.reason, false)
-      .catch((err) => logger.error({ err, submissionId }, "checkSubmissionNow: reversal error"));
-    reversalTriggered = true;
+  let autoRejected = false;
+  let clawbackTriggered = false;
+
+  if (newStatus === "removed" || newStatus === "deleted") {
+    const reviewReason = `Auto-rejected by /checksubmission: comment ${newStatus}.${result.reason ? " Reason: " + result.reason : ""}`;
+
+    if (isReversible && cachedClient) {
+      // Case 1: accepted + unpaid — 45-second confirmation then claw back balance_pending.
+      // performReversalWithConfirmation now also sets review_status = 'rejected'.
+      const syntheticRow: SubmissionRow = {
+        id: row.id,
+        proof_link: row.proof_link,
+        discord_id: row.discord_id,
+        task_id: row.task_id,
+        reward: row.reward,
+        live_status: previousStatus,
+        reddit_username: row.reddit_username,
+        workspace_channel_id: row.workspace_channel_id,
+      };
+      const client = cachedClient;
+      performReversalWithConfirmation(client, syntheticRow, previousStatus, newStatus, result.reason, false)
+        .catch((err) => logger.error({ err, submissionId }, "checkSubmissionNow: reversal error"));
+      reversalTriggered = true;
+
+    } else if (reviewStatus === "accepted" && movedToAvailable === 1) {
+      // Case 2: already paid out — claw back from balance_available immediately.
+      const reward = parseFloat(row.reward);
+      const userId = parseInt(row.user_id ?? "0");
+      const cas = await db.execute<{ id: string }>(
+        sql`UPDATE submissions
+            SET review_status      = 'rejected',
+                review_reason      = ${reviewReason},
+                live_status        = ${newStatus},
+                removal_reason     = ${result.reason ?? null},
+                last_checked_at    = now(),
+                live_status_changed_at = now()
+            WHERE id = ${submissionId}
+              AND live_status NOT IN ('removed', 'deleted')
+            RETURNING id`
+      );
+      if (cas.rows.length > 0 && userId > 0) {
+        await db.execute(
+          sql`UPDATE users
+              SET balance_available = GREATEST(0, balance_available - ${reward}::numeric),
+                  total_earned      = GREATEST(0, total_earned - ${reward}::numeric)
+              WHERE id = ${userId}`
+        );
+        clawbackTriggered = true;
+        autoRejected = true;
+        logger.warn(
+          { submissionId, discordId: row.discord_id, reward, newStatus },
+          "checkSubmissionNow: post-payout clawback executed + submission rejected"
+        );
+        try { logSubmissionEvent(submissionId, "removed"); } catch { /* non-fatal */ }
+        if (cachedClient) {
+          const paidRow = {
+            id: row.id, proof_link: row.proof_link,
+            discord_id: row.discord_id, task_id: row.task_id,
+            reward: row.reward, live_status: newStatus as LiveStatus,
+            reddit_username: row.reddit_username,
+            workspace_channel_id: row.workspace_channel_id,
+          };
+          notifyStatusChange(cachedClient, paidRow, previousStatus, newStatus, result.reason, false)
+            .catch(() => {});
+        }
+      }
+
+    } else if (reviewStatus === "pending_hold") {
+      // Case 3: in hold, not yet paid — reject immediately, no balance to reverse.
+      await db.execute(
+        sql`UPDATE submissions
+            SET review_status   = 'rejected',
+                review_reason   = ${reviewReason},
+                live_status     = ${newStatus},
+                removal_reason  = ${result.reason ?? null},
+                last_checked_at = now()
+            WHERE id = ${submissionId}`
+      );
+      // Small trust deduction — same as hold-end rejection.
+      await db.execute(
+        sql`UPDATE users SET trust_score = GREATEST(0, trust_score - 3) WHERE discord_id = ${row.discord_id}`
+      );
+      autoRejected = true;
+      logger.warn(
+        { submissionId, discordId: row.discord_id, newStatus },
+        "checkSubmissionNow: pending_hold submission rejected (comment not live)"
+      );
+      if (cachedClient) {
+        const holdRow = {
+          id: row.id, proof_link: row.proof_link,
+          discord_id: row.discord_id, task_id: row.task_id,
+          reward: row.reward, live_status: newStatus as LiveStatus,
+          reddit_username: row.reddit_username,
+          workspace_channel_id: row.workspace_channel_id,
+        };
+        notifyStatusChange(cachedClient, holdRow, previousStatus, newStatus, result.reason, false)
+          .catch(() => {});
+      }
+
+    } else if (reviewStatus === "pending") {
+      // Case 4: still in manual review queue — close it out as rejected.
+      await db.execute(
+        sql`UPDATE submissions
+            SET review_status   = 'rejected',
+                review_reason   = ${reviewReason},
+                live_status     = ${newStatus},
+                removal_reason  = ${result.reason ?? null},
+                last_checked_at = now()
+            WHERE id = ${submissionId}`
+      );
+      autoRejected = true;
+      logger.warn(
+        { submissionId, discordId: row.discord_id, newStatus },
+        "checkSubmissionNow: pending submission rejected (comment not live)"
+      );
+    }
   }
 
   return {
@@ -640,6 +744,8 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
     statusChanged: newStatus !== "unknown" && newStatus !== previousStatus,
     isReversible,
     reversalTriggered,
+    autoRejected,
+    clawbackTriggered,
     reason: result.reason ?? null,
     errorMessage: null,
   };

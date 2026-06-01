@@ -614,13 +614,24 @@ export async function handleCheckSubmission(interaction: ChatInputCommandInterac
     lines.push(
       "",
       "⏳ **Reversal in progress** — running 45-second confirmation check.",
-      "If confirmed removed, the payout will be clawed back and a notice posted to task-logs."
+      "If confirmed removed, the payout will be clawed back, the submission marked **Rejected**, and a notice posted to task-logs."
+    );
+  } else if (result.clawbackTriggered) {
+    lines.push(
+      "",
+      "💸 **Clawback executed** — the reward has been deducted from the user's available balance.",
+      "Submission marked **Rejected**."
+    );
+  } else if (result.autoRejected) {
+    lines.push(
+      "",
+      "🚫 **Submission auto-rejected** — marked as Rejected. No funds were at stake."
     );
   } else if (
     (currentStatus === "removed" || currentStatus === "deleted") &&
     !result.isReversible
   ) {
-    lines.push("", "ℹ️ Payout already processed or submission already reversed — no financial action taken.");
+    lines.push("", "ℹ️ Submission already reversed or rejected — no further financial action taken.");
   }
 
   const embed = makeEmbed(color)

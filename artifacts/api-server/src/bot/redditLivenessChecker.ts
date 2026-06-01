@@ -244,7 +244,7 @@ async function performReversalWithConfirmation(
           VALUES (${userIdNum}, ${row.discord_id}, 0,
                   ${'Payout reversed (-0.05 trust): post ' + firstDetectedStatus + (isEarlyCheck ? ' (early check)' : '') + ' before verify cleared'},
                   ${parseInt(row.id)}, now())`
-    ).catch((err) => {
+    ).catch((err: any) => {
       logger.warn({ err, submissionId: row.id }, "Reddit liveness: trust_logs insert failed (non-fatal)");
     });
   }

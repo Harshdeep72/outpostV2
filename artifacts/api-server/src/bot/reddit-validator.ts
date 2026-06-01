@@ -967,13 +967,13 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   if (osintUrl) {
     try {
       logger.info({ postId: parsed.postId }, "recheckRedditLiveness: checking via redditOSINT remote API");
-      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(url)}`, {
+      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(proofUrl)}`, {
         headers: { "Accept": "application/json" }
       });
       if (res.ok) {
         const data = await res.json() as any;
         if (data.success === false && data.message?.includes("not found")) {
-          return { liveStatus: "not_found", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404) via redditOSINT." };
+          return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404) via redditOSINT." };
         }
         if (data.success) {
           const liveness = data.liveness || (data.data && data.data.liveness);

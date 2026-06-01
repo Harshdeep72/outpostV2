@@ -424,7 +424,7 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
       status: mappedStatus,
       failures: mappedStatus === "live" ? [] : [`Comment is ${mappedStatus}`],
       authorFound: data.author,
-      title: null,
+      title: undefined,
       upvotes: data.upvotes,
       postLive: mappedStatus === "live",
       verifiedVia: "json_proxy",

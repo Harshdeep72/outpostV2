@@ -279,7 +279,7 @@ export function startPendingProcessor(client: Client) {
           continue;
         }
 
-        if (liveness.status === "live") {
+        if (liveness.liveStatus === "live") {
           // Comment is still live — pay out now.
           // Funds were never in balance_pending for pending_hold rows, so we
           // credit balance_available and total_earned directly in one step.
@@ -311,7 +311,7 @@ export function startPendingProcessor(client: Client) {
 
           logger.info({ subId, discordId: row.discord_id, reward: row.reward }, "Hold processor: comment still live — payout issued");
 
-        } else if (liveness.status === "unknown") {
+        } else if (liveness.liveStatus === "unknown") {
           // Transient / inconclusive first reading — Reddit API blip, proxy
           // block, or AutoMod temporary filter window. Do NOT reject on a
           // single inconclusive result. Send to manual review so no valid
@@ -331,7 +331,7 @@ export function startPendingProcessor(client: Client) {
           // pass before making any permanent decision — a single bad reading
           // (transient AutoMod window, Reddit API inconsistency, proxy blip)
           // must never permanently reject a valid submission.
-          const firstDetected = liveness.status === "deleted" ? "deleted" : "removed";
+          const firstDetected = liveness.liveStatus === "deleted" ? "deleted" : "removed";
           const firstReason = liveness.reason;
 
           logger.warn(
@@ -358,7 +358,7 @@ export function startPendingProcessor(client: Client) {
             continue;
           }
 
-          if (confirmation.status === "live") {
+          if (confirmation.liveStatus === "live") {
             // Confirmation says live — the first reading was a false positive
             // (transient remove / AutoMod temporary filter). Pay out.
             logger.info(
@@ -393,7 +393,7 @@ export function startPendingProcessor(client: Client) {
             await notifySubmissionCleared(client, row);
             void notifyFalsePositiveOverride(row, firstDetected);
 
-          } else if (confirmation.status === "unknown") {
+          } else if (confirmation.liveStatus === "unknown") {
             // Both reads inconclusive enough that we can't be certain.
             // Manual review is the only safe outcome.
             logger.warn(
@@ -413,7 +413,7 @@ export function startPendingProcessor(client: Client) {
 
           } else {
             // Both reads agree: removed or deleted. Now it is safe to reject.
-            const confirmedStatus = confirmation.status === "deleted" ? "deleted" : "removed";
+            const confirmedStatus = confirmation.liveStatus === "deleted" ? "deleted" : "removed";
 
             logger.warn(
               { subId, discordId: row.discord_id, confirmedStatus },

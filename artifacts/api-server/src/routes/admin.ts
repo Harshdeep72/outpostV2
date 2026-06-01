@@ -1895,31 +1895,44 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
     // If submission was just accepted and wasn't accepted before, credit the user's balance.
     const justAccepted = reviewStatus === "accepted" && prevSub?.reviewStatus !== "accepted";
     if (justAccepted) {
-      // Enforce a 10-minute minimum hold on all first-time accepts so the
-      // early liveness check (fires at 5 min post-accept) always runs before
-      // the pending processor can release funds. Without this, accepting a
-      // submission with available_at in the past (e.g. 0-delay tasks) would
-      // immediately credit balance_available and set moved_to_available=1,
-      // making the deletion check say "already processed" when the post is gone.
-      const MIN_HOLD_MS = 10 * 60 * 1000;
-      const rawAvailableAt = updated.availableAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const safeAvailableAt = rawAvailableAt.getTime() < Date.now() + MIN_HOLD_MS
-        ? new Date(Date.now() + MIN_HOLD_MS)
-        : rawAvailableAt;
+      // Guard: if the payout was already cleared by the pendingProcessor
+      // (moved_to_available = 1), do NOT re-queue it or double-credit
+      // balance_pending. This handles the reject → re-accept cycle on the
+      // dashboard where justAccepted fires again even though the submission
+      // was already paid out, which previously caused a second "Payout
+      // Cleared" notification and inflated the user's balance.
+      if (prevSub?.movedToAvailable === 1) {
+        req.log.warn(
+          { submissionId: updated.id, userId: updated.userId },
+          "Dashboard: re-accept on already-cleared submission — skipping balance credit and queue reset to prevent double-payout"
+        );
+      } else {
+        // Enforce a 10-minute minimum hold on all first-time accepts so the
+        // early liveness check (fires at 5 min post-accept) always runs before
+        // the pending processor can release funds. Without this, accepting a
+        // submission with available_at in the past (e.g. 0-delay tasks) would
+        // immediately credit balance_available and set moved_to_available=1,
+        // making the deletion check say "already processed" when the post is gone.
+        const MIN_HOLD_MS = 10 * 60 * 1000;
+        const rawAvailableAt = updated.availableAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const safeAvailableAt = rawAvailableAt.getTime() < Date.now() + MIN_HOLD_MS
+          ? new Date(Date.now() + MIN_HOLD_MS)
+          : rawAvailableAt;
 
-      // Always route through the pending queue — never immediate balance_available
-      // credit on a first-time accept. The pendingProcessor will release funds
-      // once safeAvailableAt arrives and the early liveness check has had a
-      // chance to catch deletions.
-      await pool.query(
-        `UPDATE users SET balance_pending = balance_pending + $1 WHERE id = $2`,
-        [updated.reward, updated.userId]
-      );
-      await pool.query(
-        `UPDATE submissions SET available_at = $1, moved_to_available = 0 WHERE id = $2`,
-        [safeAvailableAt, updated.id]
-      );
-      req.log.info({ submissionId: updated.id, userId: updated.userId, reward: updated.reward, safeAvailableAt }, "Dashboard: submission accepted, queued for pending release");
+        // Always route through the pending queue — never immediate balance_available
+        // credit on a first-time accept. The pendingProcessor will release funds
+        // once safeAvailableAt arrives and the early liveness check has had a
+        // chance to catch deletions.
+        await pool.query(
+          `UPDATE users SET balance_pending = balance_pending + $1 WHERE id = $2`,
+          [updated.reward, updated.userId]
+        );
+        await pool.query(
+          `UPDATE submissions SET available_at = $1, moved_to_available = 0 WHERE id = $2`,
+          [safeAvailableAt, updated.id]
+        );
+        req.log.info({ submissionId: updated.id, userId: updated.userId, reward: updated.reward, safeAvailableAt }, "Dashboard: submission accepted, queued for pending release");
+      }
     }
 
     // ----- Dashboard reject/flag mirror -----

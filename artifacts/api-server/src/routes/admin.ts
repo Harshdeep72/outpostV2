@@ -1428,6 +1428,21 @@ router.post("/campaigns/:id/create-sheet", requireAuth, async (req, res) => {
     try {
       const { invalidateSheetsConfigCache, backfillCampaignSheet } = await import("../lib/sheetsLogger.js");
       invalidateSheetsConfigCache();
+
+      // Run liveness check BEFORE backfill so the sheet is populated with
+      // up-to-date live_status values rather than potentially stale ones.
+      // This is awaited intentionally — the backfill must see fresh DB state.
+      try {
+        const { runCampaignLivenessCheck } = await import("../bot/redditLivenessChecker.js");
+        const lv = await runCampaignLivenessCheck(id);
+        req.log.info(
+          { campaignId: id, ...lv },
+          "create-sheet: sheet-generation liveness check complete"
+        );
+      } catch (lvErr) {
+        req.log.warn({ lvErr, campaignId: id }, "create-sheet: liveness check failed (non-fatal)");
+      }
+
       // Auto-backfill: if the campaign already has submissions (e.g. operator
       // created the sheet AFTER the campaign was running / completed), dump
       // them all into the new sheet so it isn't empty. Non-fatal on failure

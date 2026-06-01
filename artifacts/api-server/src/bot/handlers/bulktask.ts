@@ -11,6 +11,7 @@ import { makeEmbed, hasModRole } from "../util.js";
 import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { createBulkTasksFromCsv, parseTaskCsv } from "../task-creation.js";
+import { runCampaignLivenessCheck } from "../redditLivenessChecker.js";
 
 function extractSheetId(url: string): { sheetId: string; gid: string } | null {
   try {
@@ -184,6 +185,14 @@ async function processBulkFromUrl(
     { campaignId: result.campaignId, created: result.created, scheduled: result.scheduled, intervalMinutes: result.intervalMinutes, maxClaimsPerUser, errors: result.errors.length },
     "Bulk import from Sheets complete",
   );
+
+  // Fire-and-forget: run a one-shot liveness check on all existing accepted/
+  // pending_hold + live submissions in this campaign. For brand-new campaigns
+  // this is a no-op; it becomes meaningful if /bulktask is used to re-import
+  // or supplement an existing campaign that already has submissions.
+  runCampaignLivenessCheck(result.campaignId).catch((err) => {
+    logger.warn({ err, campaignId: result.campaignId }, "Sheet-generation liveness check (bulktask): unhandled error");
+  });
 }
 
 export async function handleBulkTaskCsvModal(interaction: ModalSubmitInteraction) {

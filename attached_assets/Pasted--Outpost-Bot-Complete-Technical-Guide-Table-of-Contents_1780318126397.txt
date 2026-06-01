@@ -1,0 +1,918 @@
+# Outpost Bot — Complete Technical Guide
+
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [Architecture](#2-architecture)
+3. [Server Setup Flow](#3-server-setup-flow)
+4. [Verification Flow](#4-verification-flow)
+5. [Task Creation Flow](#5-task-creation-flow)
+6. [Task Claiming Flow](#6-task-claiming-flow)
+7. [Submission & Validation Flow](#7-submission--validation-flow)
+8. [Reddit Proof Validation — Deep Dive](#8-reddit-proof-validation--deep-dive)
+9. [Liveness Checking — Background Loop](#9-liveness-checking--background-loop)
+10. [Payout & Wallet System](#10-payout--wallet-system)
+11. [Trust Score System](#11-trust-score-system)
+12. [Withdrawal & Weekly Payout Flow](#12-withdrawal--weekly-payout-flow)
+13. [Referral System](#13-referral-system)
+14. [Leaderboard System](#14-leaderboard-system)
+15. [All Slash Commands — Full Reference](#15-all-slash-commands--full-reference)
+16. [Background Processes](#16-background-processes)
+17. [Database Schema — Key Tables](#17-database-schema--key-tables)
+18. [Environment Variables](#18-environment-variables)
+
+---
+
+## 1. Overview
+
+**Outpost Bot** is a Discord bot that manages a paid micro-task ecosystem. Task creators post jobs (Reddit comments, posts, Twitter engagement, Quora answers, etc.) with a dollar reward attached. Verified Discord members claim those tasks, complete the work, submit proof, and get paid.
+
+The bot's core responsibilities:
+
+- **Task lifecycle management** — creation, claiming, proof submission, approval/rejection, payout
+- **Reddit proof validation** — automated liveness checking using an authenticated Python scraper that impersonates a real browser
+- **Fraud prevention** — hold periods, clawbacks, trust scores, duplicate account detection
+- **Automated payouts** — weekly automatic payment processing with multi-creator approval gates
+- **User management** — verification, flagging, trust scores, wallet configuration
+
+---
+
+## 2. Architecture
+
+```
+Discord ──► Bot Process (discord.js v14)
+                │
+                ├── Slash Command Handlers (interactions.ts)
+                ├── Button / Modal Handlers
+                ├── Background Timers
+                │     ├── redditLivenessChecker  (every 5 min)
+                │     ├── pendingProcessor        (every 60 sec)
+                │     ├── postPayoutChecker       (periodic)
+                │     ├── claimExpirer            (periodic)
+                │     ├── autoBumper              (periodic)
+                │     ├── campaignQueueProcessor  (periodic)
+                │     └── weeklyPayouts           (every Wednesday)
+                │
+                └── Reddit Validation Layer
+                      ├── Python curl_cffi client  (Chrome TLS impersonation)
+                      ├── Reddit session cookie manager (refreshed every 25 min)
+                      └── deepRedditCommentChecker / recheckRedditLiveness
+
+PostgreSQL (Drizzle ORM)
+React Admin Dashboard (Vite, port 8080)
+Express API Server (routes /api/*)
+```
+
+**Monorepo packages:**
+- `@workspace/api-server` — Express server + Discord bot + all background loops
+- `@workspace/db` — Drizzle schema and database client
+- `@workspace/dashboard` — React admin UI
+
+---
+
+## 3. Server Setup Flow
+
+Run once by an admin when first deploying to a new Discord server.
+
+**Command:** `/setup`
+
+**What it creates:**
+
+| Category | Channels / Roles |
+|---|---|
+| Roles | `@Admin`, `@Mod`, `@Verified` |
+| Community | `#announcements`, `#start-here`, `#guide`, `#general`, `#referral-events` |
+| Earn | `#tasks`, `#leaderboard`, `#verification-log`, `#task-logs`, `#withdrawal-log` |
+| Workspace | Dynamic per-user private channels (created on claim) |
+
+The bot saves all channel/role IDs into `server_config` in the database. Every subsequent flow reads from this config cache (invalidated by `/setup`).
+
+---
+
+## 4. Verification Flow
+
+Users must verify their Reddit identity before they can claim tasks.
+
+### 4.1 How it works
+
+1. An admin posts the verification panel in a channel using `/verify`.
+2. A user clicks **"Link Reddit Account"** — the bot opens a modal asking for their Reddit username.
+3. The bot fetches the user's Reddit profile via the public API and checks:
+   - Account exists and is not suspended
+   - **Karma ≥ 100** (combined post + comment karma)
+   - **Account age ≥ 30 days**
+   - Reddit username is not already linked to another Discord account (anti-alt protection)
+4. A verification embed is posted in `#verification-log` with **Accept / Reject / Reject with Reason** buttons for mods.
+5. When a mod clicks **Accept**:
+   - The user is granted the `@Verified` role
+   - A private workspace channel is created for them (`#workspace-username`)
+   - Their Reddit username is stored in the `users` table
+   - A welcome message is posted in their workspace
+
+### 4.2 Multiple Reddit accounts
+
+Verified users can link additional Reddit accounts (up to the server's configured limit). This lets workers use different accounts for different tasks when platform cooldowns apply. Each additional account goes through the same karma/age check.
+
+### 4.3 Admin verification override
+
+`/verifyuser user:@User action:verify reddit_username:username` — lets admins manually verify someone without going through the button flow. Useful for manual onboarding.
+
+### 4.4 Revoking verification
+
+`/verifyuser user:@User action:unverify` — removes the `@Verified` role and marks the user as unverified in the database.
+
+---
+
+## 5. Task Creation Flow
+
+### 5.1 Single task — `/createtask`
+
+**Options:**
+
+| Option | Required | Description |
+|---|---|---|
+| `type` | ✅ | Task type (see list below) |
+| `reward` | ✅ | Dollar amount ($0.01–$1000) |
+| `time_limit` | ❌ | Minutes to complete after claiming (5–1440, default 60) |
+| `hold_hours` | ❌ | Hours to hold payout after acceptance (0–720, default 168 = 7 days) |
+| `min_trust` | ❌ | Minimum trust score required to claim (0–500, default 0) |
+| `cooldown_enabled` | ❌ | Whether the task cooldown applies (default true) |
+| `image` | ❌ | Reference image shown on the task card |
+
+After submitting options, a **modal** opens asking for:
+- Task title / instructions
+- Target URL (e.g., the Reddit post to comment on)
+
+**Supported task types:**
+
+| Platform | Types |
+|---|---|
+| Reddit | `comment`, `post`, `upvote`, `share`, `join` |
+| Twitter | `twitter_follow`, `twitter_like`, `twitter_retweet`, `twitter_reply`, `twitter_tweet` |
+| Quora | `quora_answer`, `quora_follow`, `quora_upvote` |
+
+The task is posted as an embed card in `#tasks` with a **"Claim Task"** button.
+
+### 5.2 Bulk tasks — `/bulktask`
+
+**Options:**
+
+| Option | Description |
+|---|---|
+| `sheets_url` | Public Google Sheets URL (leave blank to paste CSV manually) |
+| `interval_minutes` | Minutes between each task drop (0 = post all at once, max 1440) |
+| `max_claims_per_user` | How many tasks from this campaign a single user can claim (0 = unlimited) |
+
+If `interval_minutes > 0`, the bot creates a **campaign** and drip-feeds tasks one at a time at the set interval using the `campaignQueueProcessor` background loop.
+
+All bulk tasks share the same campaign ID, allowing `/cancelcampaign` to cancel all remaining tasks in one command.
+
+---
+
+## 6. Task Claiming Flow
+
+1. A user clicks **"Claim Task"** on the task embed in `#tasks`.
+2. The bot runs a series of gate checks:
+   - User is `@Verified`
+   - User is not flagged
+   - User's trust score ≥ task's `min_trust`
+   - User has not already claimed/completed this task
+   - Task is still open (not expired, cancelled, or fully claimed)
+   - Task cooldown has elapsed (if `cooldown_enabled`)
+3. On pass, the bot:
+   - Creates or reuses the user's private workspace channel
+   - Posts the full task details embed with the proof submission button
+   - Sets a claim expiry timer (`time_limit` minutes)
+4. If the user does not submit proof before the timer expires, the claim is automatically cancelled and the task becomes available again.
+
+---
+
+## 7. Submission & Validation Flow
+
+### 7.1 Submitting proof
+
+Inside their workspace channel, the user clicks **"Submit Proof"**. A modal opens asking for their proof URL (or additional text depending on task type).
+
+### 7.2 Auto-validation (Reddit tasks)
+
+For `comment` tasks, the bot immediately runs full Reddit proof validation:
+
+1. **URL parsing** — `parseRedditProofUrl` extracts `subreddit`, `postId`, `commentId`.
+2. **Share link resolution** — mobile share links (`/s/XXXX`) are resolved to full URLs first.
+3. **Deep comment check** — `deepCheckComment` fetches the comment via the Python curl_cffi client (see Section 8).
+4. If **passed**:
+   - Submission is stored with `review_status = 'pending_hold'`
+   - An early 5-minute liveness check is scheduled (catches immediate deletions)
+   - The user sees a "Submission received, hold period active" message
+5. If **failed**:
+   - The bot posts the specific failure reason (wrong post, author mismatch, comment deleted, etc.)
+   - The user can resubmit
+
+### 7.3 Manual review (non-Reddit / failed auto)
+
+Tasks that cannot be auto-validated go to a review queue visible in `#task-logs`. Mods see **Accept / Reject / Reject with Reason** buttons on each submission embed.
+
+- **Accept** → `review_status = 'accepted'`, reward goes into `balance_pending`, 7-day hold begins
+- **Reject** → `review_status = 'rejected'`, user is notified with the reason
+
+### 7.4 Submission states
+
+| `review_status` | `live_status` | Meaning |
+|---|---|---|
+| `pending` | `live` | Awaiting manual mod review |
+| `pending_hold` | `live` | Auto-approved, hold period running |
+| `accepted` | `live` | Mod-approved, hold period running |
+| `accepted` | `live` | Hold cleared, funds in `balance_available` |
+| `rejected` | `deleted` / `removed` | Rejected — content gone |
+| `rejected` | `live` | Rejected for another reason (wrong author, etc.) |
+
+---
+
+## 8. Reddit Proof Validation — Deep Dive
+
+This is the core technical differentiator of the bot. Reddit aggressively blocks datacenter IPs, deprecated unauthenticated JSON, and serves different content to logged-out users. The validation stack is designed to defeat all of these.
+
+### 8.1 URL parsing — `parseRedditProofUrl`
+
+Handles all Reddit URL formats:
+
+```
+https://www.reddit.com/r/sub/comments/postId/title/commentId/
+https://www.reddit.com/r/sub/comments/postId/comment/commentId/   ← Android share format
+https://www.reddit.com/user/name/comments/postId/title/commentId/
+https://old.reddit.com/r/sub/comments/postId/
+```
+
+Returns: `{ subreddit, postId, commentId | null, isUserPost }`
+
+### 8.2 Share link resolution
+
+Reddit mobile shares produce `https://www.reddit.com/r/sub/s/XXXX` — these contain no IDs. The bot resolves them by:
+
+1. Sending a `HEAD` request with `redirect: manual` and reading the `Location` header
+2. If that fails, sending a `GET` and parsing `<link rel="canonical">` from the HTML
+
+### 8.3 The Python curl_cffi client
+
+Located at `scripts/reddit_client.py`. Invoked by `executePythonRedditClient()` in TypeScript.
+
+**Why it exists:** Reddit serves login walls and Cloudflare challenges to datacenter IPs making standard `fetch` calls. `curl_cffi` impersonates Chrome 120 at the TLS fingerprint level — Reddit's CDN cannot distinguish it from a real browser.
+
+**How it works:**
+1. TypeScript spawns a Python subprocess, sends fetch parameters as JSON on stdin
+2. Python initialises a `curl_cffi` session impersonating `chrome120`
+3. Attaches the Reddit session cookie from `REDDIT_SESSION_COOKIE` env var
+4. Optionally visits a "warm-up" HTML URL first (to set cookies/referer), then fetches the actual JSON endpoint
+5. Returns the parsed result as JSON on stdout
+6. If a proxy list exists (`proxies.txt`), tries up to 4 different proxies on failure
+
+### 8.4 Session cookie management — `redditCookieManager`
+
+The `REDDIT_SESSION_COOKIE` is kept fresh automatically:
+
+- `reddit_cookie_refresher.py` runs every **25 minutes** in the background
+- It fetches a guest session from Reddit's homepage and extracts the session cookie
+- The fresh cookie is mirrored into `process.env.REDDIT_SESSION_COOKIE` so all Python subprocesses inherit it automatically
+- Falls back to a manually-set `REDDIT_SESSION_COOKIE` env var if auto-refresh fails
+
+### 8.5 Deep comment check — `deepCheckComment`
+
+Called for every comment proof submission and every `/checksubmission` command.
+
+**Sole source: Python JSON**
+
+The bot fetches:
+```
+GET https://www.reddit.com/r/{sub}/comments/{postId}/_/{commentId}.json?context=3&raw_json=1
+```
+with the session cookie via the Python curl_cffi client.
+
+**Decision logic:**
+
+| Result | Verdict |
+|---|---|
+| Fetch failed (network/block) | `api_unreachable` — retry later, no action taken |
+| Fetch succeeded, comment in thread | Classify via `classifyComment()` |
+| Fetch succeeded, comment absent from thread | `comment_missing` — definitively gone |
+
+**`classifyComment()` logic** — reads Reddit's internal fields:
+
+| Signal | Status |
+|---|---|
+| `author === "[deleted]"` or `body === "[deleted]"` or `removed_by_category === "author"` | `deleted_by_author` |
+| `body === "[removed]"` or `removed_by_category === "moderator"` | `removed_by_mod` |
+| `removed_by_category === "anti_evil_ops"` or `"reddit"` | `removed_by_reddit` |
+| `removed_by_category === "automod_filtered"` | `removed_by_automod` |
+| No removal signals | `live` |
+
+**Additional checks (for initial submission validation):**
+
+| Check | Failure status |
+|---|---|
+| Comment is on wrong post | `wrong_post` |
+| Comment is in wrong subreddit | `wrong_subreddit` |
+| `author` doesn't match the claiming user | `author_mismatch` |
+| Comment was posted before the task was created (>24h grace) | `stale_proof` |
+| Comment body is shorter than `MIN_COMMENT_CHARS` | `comment_too_short` |
+
+### 8.6 Post liveness check — `recheckRedditLiveness`
+
+Used for ongoing monitoring of posts (not comment-specific). Uses **four parallel sources**:
+
+1. **Python JSON** (primary) — `https://www.reddit.com/r/sub/comments/postId.json`
+2. **Python HTML** — `old.reddit.com` page with `curl_cffi`
+3. **Proxy HTML** — `old.reddit.com` via HTTP proxy (fast fallback)
+4. **RSS** — `https://www.reddit.com/r/sub/comments/postId/.rss`
+
+Old.reddit is the most reliable HTML source — it is fully server-rendered, so removed posts carry CSS classes (`deleted`, `removed`, `spam`) and selftext `[removed]` markers that are readable without JavaScript.
+
+For **comment URLs**, `recheckRedditLiveness` delegates entirely to `deepCheckComment` (Python JSON only).
+
+### 8.7 Status → liveness mapping
+
+| `detailedStatus` | `liveStatus` (used for wallet decisions) |
+|---|---|
+| `live` | `live` |
+| `deleted_by_author`, `comment_deleted` | `deleted` |
+| `comment_missing` | `deleted` |
+| `removed_by_mod`, `removed_by_reddit`, `removed_by_automod` | `removed` |
+| `api_unreachable` | `unknown` (no action, retry next tick) |
+
+---
+
+## 9. Liveness Checking — Background Loop
+
+### 9.1 Main liveness checker (`redditLivenessChecker`)
+
+Runs every **5 minutes**. Scans accepted submissions that:
+- `review_status = 'accepted'`
+- `moved_to_available = 0` (still within hold period)
+- `submitted_at` within the last 14 days
+- Not checked in the last recheck interval
+
+For each submission, it calls `recheckRedditLiveness` and then:
+
+**If status is `live` (unchanged):** Update `last_checked_at`, no action.
+
+**If status changed to `removed` or `deleted`:**
+1. Wait **45 seconds** and re-check (confirmation pass — prevents false reversals from transient Reddit API blips)
+2. If confirmed removed: execute reversal (see Section 10.3)
+3. If second check shows `live` again: revert the status change, log a "false positive averted" message
+
+**If status is `unknown`:** Update `last_checked_at`, try again next tick.
+
+### 9.2 Early 5-minute check
+
+When a comment submission is auto-approved, a one-shot check is scheduled for 5 minutes later. This catches users who delete their comment immediately after getting the "Accepted" notification.
+
+### 9.3 Post-payout checker (`postPayoutChecker`)
+
+A separate background loop checks submissions where `moved_to_available = 1` (funds already cleared to available balance). This catches users who keep their comment live during the hold period but delete it after getting paid.
+
+Window: submissions within the last **14 days** after payout.
+
+---
+
+## 10. Payout & Wallet System
+
+### 10.1 Balance types
+
+| Field | What it holds |
+|---|---|
+| `balance_pending` | Rewards for manually accepted submissions still within their hold period |
+| `balance_available` | Withdrawable funds — cleared hold or directly approved |
+| `total_earned` | Lifetime total (only decremented on clawback) |
+
+### 10.2 The `pendingProcessor` (runs every 60 seconds)
+
+Two branches run in every tick:
+
+**Branch A — `accepted` submissions past their hold:**
+```sql
+WHERE review_status = 'accepted'
+  AND moved_to_available = 0
+  AND available_at <= now()
+```
+For each: deduct from `balance_pending`, add to `balance_available`, set `moved_to_available = 1`.
+
+**Branch B — `pending_hold` submissions (auto-approved Reddit tasks):**
+```sql
+WHERE review_status = 'pending_hold'
+  AND available_at <= now()
+```
+For each: run a final liveness check.
+- **Still live** → bypass `balance_pending`, credit `balance_available` directly, set `moved_to_available = 1`, change `review_status` to `accepted`
+- **Deleted/removed** → reject, no credit, notify user
+
+`moved_to_available` acts as an atomic idempotency flag — once set to `1`, no further credits or deductions can be applied to that submission.
+
+### 10.3 Clawback mechanism
+
+When the liveness checker confirms a submission is removed/deleted:
+
+1. **Deduct from balance_pending first** (funds likely still there):
+   ```sql
+   SET balance_pending   = GREATEST(0, balance_pending   - reward),
+       balance_available = GREATEST(0, balance_available - GREATEST(0, reward - balance_pending)),
+       total_earned      = GREATEST(0, total_earned      - GREATEST(0, reward - balance_pending))
+   ```
+   The `GREATEST(0, ...)` prevents negative balances. If `balance_pending` already absorbed the full deduction, `balance_available` is untouched.
+
+2. **Update submission:**
+   ```sql
+   SET moved_to_available = 1,
+       review_status      = 'rejected',
+       live_status        = 'deleted' | 'removed',
+       review_reason      = 'Auto-rejected: comment deleted'
+   ```
+
+3. **Trust score** — deduct `0.05`
+
+4. **Notify user** — DM embed: "Your submission was found removed. $X.XX has not been credited."
+
+5. If the funds had already moved to `balance_available` (payout already cleared) — the DM says "Payout Reversed" and shows the exact dollar amount deducted from their available balance.
+
+### 10.4 Manual admin tools
+
+| Command | Effect |
+|---|---|
+| `/addbalance user:@U amount:X reason:Y` | Adds `X` to `balance_available` directly; DMs the user |
+| `/removebalance user:@U amount:X reason:Y` | Deducts `X` from `balance_available` (clamps at 0); DMs the user |
+| `/approvesubmission id:N` | Re-approves a wrongly rejected submission: credits reward to `balance_available`, restores 0.05 trust, DMs user |
+
+---
+
+## 11. Trust Score System
+
+### 11.1 What it is
+
+A numeric score (default 0, no upper cap in code) stored on the `users` table. Tasks can require a minimum trust score (`min_trust` option on `/createtask`). Users below the threshold cannot claim that task.
+
+### 11.2 Score changes
+
+| Event | Delta |
+|---|---|
+| Hold period cleared, submission confirmed live | `+2` |
+| Submission auto-rejected (comment removed during hold) | `-0.05` |
+| Payout reversed post-clawback | `-0.05` |
+| User flagged by admin | `-10` |
+
+All changes are logged to the `trust_logs` table with: `user_id`, `discord_id`, `delta`, `reason`, `related_submission_id`, `created_at`.
+
+### 11.3 Trust badges
+
+Displayed on wallet cards and leaderboard:
+
+| Score range | Badge |
+|---|---|
+| < 50 | (none) |
+| 50–149 | 🛡️ |
+| 150–299 | ⭐ |
+| 300–499 | 💎 |
+| 500+ | 👑 |
+
+### 11.4 `/flag` and `/unflag`
+
+Flagging a user:
+- Blocks them from claiming new tasks
+- Blocks their payouts
+- Applies a `-10` trust score penalty
+- Logged in `trust_logs`
+
+Unflagging restores their ability to claim and receive payouts (trust score is not automatically restored).
+
+---
+
+## 12. Withdrawal & Weekly Payout Flow
+
+### 12.1 Weekly automatic payouts
+
+The `weeklyPayouts` handler fires every **Wednesday at midnight UTC**.
+
+1. **Atomic lock** — updates `server_config.last_payout_at` with a `WHERE last_payout_at < this_week` guard, ensuring only one bot instance runs the payout even if multiple are running.
+2. **Eligibility query:**
+   - `balance_available > 0`
+   - `verified = true`
+   - Not flagged
+   - Has a configured payout method (UPI, PayPal, crypto wallet, or Binance Pay)
+3. **For each eligible user:**
+   - SQL `FOR UPDATE` locks the user row
+   - Zeroes out `balance_available`
+   - Creates a `withdrawals` record with the amount and payout details
+   - Posts a notification in the user's workspace channel
+
+### 12.2 Withdrawal approval — multi-creator gate
+
+Each task has a creator (the admin who created it). When a withdrawal is processed, the bot splits it into `withdrawal_creator_payouts` — one record per task creator whose tasks contributed to that withdrawal.
+
+The withdrawal reaches `approved` status only when **every creator** has marked their portion as paid by clicking a button in `#withdrawal-log`.
+
+This gives task creators visibility into what they owe and prevents one creator's delay from blocking another.
+
+### 12.3 Payment methods
+
+| Method | Command | Fields |
+|---|---|---|
+| UPI (INR auto-payout) | `/setupi upi_id:X` | UPI ID |
+| PayPal | `/setpaypal email:X` | Email address |
+| Crypto (ETH/BTC/USDT) | `/setwallet coin:X address:Y network:Z` | Address + chain |
+| Binance Pay | `/setwallet coin:BINANCE address:Y` | Binance Pay ID (8–13 digits) |
+
+Supported crypto networks: `TRC20`, `ERC20`, `BEP20`, `SOL`, `POLYGON`, `ARB`, `OP`, `BASE`, `LIGHTNING`
+
+---
+
+## 13. Referral System
+
+### 13.1 How it works
+
+1. Any user gets a unique 8-character referral code via `/referral`.
+2. A new user runs `/referraluse code:XXXXXXXX` **before** verifying.
+3. The referral is recorded but not paid out yet.
+4. Payout triggers when the referred user:
+   - Successfully verifies (`@Verified` role granted)
+   - Completes and gets paid for their **first task**
+
+### 13.2 Rewards
+
+The referral reward amount is configured per-server. The referrer receives it added to their `balance_available` when the condition is met.
+
+### 13.3 Commands
+
+| Command | Description |
+|---|---|
+| `/referral` | View your referral code, how many people you've referred, and earnings from referrals |
+| `/referraluse code:XXXXXXXX` | Apply someone else's referral code before verifying (one-time, cannot be changed after) |
+
+---
+
+## 14. Leaderboard System
+
+The leaderboard ranks users by total accepted submission rewards in the **current week** (Monday–Sunday UTC).
+
+- **Auto-refresh** — the leaderboard embed in `#leaderboard` is updated every 5 minutes by the background loop
+- **Weekly reset** — rankings reset at the start of each new week; history is preserved in the database
+- `/leaderboard` — manually force a refresh of the leaderboard embed
+- `/resetleaderboard` — reposts a fresh leaderboard message (useful if the old message was deleted)
+
+Top 10 earners are shown with their wallet balance and total accepted task count. Trust score badges are displayed alongside each entry.
+
+---
+
+## 15. All Slash Commands — Full Reference
+
+### User Commands
+
+---
+
+#### `/verify`
+Post the Reddit verification panel.
+
+> **Who:** Admin / Mod only  
+> **Effect:** Posts an embed in the current channel with a "Link Reddit Account" button. Users click it to start verification.
+
+---
+
+#### `/wallet [user]`
+Display a wallet card showing earnings and balance.
+
+> **Options:** `user` (optional — defaults to yourself)  
+> **Shows:** `balance_pending`, `balance_available`, `total_earned`, trust score, trust badge, payout method status
+
+---
+
+#### `/profile [user]`
+Show a user's linked Reddit accounts and earnings summary.
+
+> **Options:** `user` (optional — defaults to yourself)  
+> **Shows:** All linked Reddit usernames, karma, account age, task completion count, verification status
+
+---
+
+#### `/mystatus`
+Check your own active submissions in the verification hold.
+
+> **DM-safe:** Yes  
+> **Shows:** Each pending/accepted submission — task type, reward amount, live status, time until `available_at`
+
+---
+
+#### `/setupi upi_id`
+Save your UPI ID for INR auto-payouts.
+
+> **DM-safe:** Yes  
+> `upi_id` — Your UPI payment ID (e.g. `name@bankname`)
+
+---
+
+#### `/setpaypal email`
+Save your PayPal email for payouts.
+
+> **DM-safe:** Yes  
+> `email` — Your PayPal email address
+
+---
+
+#### `/setwallet coin address [network]`
+Save a crypto wallet or Binance Pay ID.
+
+> **DM-safe:** Yes  
+> `coin` — `ETH`, `USDT`, `BTC`, or `BINANCE`  
+> `address` — Wallet address or Binance Pay ID  
+> `network` — Required for USDT: `TRC20`, `ERC20`, `BEP20`, `SOL`, `POLYGON`, `ARB`, `OP`, `BASE`, `LIGHTNING`, `BTC`
+
+---
+
+#### `/referral`
+View your referral code and earnings.
+
+> **DM-safe:** Yes  
+> **Shows:** Your unique code, referred count, pending/paid referral earnings
+
+---
+
+#### `/referraluse code`
+Apply a referral code before verifying.
+
+> **DM-safe:** Yes  
+> `code` — 8-character referral code from a friend  
+> **Note:** Must be run before `/verify`. Cannot be changed after.
+
+---
+
+#### `/digest on|off|status`
+Control the once-a-day DM digest of earnings and new tasks.
+
+> **DM-safe:** Yes  
+> Subcommands: `on`, `off`, `status`
+
+---
+
+#### `/stats`
+Show global community statistics.
+
+> **DM-safe:** Yes  
+> **Shows:** Total tasks created/completed, total earnings paid out, active users this week, top earner
+
+---
+
+#### `/ping`
+Show bot and infrastructure health.
+
+> **DM-safe:** Yes  
+> **Shows:** Discord API latency, database round-trip time, proxy success rate, Reddit API reachability, cache stats
+
+---
+
+#### `/leaderboard`
+Refresh the leaderboard embed in `#leaderboard`.
+
+---
+
+#### `/taskhistory [user]`
+Show tasks **created** by an admin (or yourself).
+
+> `user` — optional; defaults to yourself
+
+---
+
+#### `/payouthistory [user]`
+Show your own submission / earning history.
+
+> **DM-safe:** Yes  
+> `user` — optional; defaults to yourself
+
+---
+
+### Admin / Mod Commands
+
+---
+
+#### `/setup`
+Bootstrap all server channels, categories, and roles.
+
+> **Who:** Admin only  
+> **Safe to re-run** — skips anything that already exists.
+
+---
+
+#### `/createtask type reward [time_limit] [hold_hours] [min_trust] [cooldown_enabled] [image]`
+Create a single task and post it in `#tasks`.
+
+> `type` — Task platform/action (see Section 5.1)  
+> `reward` — Dollar amount ($0.01–$1000)  
+> `time_limit` — Minutes to complete after claiming (5–1440, default 60)  
+> `hold_hours` — Hold period before payout (0–720 hours, default 168)  
+> `min_trust` — Minimum trust score to claim (0–500, default 0)  
+> `cooldown_enabled` — Whether task cooldown applies (default true)  
+> `image` — Reference image for the task card  
+> **Then:** A modal opens for title, instructions, and target URL.
+
+---
+
+#### `/bulktask [sheets_url] [interval_minutes] [max_claims_per_user]`
+Import multiple tasks from Google Sheets or CSV.
+
+> `sheets_url` — Public Google Sheets URL (skip to paste CSV manually)  
+> `interval_minutes` — Drip-feed delay between task drops (0 = all at once, max 1440)  
+> `max_claims_per_user` — Max tasks a single user can claim from this campaign (0 = unlimited)
+
+---
+
+#### `/canceltask task_id [reason]`
+Cancel a single open task.
+
+> `task_id` — Numeric task ID  
+> `reason` — Shown to any users who have claimed the task
+
+---
+
+#### `/cancelcampaign campaign_id [reason]`
+Cancel all remaining tasks in a campaign.
+
+> `campaign_id` — Numeric campaign ID  
+> `reason` — Shown to affected claimers
+
+---
+
+#### `/checksubmission id`
+Immediately re-check a submission's Reddit liveness.
+
+> **Who:** Mod / Admin  
+> `id` — Submission ID (shown in task-logs, e.g. `1284`)  
+> **Effect:** Runs the full Python JSON liveness check right now. If found removed and the submission is reversible, triggers the 45-second confirmation + clawback. Shows the result as an embed.
+
+---
+
+#### `/approvesubmission id`
+Manually approve a wrongly-rejected submission and credit the reward.
+
+> **Who:** Mod / Admin  
+> `id` — Submission ID (e.g. `1284`)  
+> **Effect:**
+> - Credits the full reward to the user's `balance_available`
+> - Restores the `0.05` trust deduction applied during rejection
+> - Sets `review_status = 'accepted'`, `live_status = 'live'`
+> - Clears the rejection reason
+> - DMs the user: "Your submission has been manually reviewed and approved — $X.XX added to your balance"
+> - Logs to `trust_logs` for audit trail
+> - Safe: only works on submissions with `review_status = 'rejected'`
+
+---
+
+#### `/addbalance user amount [reason]`
+Add money to a user's available balance.
+
+> **Who:** Admin only  
+> `amount` — $0.01–$10,000  
+> `reason` — Shown to the user in a DM  
+> **Effect:** Credits `balance_available` directly (bypasses submission flow). DMs the user.
+
+---
+
+#### `/removebalance user amount [reason]`
+Remove money from a user's available balance.
+
+> **Who:** Admin only  
+> `amount` — $0.01–$10,000  
+> **Effect:** Deducts from `balance_available` (clamped at $0). DMs the user.
+
+---
+
+#### `/addmod user` / `/removemod user`
+Grant or remove the `@Mod` role.
+
+> **Who:** Admin only
+
+---
+
+#### `/addadmin user`
+Grant the `@Admin` role.
+
+> **Who:** Admin only
+
+---
+
+#### `/flag user [reason]` / `/unflag user`
+Flag a user (blocks claiming and payouts) or clear the flag.
+
+> **Who:** Mod / Admin  
+> `reason` — Optional; stored in the database and shown to other mods
+
+---
+
+#### `/verifyuser user action [reddit_username]`
+Manually verify or unverify a Discord user.
+
+> `action` — `verify` or `unverify`  
+> `reddit_username` — Required when verifying without a prior linked account
+
+---
+
+#### `/adminpayouthistory [user]`
+Show payouts reviewed by an admin (the reviewer's perspective).
+
+---
+
+#### `/massdm [user] [target]`
+Send a DM to server members.
+
+> `user` — DM only this one user (skips the group target)  
+> `target` — `verified`, `unverified`, or `all`  
+> **Then:** A modal opens for the message content.
+
+---
+
+#### `/sendstats`
+Post each verified user a personalized task-stats card in their workspace channel.
+
+---
+
+#### `/notifywalletmigration`
+DM users with legacy crypto wallets (no network saved) prompting them to re-save with a network.
+
+---
+
+#### `/testurl url [reddit_username]`
+Run a Reddit URL through the full validation system and show every detail of the result.
+
+> **Who:** Admin only  
+> `url` — Full Reddit comment or post URL  
+> `reddit_username` — Optional — check authorship against this username  
+> **Shows:** Live status, verified-via source, author found, subreddit, comment date, post live, body preview (200 chars), check duration
+
+---
+
+#### `/health`
+Deep infrastructure health check.
+
+> **Who:** Admin only  
+> **Shows:** DB latency (ms), proxy pool success rate, Reddit API reachability via Python client, session cookie status, last cookie refresh time
+
+---
+
+#### `/resetleaderboard`
+Delete and repost the leaderboard message.
+
+---
+
+#### `/profile [user]`
+View a user's Reddit accounts, karma, and earnings. (Also available to regular users for themselves.)
+
+---
+
+## 16. Background Processes
+
+| Process | Interval | What it does |
+|---|---|---|
+| `redditLivenessChecker` | 5 min | Re-checks accepted submissions still in hold; triggers clawbacks on deletions |
+| `pendingProcessor` | 60 sec | Moves cleared-hold rewards from `balance_pending` → `balance_available`; finalises `pending_hold` submissions |
+| `postPayoutChecker` | Periodic | Checks submissions where `moved_to_available = 1` (already paid) for post-payout deletions |
+| `claimExpirer` | Periodic | Cancels claims where the user didn't submit proof within `time_limit` minutes |
+| `autoBumper` | Periodic | Re-posts old task cards in `#tasks` if they've been pushed too far up the channel |
+| `campaignQueueProcessor` | Periodic | Drip-feeds tasks from a campaign at the configured `interval_minutes` |
+| `weeklyPayouts` | Every Wednesday UTC | Processes `balance_available` for all eligible users into `withdrawals` records |
+| `expiryReminder` | Periodic | DMs users whose claim is about to expire to remind them to submit proof |
+| `unclaimedNotifier` | Periodic | Posts reminders about tasks that have had no claims for a while |
+| `dailyDigestSender` | Daily | DMs opted-in users a summary of their weekly earnings and any new active tasks |
+| `redditCookieManager` | 25 min | Refreshes the Reddit session cookie used by the Python curl_cffi client |
+| `earnerRoles` | Periodic | Grants/removes Discord roles based on trust score thresholds |
+| `streakTracker` | Periodic | Updates submission streaks for gamification |
+
+---
+
+## 17. Database Schema — Key Tables
+
+| Table | Key Fields | Purpose |
+|---|---|---|
+| `users` | `discord_id`, `reddit_username`, `balance_pending`, `balance_available`, `total_earned`, `trust_score`, `verified`, `flagged` | All user state |
+| `tasks` | `id`, `type`, `reward`, `hold_hours`, `time_limit`, `min_trust`, `creator_discord_id`, `status` | Task definitions |
+| `submissions` | `id`, `user_id`, `task_id`, `proof_link`, `review_status`, `live_status`, `reward`, `moved_to_available`, `available_at`, `last_checked_at`, `removal_reason` | Per-submission state |
+| `withdrawals` | `id`, `user_id`, `amount`, `status`, `payout_method`, `created_at` | Withdrawal records |
+| `withdrawal_creator_payouts` | `withdrawal_id`, `creator_discord_id`, `amount`, `paid_at` | Per-creator split tracking |
+| `trust_logs` | `user_id`, `discord_id`, `delta`, `reason`, `related_submission_id`, `created_at` | Audit trail for all balance/trust changes |
+| `server_config` | `guild_id`, channel IDs, role IDs, `last_payout_at` | Per-server setup config |
+| `campaigns` | `id`, `guild_id`, `interval_minutes`, `next_drop_at`, `remaining_count` | Bulk task campaigns |
+| `referrals` | `referrer_id`, `referee_id`, `reward`, `paid_at` | Referral tracking |
+
+---
+
+## 18. Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | ✅ | Discord bot token |
+| `DISCORD_CLIENT_ID` | ✅ | Discord application client ID |
+| `DISCORD_GUILD_ID` | ✅ | Target Discord server ID |
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `SESSION_SECRET` | ✅ | Express session secret for admin dashboard |
+| `REDDIT_SESSION_COOKIE` | Recommended | Reddit session cookie for authenticated scraping (auto-refreshed if refresher script is available) |
+| `REDDIT_CLIENT_ID` | Optional | Reddit OAuth app client ID (used as OAuth fallback) |
+| `REDDIT_CLIENT_SECRET` | Optional | Reddit OAuth app secret |
+| `PYTHON_PATH` | Optional | Override Python interpreter path (default: `venv/bin/python` or `python3`) |
+| `MIN_COMMENT_CHARS` | Optional | Minimum comment body length to pass validation (default: 0 = disabled) |
+| `REPLIT_DOMAINS` | Optional | Trusted domains for the admin dashboard CORS/session config |
+
+---
+
+*Guide reflects the codebase as of June 2026. All command behaviors, validation logic, and background process intervals are sourced directly from the production source code.*

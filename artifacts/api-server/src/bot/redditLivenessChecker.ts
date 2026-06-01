@@ -3,6 +3,7 @@ import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { db } from "@workspace/db";
 import { logger } from "../lib/logger.js";
 import { recheckRedditLiveness, parseRedditProofUrl, type LiveStatus } from "./reddit-validator.js";
+import { deepCheckComment } from "./deepRedditCommentChecker.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
@@ -910,4 +911,186 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
 /** Returns whether a bulk scan is currently in progress. */
 export function isBulkScanRunning(): boolean {
   return bulkScanRunning;
+}
+
+// ---------------------------------------------------------------------------
+// Sheet-generation liveness check — fires once when a Google Sheet is created
+// or linked to a campaign (via /bulktask or the admin dashboard).
+//
+// Queries all submissions for the campaign that are (accepted|pending_hold)
+// + live, runs deepCheckComment via the Python curl_cffi client for each,
+// updates live_status in the DB, and calls logSubmissionEvent so the sheet
+// reflects the freshest status before it is populated / sent.
+//
+// This is a one-shot check — it does NOT trigger reversals or Discord DMs.
+// It is intentionally fire-and-forget at the call site for /bulktask, and
+// awaited (before backfill) at the call site for the admin create-sheet route.
+// ---------------------------------------------------------------------------
+
+interface SheetCheckRow {
+  id: string;
+  proof_link: string;
+  task_link: string | null;
+  task_type: string;
+  reddit_username_used: string | null;
+  reddit_username: string | null;
+}
+
+function mapDeepCheckToLiveStatus(
+  status: string
+): LiveStatus | null {
+  if (status === "live") return "live";
+  if (
+    status === "deleted_by_author" ||
+    status === "comment_missing" ||
+    status === "comment_deleted" ||
+    status === "not_found"
+  ) return "deleted";
+  if (
+    status === "removed_by_mod" ||
+    status === "removed_by_reddit" ||
+    status === "removed_by_automod"
+  ) return "removed";
+  // api_unreachable, url_invalid, author_mismatch, wrong_post, wrong_subreddit,
+  // stale_proof, comment_too_short, locked — not a liveness signal, skip.
+  return null;
+}
+
+export interface CampaignLivenessCheckResult {
+  checked: number;
+  changed: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
+ * Run a one-shot deepCheckComment liveness pass over all comment submissions
+ * in the given campaign that are (accepted|pending_hold) and live.
+ *
+ * Updates live_status in the submissions table and calls logSubmissionEvent
+ * so the associated Google Sheet is updated before it is shown to the operator.
+ *
+ * Safe to call fire-and-forget. Never throws.
+ */
+export async function runCampaignLivenessCheck(
+  campaignId: number
+): Promise<CampaignLivenessCheckResult> {
+  const result: CampaignLivenessCheckResult = { checked: 0, changed: 0, skipped: 0, errors: 0 };
+
+  try {
+    const rows = await db.execute<SheetCheckRow>(sql`
+      SELECT
+        s.id::text                AS id,
+        s.proof_link              AS proof_link,
+        s.reddit_username_used    AS reddit_username_used,
+        t.type                    AS task_type,
+        t.task_link               AS task_link,
+        u.reddit_username         AS reddit_username
+      FROM submissions s
+      JOIN tasks t ON t.id = s.task_id
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE t.campaign_id = ${campaignId}
+        AND s.review_status IN ('accepted', 'pending_hold')
+        AND s.live_status = 'live'
+        AND t.type = 'comment'
+    `);
+
+    if (rows.rows.length === 0) {
+      logger.info(
+        { campaignId },
+        "Sheet-generation liveness check: no eligible submissions, skipping"
+      );
+      return result;
+    }
+
+    logger.info(
+      { campaignId, count: rows.rows.length },
+      "Sheet-generation liveness check: starting"
+    );
+
+    for (const row of rows.rows) {
+      if (!isRedditUrl(row.proof_link)) {
+        result.skipped++;
+        continue;
+      }
+
+      const expectedAuthor =
+        row.reddit_username_used?.trim() ||
+        row.reddit_username?.trim() ||
+        "";
+
+      if (!expectedAuthor) {
+        logger.warn(
+          { submissionId: row.id },
+          "Sheet-generation liveness check: no reddit username found, skipping"
+        );
+        result.skipped++;
+        continue;
+      }
+
+      const taskLink = row.task_link ?? "";
+
+      try {
+        const checkResult = await deepCheckComment(
+          row.proof_link,
+          expectedAuthor,
+          taskLink
+        );
+
+        result.checked++;
+
+        const newLiveStatus = mapDeepCheckToLiveStatus(checkResult.status);
+
+        if (newLiveStatus === null) {
+          // Not a liveness signal (transient error, validation mismatch, etc.)
+          result.skipped++;
+          continue;
+        }
+
+        if (newLiveStatus === "live") {
+          // Still live — just bump last_checked_at.
+          await db.execute(
+            sql`UPDATE submissions
+                SET last_checked_at = now()
+                WHERE id = ${parseInt(row.id)}`
+          );
+        } else {
+          // Status changed — update DB and log to sheet.
+          await db.execute(
+            sql`UPDATE submissions
+                SET live_status            = ${newLiveStatus},
+                    last_checked_at        = now(),
+                    live_status_changed_at = now()
+                WHERE id = ${parseInt(row.id)}`
+          );
+          result.changed++;
+          logger.info(
+            { submissionId: row.id, campaignId, newLiveStatus, deepStatus: checkResult.status },
+            "Sheet-generation liveness check: live_status updated"
+          );
+          try {
+            logSubmissionEvent(parseInt(row.id), "removed");
+          } catch { /* swallowed */ }
+        }
+      } catch (err) {
+        result.errors++;
+        logger.warn(
+          { err, submissionId: row.id, campaignId },
+          "Sheet-generation liveness check: error checking submission"
+        );
+      }
+
+      // Small courtesy delay so we don't slam the Python client.
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    logger.info(
+      { campaignId, ...result },
+      "Sheet-generation liveness check: complete"
+    );
+  } catch (err) {
+    logger.error({ err, campaignId }, "Sheet-generation liveness check: outer error");
+  }
+
+  return result;
 }

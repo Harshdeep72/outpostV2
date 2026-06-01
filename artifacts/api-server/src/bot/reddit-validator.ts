@@ -2,6 +2,7 @@ import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
 import { getRedditSessionCookie } from "./redditCookieManager.js";
+import { executePythonRedditClient } from "./pythonClient.js";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -960,6 +961,33 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   const postRssUrl  = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/.rss`;
   const postJsonUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}.json?raw_json=1`;
   const postVisitUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/`;
+
+  // ── 0. redditOSINT API (PRIMARY) ──────────────────────────────────────────
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (osintUrl) {
+    try {
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: checking via redditOSINT remote API");
+      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(url)}`, {
+        headers: { "Accept": "application/json" }
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        if (data.success === false && data.message?.includes("not found")) {
+          return { liveStatus: "not_found", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404) via redditOSINT." };
+        }
+        if (data.success) {
+          const liveness = data.liveness || (data.data && data.data.liveness);
+          if (liveness === "live") {
+            return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+          } else if (liveness === "removed" || liveness === "deleted") {
+            return { liveStatus: "removed", detailedStatus: "removed_by_reddit", statusLabel: "Post removed", reason: "Post removed or deleted via redditOSINT." };
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn({ err, postId: parsed.postId }, "recheckRedditLiveness: redditOSINT check failed, falling back to local python");
+    }
+  }
 
   // Fire all sources in parallel so we always pay only one round-trip.
   // Python JSON (primary) + Python HTML (secondary HTML) + proxy HTML + RSS.

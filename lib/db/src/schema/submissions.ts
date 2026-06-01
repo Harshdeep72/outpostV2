@@ -28,9 +28,6 @@ export const submissions = pgTable("submissions", {
   // Which source successfully verified the proof comment: 'oauth', 'json_proxy',
   // 'html', 'rss', or 'manual'. NULL for legacy rows or non-Reddit proofs.
   proofVerifiedVia: text("proof_verified_via"),
-  // Timestamp set by the admin bulk liveness scan so we don't re-visit the
-  // same row twice in a single scan run.
-  bulkScanCheckedAt: timestamp("bulk_scan_checked_at", { withTimezone: true }),
 });
 
 export type Submission = typeof submissions.$inferSelect;

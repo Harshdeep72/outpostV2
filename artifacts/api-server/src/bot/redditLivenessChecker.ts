@@ -24,6 +24,7 @@ interface SubmissionRow extends Record<string, unknown> {
   task_id: string;
   reward: string;
   live_status: LiveStatus;
+  moved_to_available?: number | string;
   reddit_username: string | null;
   workspace_channel_id: string | null;
 }
@@ -679,21 +680,27 @@ export async function startBulkLivenessScanAllTime(): Promise<{ ok: boolean; rea
     sql`SELECT COUNT(*)::text AS n
         FROM submissions
         WHERE review_status = 'accepted'
-          AND moved_to_available = 0
           AND live_status = 'live'
           AND proof_link ILIKE '%reddit.com%'`
   );
   const total = parseInt(countRes.rows[0]?.n ?? "0");
 
+  // Set the flag synchronously before launching the background task so the
+  // status endpoint never sees a false-negative "not running" window.
+  bulkScanRunning = true;
+
   // Fire the scan in the background without awaiting.
-  void runBulkScan(cachedClient, total);
+  runBulkScan(cachedClient, total).catch((err) => {
+    logger.error({ err }, "Bulk liveness scan: unhandled top-level error");
+    bulkScanRunning = false;
+  });
 
   logger.info({ total }, "Bulk liveness scan: started in background");
   return { ok: true, total };
 }
 
 async function runBulkScan(client: Client, total: number): Promise<void> {
-  bulkScanRunning = true;
+  // bulkScanRunning is already set to true by the caller.
   let checked = 0;
   let removed = 0;
   let deleted = 0;
@@ -701,7 +708,10 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
   try {
     logger.info({ total }, "Bulk liveness scan: beginning full scan of all live accepted submissions");
 
-    // Process in pages of BATCH_SIZE so we don't hold a huge result set in memory.
+    // Use cursor-style pagination by ID so we never need an extra DB column.
+    // Each iteration fetches the next BATCH_SIZE rows with id > lastId.
+    let lastId = 0;
+
     while (true) {
       const rows = await db.execute<SubmissionRow>(
         sql`SELECT s.id::text          AS id,
@@ -710,39 +720,39 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
                    s.task_id::text     AS task_id,
                    s.reward::text      AS reward,
                    s.live_status       AS live_status,
+                   s.moved_to_available AS moved_to_available,
                    u.reddit_username   AS reddit_username,
                    u.workspace_channel_id AS workspace_channel_id
             FROM submissions s
             LEFT JOIN users u ON u.id = s.user_id
             WHERE s.review_status = 'accepted'
-              AND s.moved_to_available = 0
               AND s.live_status = 'live'
               AND s.proof_link ILIKE '%reddit.com%'
-              AND (s.bulk_scan_checked_at IS NULL OR s.bulk_scan_checked_at < now() - interval '1 hour')
+              AND s.id > ${lastId}
             ORDER BY s.id ASC
             LIMIT ${BATCH_SIZE}`
       );
 
       if (rows.rows.length === 0) break;
 
-      for (const row of rows.rows) {
-        // Immediately mark as scanned so we don't revisit in this run if we loop.
-        await db.execute(
-          sql`UPDATE submissions SET bulk_scan_checked_at = now() WHERE id = ${parseInt(row.id)}`
-        ).catch(() => { /* non-fatal */ });
+      // Advance the cursor to the last ID we fetched.
+      lastId = parseInt(rows.rows[rows.rows.length - 1].id);
 
+      for (const row of rows.rows) {
         const result = await recheckRedditLiveness(row.proof_link);
         const oldStatus = row.live_status as LiveStatus;
         const newStatus = result.liveStatus;
         checked++;
 
         if (newStatus === "unknown") {
-          // Transient — skip
           await new Promise((r) => setTimeout(r, 300));
           continue;
         }
 
         if (newStatus === oldStatus) {
+          await db.execute(
+            sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${parseInt(row.id)}`
+          );
           await new Promise((r) => setTimeout(r, 300));
           continue;
         }
@@ -765,10 +775,13 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
         if (newStatus === "removed") removed++;
         if (newStatus === "deleted") deleted++;
 
-        if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live") {
+        const isReversible = Number((row as any).moved_to_available) === 0;
+
+        if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live" && isReversible) {
           // Perform reversal with confirmation (45-second check + clawback).
           await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
         } else {
+          // Status changed but already paid out — just notify, no reversal.
           await notifyStatusChange(client, row, oldStatus, newStatus, result.reason, false);
         }
 

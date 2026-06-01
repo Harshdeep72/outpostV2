@@ -7,8 +7,88 @@ import { COLORS } from "./constants.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 import { recheckRedditLiveness } from "./reddit-validator.js";
 import { safeSyncEarnerRoles } from "./earnerRoles.js";
+import { setupGuild } from "./setup.js";
+import { getPrimaryGuild } from "./discord-client.js";
 
 let started = false;
+
+/**
+ * Post an alert to #task-logs pinging the Admin role whenever a hold-end
+ * liveness check is inconclusive and the submission is queued for manual
+ * review. Ensures the case doesn't sit silently in the queue.
+ */
+async function notifyManualReview(
+  row: { id: string; discord_id: string; reward: string; proof_link: string },
+  reason: string
+): Promise<void> {
+  try {
+    const guild = getPrimaryGuild();
+    if (!guild) return;
+    const { taskLogsChannel, adminRole } = await setupGuild(guild);
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.WARNING)
+      .setTitle("⚠️ Hold-End Check Inconclusive — Manual Review Required")
+      .setDescription(
+        [
+          `Submission **#${row.id}** could not be automatically resolved at the end of its hold period.`,
+          ``,
+          `**Reason:** ${reason}`,
+          ``,
+          `Use \`/approvesubmission ${row.id}\` to credit the reward, or review the submission in the dashboard.`,
+        ].join("\n")
+      )
+      .addFields(
+        { name: "Worker", value: `<@${row.discord_id}>`, inline: true },
+        { name: "Reward", value: `$${row.reward}`, inline: true },
+        { name: "Proof", value: `[Open link](${row.proof_link})`, inline: false }
+      )
+      .setTimestamp(new Date());
+
+    await (taskLogsChannel as TextChannel).send({
+      content: `${adminRole} — submission needs a manual decision`,
+      embeds: [embed],
+    });
+  } catch (err) {
+    logger.warn({ err, submissionId: row.id }, "Pending processor: notifyManualReview failed (non-fatal)");
+  }
+}
+
+/**
+ * Post an informational alert to #task-logs when the confirmation check
+ * overrides a false-positive "removed" first reading and pays out automatically.
+ * Lets admins audit the system without requiring any action.
+ */
+async function notifyFalsePositiveOverride(
+  row: { id: string; discord_id: string; reward: string; proof_link: string },
+  firstDetected: string
+): Promise<void> {
+  try {
+    const guild = getPrimaryGuild();
+    if (!guild) return;
+    const { taskLogsChannel } = await setupGuild(guild);
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.SUCCESS)
+      .setTitle("🔄 False-Positive Overridden — Auto Paid Out")
+      .setDescription(
+        [
+          `Submission **#${row.id}** initially read as **${firstDetected}** at the end of its hold period,`,
+          `but the 45-second confirmation check found it **live**. The first reading was a transient false positive.`,
+          ``,
+          `**$${row.reward}** has been credited automatically. No action needed.`,
+        ].join("\n")
+      )
+      .addFields(
+        { name: "Worker", value: `<@${row.discord_id}>`, inline: true },
+        { name: "Reward", value: `$${row.reward}`, inline: true },
+        { name: "Proof", value: `[Open link](${row.proof_link})`, inline: false }
+      )
+      .setTimestamp(new Date());
+
+    await (taskLogsChannel as TextChannel).send({ embeds: [embed] });
+  } catch (err) {
+    logger.warn({ err, submissionId: row.id }, "Pending processor: notifyFalsePositiveOverride failed (non-fatal)");
+  }
+}
 
 /**
  * Notify the worker (DM + their workspace channel) that their submission
@@ -195,6 +275,7 @@ export function startPendingProcessor(client: Client) {
                        last_checked_at = NOW()
                  WHERE id = ${subId}`
           );
+          void notifyManualReview(row, "Reddit API error during hold-end liveness check — could not determine comment status.");
           continue;
         }
 
@@ -243,6 +324,7 @@ export function startPendingProcessor(client: Client) {
                        review_reason  = 'Hold-end liveness check inconclusive (unknown) — needs manual review'
                  WHERE id = ${subId} AND review_status = 'checking'`
           );
+          void notifyManualReview(row, "Hold-end liveness check returned an inconclusive result (Reddit API blip or proxy issue). Comment status could not be determined.");
 
         } else {
           // First check says removed or deleted. Run a 45-second confirmation
@@ -272,6 +354,7 @@ export function startPendingProcessor(client: Client) {
                          review_reason  = 'Hold-end liveness confirmation check errored — needs manual review'
                    WHERE id = ${subId} AND review_status = 'checking'`
             );
+            void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check errored — cannot determine final status.`);
             continue;
           }
 
@@ -308,6 +391,7 @@ export function startPendingProcessor(client: Client) {
             safeSyncEarnerRoles(row.discord_id);
             logSubmissionEvent(subId, "paid");
             await notifySubmissionCleared(client, row);
+            void notifyFalsePositiveOverride(row, firstDetected);
 
           } else if (confirmation.status === "unknown") {
             // Both reads inconclusive enough that we can't be certain.
@@ -325,6 +409,7 @@ export function startPendingProcessor(client: Client) {
                          review_reason  = ${'Hold-end check inconclusive after confirmation (first: ' + firstDetected + ') — needs manual review'}
                    WHERE id = ${subId} AND review_status = 'checking'`
             );
+            void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check also inconclusive — cannot determine final status.`);
 
           } else {
             // Both reads agree: removed or deleted. Now it is safe to reject.

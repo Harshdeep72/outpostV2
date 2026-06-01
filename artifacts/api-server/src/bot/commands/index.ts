@@ -347,6 +347,11 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setMinValue(1)
     );
 
+  const mystatus = new SlashCommandBuilder()
+    .setName("mystatus")
+    .setDescription("Check your submissions currently in the verification hold — see reward, live status, and time until payout")
+    .setDMPermission(true);
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -354,7 +359,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission,
+    checksubmission, mystatus,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

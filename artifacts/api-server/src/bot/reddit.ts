@@ -755,8 +755,98 @@ async function fetchViaPythonClient(name: string): Promise<RedditFetchResult | n
 }
 
 
+/**
+ * Fetch Reddit user profile by fetching the HTML page via Python curl_cffi
+ * and extracting the embedded JSON karma data.
+ *
+ * Reddit's new-UI HTML page (www.reddit.com/user/{name}/about) embeds the full
+ * user profile JSON inside <script> tags on first render.  Fetching HTML (not
+ * the JSON API) is far less likely to trigger Cloudflare blocks — combined with
+ * curl_cffi Chrome TLS impersonation it works even from datacenter IPs and
+ * without a session cookie.
+ *
+ * This is effectively fetchViaNewRedditHtml but powered by the Python client
+ * instead of a plain undici fetch.
+ */
+async function fetchViaPythonHtml(name: string): Promise<RedditFetchResult | null> {
+  try {
+    const url = `https://www.reddit.com/user/${name}/about`;
+    const result = await executePythonRedditClient({
+      url,
+      isJson: false,
+      useProxy: true,
+    });
+
+    if (!result.ok || typeof result.body !== "string") return null;
+    const html: string = result.body;
+
+    // Suspended / not-found detection
+    if (html.includes("has been suspended") || html.includes("account-suspended")) {
+      return { ok: false, notFound: true, suspended: true };
+    }
+    if (html.includes("page not found") && !html.includes(name.toLowerCase())) {
+      return { ok: false, notFound: true };
+    }
+
+    // Extract karma fields from the server-rendered JSON blobs embedded in the page.
+    function extractAll(pattern: RegExp): number[] {
+      const out: number[] = [];
+      let m: RegExpExecArray | null;
+      const re = new RegExp(pattern.source, "g");
+      while ((m = re.exec(html)) !== null) {
+        const v = parseInt(m[1]!, 10);
+        if (!isNaN(v)) out.push(v);
+      }
+      return out;
+    }
+
+    const linkKarmas    = extractAll(/"link_karma"\s*:\s*(\d+)/);
+    const commentKarmas = extractAll(/"comment_karma"\s*:\s*(\d+)/);
+    const totalKarmas   = extractAll(/"total_karma"\s*:\s*(\d+)/);
+    const createdUtcs   = extractAll(/"created_utc"\s*:\s*(\d+(?:\.\d+)?)/);
+
+    const linkKarma    = linkKarmas.length    ? Math.max(...linkKarmas)    : 0;
+    const commentKarma = commentKarmas.length ? Math.max(...commentKarmas) : 0;
+    const totalKarma   = totalKarmas.length   ? Math.max(...totalKarmas)   : linkKarma + commentKarma;
+
+    if (linkKarma === 0 && commentKarma === 0 && totalKarma === 0) {
+      logger.debug({ name, htmlLen: html.length }, "fetchViaPythonHtml: no karma fields in page");
+      return null;
+    }
+
+    const createdUtc = createdUtcs.length ? Math.min(...createdUtcs) : 0;
+    const ageDays    = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+
+    const nameMatch = new RegExp(`"name"\\s*:\\s*"(${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})"`, "i").exec(html);
+    const resolvedName = nameMatch ? nameMatch[1]! : name;
+
+    const iconMatch = /"icon_img"\s*:\s*"([^"]+https[^"]+)"/.exec(html);
+    const iconImg   = iconMatch ? stripQuery(iconMatch[1]) : undefined;
+
+    logger.info({ name: resolvedName, linkKarma, commentKarma, totalKarma, ageDays, via: result.via }, "Reddit profile via Python curl_cffi HTML scrape");
+
+    return {
+      ok: true,
+      profile: {
+        name: resolvedName,
+        createdUtc,
+        linkKarma,
+        commentKarma,
+        totalKarma,
+        iconImg,
+        accountAgeDays: ageDays,
+        karmaVerified: true,
+      },
+    };
+  } catch (err) {
+    logger.warn({ err, name }, "fetchViaPythonHtml failed");
+  }
+  return null;
+}
+
+
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  // ── 1. Python curl_cffi (PRIMARY) + OAuth (FALLBACK) — run in parallel ────
+  // ── 1. Python curl_cffi JSON (PRIMARY) + OAuth (FALLBACK) — in parallel ───
   // Python browser TLS impersonation bypasses datacenter IP blocks that reject
   // unauthenticated Reddit API calls from server IPs.
   // Both fire simultaneously so we pay only one round-trip of latency.
@@ -766,12 +856,24 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
     fetchViaOAuth(name).catch(() => null),
   ]);
   if (pythonResult !== null) {
-    logger.info({ name, ok: pythonResult.ok }, "Reddit profile via Python curl_cffi client (primary)");
+    logger.info({ name, ok: pythonResult.ok }, "Reddit profile via Python curl_cffi JSON (primary)");
     return pythonResult;
   }
   if (oauthResult !== null) {
-    logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth (Python unavailable — fallback)");
+    logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth (Python JSON unavailable — fallback)");
     return oauthResult;
+  }
+
+  // ── 1b. Python curl_cffi HTML — JSON endpoint blocked, try HTML page ───────
+  // When Cloudflare challenges the JSON API endpoint, the full HTML page is
+  // typically served without challenge to a browser-fingerprinted client.
+  // Reddit server-renders karma inside <script> tags, so we can extract it
+  // from the HTML even without running JavaScript.
+  logger.info({ name }, "Python JSON + OAuth both failed — trying Python HTML scrape");
+  const pythonHtmlResult = await fetchViaPythonHtml(name);
+  if (pythonHtmlResult !== null) {
+    logger.info({ name, ok: pythonHtmlResult.ok }, "Reddit profile via Python curl_cffi HTML (primary fallback)");
+    return pythonHtmlResult;
   }
 
   // ── 2. Arctic Shift public archive API (no auth, no proxy, works from Render) ─

@@ -468,8 +468,20 @@ async function runDeepCheck(
   // ── Phase 2: parallel Python fallbacks for any source that proxy missed ───
   // Both fallbacks fire simultaneously — only one round of Python latency
   // regardless of how many sources need it.
-  const needPyHtml = !htmlContent;
-  const needPyRss  = !rssHtml;
+  // Proxy may return a Cloudflare challenge page or login wall instead of null.
+  // Trigger Python curl_cffi fallback whenever the returned content doesn't
+  // look like a real Reddit page, not just when the proxy returned null.
+  const htmlLooksValid =
+    !!htmlContent &&
+    (htmlContent.includes('class="commentarea"') ||
+     htmlContent.includes('id="siteTable"') ||
+     htmlContent.includes('data-subreddit=') ||
+     htmlContent.includes('<shreddit-comment-tree') ||
+     htmlContent.includes('<shreddit-app') ||
+     htmlContent.includes('shreddit-'));
+  const rssLooksValid = !!rssHtml && rssHtml.includes('<feed');
+  const needPyHtml = !htmlLooksValid;
+  const needPyRss  = !rssLooksValid;
 
   if (needPyHtml || needPyRss) {
     logger.info(

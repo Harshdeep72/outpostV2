@@ -908,9 +908,10 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   const postJsonUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}.json?raw_json=1`;
   const postVisitUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/`;
 
-  // Fire all three sources in parallel so we always pay only one round-trip.
-  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post Python JSON + RSS + HTML in parallel");
-  const [postRssText, oldRedditHtml, pythonPostRes] = await Promise.all([
+  // Fire all sources in parallel so we always pay only one round-trip.
+  // Python JSON (primary) + Python HTML (secondary HTML) + proxy HTML + RSS.
+  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post Python JSON + Python HTML + RSS + proxy HTML in parallel");
+  const [postRssText, proxyPostHtml, pythonPostRes, pythonPostHtmlRes] = await Promise.all([
     fetchDirectText(postRssUrl, 8_000),
     proxyFetchText(
       [
@@ -926,7 +927,31 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
       useProxy: true,
       timeout: 8,
     }).catch(() => null),
+    executePythonRedditClient({
+      url: `https://old.reddit.com/${subPrefix}/comments/${parsed.postId}/`,
+      isJson: false,
+      useProxy: true,
+      timeout: 10,
+    }).catch(() => null),
   ]);
+  // Use proxy HTML when it looks like a real Reddit page; fall back to Python
+  // curl_cffi HTML (browser TLS impersonation) when the proxy returns a
+  // Cloudflare challenge or login wall instead of actual page content.
+  const isValidRedditHtml = (h: string) =>
+    h.includes('class="commentarea"') ||
+    h.includes('id="siteTable"') ||
+    h.includes('data-subreddit=') ||
+    h.includes("<shreddit-post") ||
+    h.includes("<shreddit-app") ||
+    h.includes("shreddit-");
+  const oldRedditHtml: string | null = (() => {
+    if (proxyPostHtml && isValidRedditHtml(proxyPostHtml)) return proxyPostHtml;
+    if (pythonPostHtmlRes?.ok && typeof pythonPostHtmlRes.body === "string") {
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: proxy HTML invalid/blocked — using Python curl_cffi HTML for post check");
+      return pythonPostHtmlRes.body;
+    }
+    return proxyPostHtml;
+  })();
 
   // ── 0. Python JSON (primary) ──────────────────────────────────────────────
   // classifyPost() reads removed_by_category / selftext / author from JSON data.

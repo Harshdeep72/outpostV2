@@ -27,7 +27,7 @@ import { validateRedditProof, extractTaskSubreddit, detectAppUrl, appUrlHelpMess
 import { invalidateStreak } from "../streak.js";
 import { randomBytes } from "node:crypto";
 import { normalizeTaskInput, createTaskAndPost, buildSharedTaskEmbed, buildPublicTaskEmbed, buildPublicButtons, formatTaskCreator, buildCampaignProgressEmbed, refreshCampaignSummary } from "../task-creation.js";
-import { scheduleEarlyLivenessCheck } from "../redditLivenessChecker.js";
+
 
 const buildTaskEmbed = buildSharedTaskEmbed;
 

@@ -4,15 +4,16 @@ import { db } from "@workspace/db";
 import { makeEmbed, formatMoney } from "../util.js";
 import { COLORS } from "../constants.js";
 
-interface PendingHoldRow {
+interface ActiveSubmissionRow {
   id: string;
   task_id: string;
   task_title: string;
   reward: string;
   proof_link: string;
-  available_at: string;
+  available_at: string | null;
   live_status: string;
   submitted_at: string;
+  review_status: string;
   hold_hours: string;
 }
 
@@ -21,7 +22,7 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
 
   const discordId = interaction.user.id;
 
-  const rows = await db.execute<PendingHoldRow>(
+  const rows = await db.execute<ActiveSubmissionRow>(
     sql`SELECT
           s.id,
           s.task_id,
@@ -31,26 +32,30 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
           s.available_at,
           s.live_status,
           s.submitted_at,
+          s.review_status,
           t.pending_delay_hours AS hold_hours
         FROM submissions s
         JOIN tasks t ON t.id = s.task_id
         WHERE s.discord_id = ${discordId}
-          AND s.review_status = 'pending_hold'
-        ORDER BY s.available_at ASC
-        LIMIT 10`
+          AND (
+            s.review_status IN ('pending', 'pending_hold')
+            OR (s.review_status = 'accepted' AND s.moved_to_available = 0)
+          )
+        ORDER BY s.submitted_at DESC
+        LIMIT 15`
   );
 
-  const pending = rows.rows;
+  const active = rows.rows;
 
-  if (pending.length === 0) {
+  if (active.length === 0) {
     return interaction.editReply({
       embeds: [
         makeEmbed(COLORS.PRIMARY)
           .setTitle("📋 Your Active Submissions")
           .setDescription(
-            "You have no submissions currently in the verification hold.\n\n" +
-            "When you submit proof for a task, it will appear here during the hold period " +
-            "so you can track when your reward will be paid out."
+            "You have no active submissions right now.\n\n" +
+            "When you submit proof for a task, it will appear here " +
+            "so you can track its review status and payout timing."
           ),
       ],
     });
@@ -60,48 +65,78 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
 
   const embed = new EmbedBuilder()
     .setColor(COLORS.WARNING)
-    .setTitle("📋 Your Submissions In Hold")
+    .setTitle("📋 Your Active Submissions")
     .setDescription(
-      `You have **${pending.length}** submission${pending.length === 1 ? "" : "s"} in the verification hold period.\n` +
-      `Keep your comments live — they are re-checked automatically when the hold ends.`
+      `You have **${active.length}** active submission${active.length === 1 ? "" : "s"}.\n` +
+      `Keep your comments live — they are checked automatically.`
     )
     .setTimestamp(new Date());
 
-  for (const row of pending) {
-    const availTs = new Date(row.available_at).getTime();
-    const msLeft = availTs - now;
-    const unixAvail = Math.floor(availTs / 1000);
+  for (const row of active) {
+    const liveEmoji =
+      row.live_status === "live" ? "✅" :
+      row.live_status === "removed" ? "🛡️" :
+      row.live_status === "deleted" ? "🗑️" : "❔";
 
-    const liveEmoji = row.live_status === "live" ? "✅" : row.live_status === "removed" ? "🛡️" : row.live_status === "deleted" ? "🗑️" : "❔";
-    const liveLabel = row.live_status === "live" ? "Live" : row.live_status === "removed" ? "Removed" : row.live_status === "deleted" ? "Deleted" : "Unknown";
+    const liveLabel =
+      row.live_status === "live" ? "Live" :
+      row.live_status === "removed" ? "Removed" :
+      row.live_status === "deleted" ? "Deleted" : "Unknown";
 
-    const timeLeft = msLeft > 0
-      ? `<t:${unixAvail}:R> (<t:${unixAvail}:f>)`
-      : "⏰ Re-check imminent…";
+    let statusLine: string;
+    let payoutLine = "";
+
+    if (row.review_status === "pending") {
+      statusLine = "🕐 Awaiting manual review";
+    } else if (row.review_status === "pending_hold") {
+      statusLine = `${liveEmoji} ${liveLabel} — verification hold`;
+      if (row.available_at) {
+        const availTs = new Date(row.available_at).getTime();
+        const msLeft = availTs - now;
+        const unixAvail = Math.floor(availTs / 1000);
+        payoutLine = msLeft > 0
+          ? `\n**Pays out:** <t:${unixAvail}:R> (<t:${unixAvail}:f>)`
+          : `\n**Pays out:** ⏰ Re-check imminent…`;
+      }
+    } else {
+      // accepted, moved_to_available = 0
+      statusLine = `${liveEmoji} ${liveLabel} — approved, payout pending`;
+      if (row.available_at) {
+        const availTs = new Date(row.available_at).getTime();
+        const msLeft = availTs - now;
+        const unixAvail = Math.floor(availTs / 1000);
+        payoutLine = msLeft > 0
+          ? `\n**Pays out:** <t:${unixAvail}:R> (<t:${unixAvail}:f>)`
+          : `\n**Pays out:** ⏰ Processing soon…`;
+      }
+    }
 
     const shortProof = (() => {
       try {
         const u = new URL(row.proof_link);
-        return u.hostname.replace("www.", "") + u.pathname.slice(0, 40) + (u.pathname.length > 40 ? "…" : "");
+        const path = u.pathname.slice(0, 40) + (u.pathname.length > 40 ? "…" : "");
+        return u.hostname.replace("www.", "") + path;
       } catch {
         return row.proof_link.slice(0, 50);
       }
     })();
 
+    const taskLabel = row.task_title.slice(0, 40) + (row.task_title.length > 40 ? "…" : "");
+
     embed.addFields({
-      name: `#${row.id} — ${row.task_title.slice(0, 40)}${row.task_title.length > 40 ? "…" : ""}`,
+      name: `#${row.id} — ${taskLabel}`,
       value:
         `**Reward:** ${formatMoney(row.reward)}\n` +
-        `**Status:** ${liveEmoji} ${liveLabel}\n` +
-        `**Pays out:** ${timeLeft}\n` +
-        `**Proof:** [${shortProof}](${row.proof_link})`,
+        `**Status:** ${statusLine}` +
+        payoutLine +
+        `\n**Proof:** [${shortProof}](${row.proof_link})`,
       inline: false,
     });
   }
 
-  const totalReward = pending.reduce((sum, r) => sum + parseFloat(r.reward), 0);
+  const totalReward = active.reduce((sum, r) => sum + parseFloat(r.reward), 0);
   embed.setFooter({
-    text: `Total pending payout: ${formatMoney(totalReward.toFixed(2))} • Comment must stay live until the hold ends`,
+    text: `Total in-flight: ${formatMoney(totalReward.toFixed(2))} • Keep your comments live until paid out`,
   });
 
   return interaction.editReply({ embeds: [embed] });

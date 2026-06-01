@@ -535,6 +535,33 @@ async function runDeepCheck(
         commentStatus = cstate;
       }
       verifiedVia = jsonSource;
+    } else {
+      // JSON API succeeded (real response, not a network error) but the specific
+      // comment was NOT present in the thread. This is authoritative — Reddit
+      // returns the permalink thread focused on that comment, so a missing entry
+      // means the comment no longer exists (deleted/removed/never existed).
+      //
+      // In liveness-only mode (expectedLowerList empty — called by /checksubmission
+      // and the background liveness checker) we stop here immediately. Falling
+      // through to RSS would let stale cached RSS entries resurrect a gone comment
+      // and incorrectly report it as "live", which is exactly the false-positive
+      // that causes /checksubmission to say "Status: live" for deleted comments.
+      //
+      // In initial-validation mode (expectedLowerList non-empty) we allow the
+      // HTML/RSS fallback to continue because collapsed/paginated threads can
+      // omit deep-nested comments from the JSON response even when they exist.
+      if (expectedLowerList.length === 0) {
+        logger.warn(
+          { commentId: parsed.commentId, source: jsonSource },
+          "Deep check (liveness): JSON succeeded but comment absent from thread — treating as deleted"
+        );
+        failures.push(`Comment ID "${parsed.commentId}" not found on the post — it was likely removed by Reddit/Automod.`);
+        return {
+          passed: false, autoApproved: false, status: "comment_missing",
+          failures, subredditFound: subredditFound ?? parsed.subreddit, postLive: true,
+          ...meta("comment_missing"),
+        };
+      }
     }
   }
 

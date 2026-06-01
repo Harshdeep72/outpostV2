@@ -756,18 +756,22 @@ async function fetchViaPythonClient(name: string): Promise<RedditFetchResult | n
 
 
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  // ── 1. Try OAuth (authenticated, no IP block, future-proof) ───────────────
-  const oauthResult = await fetchViaOAuth(name);
-  if (oauthResult !== null) {
-    logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth");
-    return oauthResult;
-  }
-
-  // ── 1b. Try Impersonated Python curl_cffi with Cookie (bypasses Cloudflare) ───
-  const pythonResult = await fetchViaPythonClient(name);
+  // ── 1. Python curl_cffi (PRIMARY) + OAuth (FALLBACK) — run in parallel ────
+  // Python browser TLS impersonation bypasses datacenter IP blocks that reject
+  // unauthenticated Reddit API calls from server IPs.
+  // Both fire simultaneously so we pay only one round-trip of latency.
+  // Python result is preferred; OAuth is used only if Python returns null.
+  const [pythonResult, oauthResult] = await Promise.all([
+    fetchViaPythonClient(name).catch(() => null),
+    fetchViaOAuth(name).catch(() => null),
+  ]);
   if (pythonResult !== null) {
-    logger.info({ name, ok: pythonResult.ok }, "Reddit profile via Python curl_cffi client");
+    logger.info({ name, ok: pythonResult.ok }, "Reddit profile via Python curl_cffi client (primary)");
     return pythonResult;
+  }
+  if (oauthResult !== null) {
+    logger.info({ name, ok: oauthResult.ok }, "Reddit profile via OAuth (Python unavailable — fallback)");
+    return oauthResult;
   }
 
   // ── 2. Arctic Shift public archive API (no auth, no proxy, works from Render) ─

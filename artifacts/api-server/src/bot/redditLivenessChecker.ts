@@ -6,8 +6,8 @@ import { recheckRedditLiveness, parseRedditProofUrl, type LiveStatus } from "./r
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
-const TICK_MS = 12 * 60 * 60 * 1000;      // run every 12 hours
-const RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // re-check each row no more than once per 12 hr
+const TICK_MS = 5 * 60 * 1000;            // run every 5 minutes
+const RECHECK_INTERVAL_MS = 30 * 60 * 1000; // re-check each row no more than once per 30 min
 const MAX_AGE_DAYS = 14;                   // stop checking after 14 days
 const BATCH_SIZE = 30;                     // max rows per pass
 
@@ -208,17 +208,24 @@ async function performReversalWithConfirmation(
   }
 
   // Confirmed removed/deleted — execute reversal.
+  // Deduct from balance_pending first.  If the pending processor already moved
+  // the reward to balance_available before this reversal ran, the overflow is
+  // taken from balance_available (and total_earned is reduced to match).
   const reward = parseFloat(row.reward);
   await db.execute(
     sql`UPDATE users
-        SET balance_pending = GREATEST(0, balance_pending - ${reward}),
-            trust_score = GREATEST(0, trust_score - 0.05)
+        SET balance_pending   = GREATEST(0, balance_pending   - ${reward}::numeric),
+            balance_available = GREATEST(0, balance_available - GREATEST(0, ${reward}::numeric - balance_pending)),
+            total_earned      = GREATEST(0, total_earned      - GREATEST(0, ${reward}::numeric - balance_pending)),
+            trust_score       = GREATEST(0, trust_score - 0.05)
         WHERE discord_id = ${row.discord_id}`
   );
   await db.execute(
     sql`UPDATE submissions
         SET moved_to_available = 1,
-            available_at = now()
+            available_at = COALESCE(available_at, now()),
+            live_status = ${firstDetectedStatus},
+            removal_reason = ${(firstReason ?? confirm.reason) ?? null}
         WHERE id = ${parseInt(row.id)}`
   );
 
@@ -775,13 +782,12 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
         if (newStatus === "removed") removed++;
         if (newStatus === "deleted") deleted++;
 
-        const isReversible = Number((row as any).moved_to_available) === 0;
-
-        if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live" && isReversible) {
+        if (newStatus === "removed" || newStatus === "deleted") {
           // Perform reversal with confirmation (45-second check + clawback).
+          // Works whether the reward is still in balance_pending OR has already
+          // been moved to balance_available by the pending processor.
           await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
         } else {
-          // Status changed but already paid out — just notify, no reversal.
           await notifyStatusChange(client, row, oldStatus, newStatus, result.reason, false);
         }
 

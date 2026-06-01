@@ -3,6 +3,7 @@ import { proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
 import { executePythonRedditClient } from "./pythonClient.js";
+import { getRedditSessionCookie, forceRefreshCookie } from "./redditCookieManager.js";
 
 const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
 const TASK_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -117,6 +118,92 @@ async function fetchCommentThreadViaOAuth(
     return { ok: true, body };
   } catch (err) {
     logger.warn({ err }, "Reddit OAuth comment thread fetch error");
+    return null;
+  }
+}
+
+/**
+ * Primary method: fetch a comment thread directly via undici using the
+ * in-memory Reddit session cookie. No subprocess spawn — fast, predictable,
+ * and always uses the freshest cookie from getRedditSessionCookie().
+ *
+ * A clean authenticated GET to the .json permalink is the most faithful
+ * representation of what a logged-in browser would see. Unlike the Python
+ * curl_cffi path, there is no `visitFirst` HTML pre-fetch that could
+ * accumulate conflicting cookies or trigger anti-bot challenges.
+ *
+ * Returns null if no session cookie is available or the fetch fails.
+ */
+async function fetchCommentThreadViaDirectJson(
+  sub: string,
+  postId: string,
+  commentId: string
+): Promise<{ ok: boolean; body: any } | null> {
+  const sessionCookie = getRedditSessionCookie();
+  if (!sessionCookie) {
+    logger.info({ sub, postId, commentId }, "fetchCommentThreadViaDirectJson: no session cookie — skipping");
+    return null;
+  }
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({
+      connect: { timeout: 8_000 },
+      bodyTimeout: 15_000,
+      headersTimeout: 10_000,
+    });
+
+    const url = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?context=3&raw_json=1`;
+
+    const res = await undiciFetch(url, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Cookie": sessionCookie,
+        "Accept": "application/json",
+        "Referer": `https://www.reddit.com/${sub}/comments/${postId}/`,
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    // 403 = cookie expired/invalid — trigger a background refresh for next call
+    if (res.status === 403 || res.status === 401) {
+      logger.warn({ status: res.status, sub, postId, commentId }, "fetchCommentThreadViaDirectJson: auth error — triggering cookie refresh");
+      void forceRefreshCookie();
+      return null;
+    }
+
+    if (!res.ok) {
+      logger.warn({ status: res.status, sub, postId, commentId }, "fetchCommentThreadViaDirectJson: non-200 response");
+      return null;
+    }
+
+    const text = await res.text();
+
+    // Detect HTML/non-JSON responses (login walls, Cloudflare challenges)
+    const trimmed = text.trimStart();
+    if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) {
+      logger.warn({ sub, postId, commentId, preview: trimmed.slice(0, 80) }, "fetchCommentThreadViaDirectJson: response is not JSON (HTML/block page)");
+      return null;
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      logger.warn({ sub, postId, commentId }, "fetchCommentThreadViaDirectJson: JSON parse failed");
+      return null;
+    }
+
+    if (!Array.isArray(body)) {
+      logger.warn({ sub, postId, commentId, bodyType: typeof body }, "fetchCommentThreadViaDirectJson: response is not an array — likely a Reddit error object");
+      return null;
+    }
+
+    logger.info({ sub, postId, commentId }, "fetchCommentThreadViaDirectJson: success");
+    return { ok: true, body };
+  } catch (err) {
+    logger.warn({ err, sub, postId, commentId }, "fetchCommentThreadViaDirectJson failed");
     return null;
   }
 }
@@ -404,26 +491,43 @@ async function runDeepCheck(
     };
   }
 
-  // ── Python JSON via session cookie (sole source) ─────────────────────────
-  // RSS and HTML fallbacks have been removed. Both caused reliability problems:
-  // - RSS caches deleted comments, producing false "live" verdicts.
-  // - Shreddit HTML lazy-loads comments, making "not found" inconclusive and
-  //   causing false "removed" verdicts for live comments.
+  // ── JSON via session cookie (primary: direct undici → fallback: Python curl_cffi) ──
   //
-  // The Python curl_cffi client impersonates Chrome 120 and sends the Reddit
-  // session cookie (REDDIT_SESSION_COOKIE env var), giving authenticated access
-  // identical to a logged-in browser. For a comment permalink Reddit returns
-  // the focused thread — the target comment MUST appear in the t1 listing if
-  // it exists. Absence = gone. Failure to fetch = api_unreachable (retry later).
+  // Strategy:
+  //   1. Direct undici fetch with the in-memory session cookie (fastest, no subprocess,
+  //      always uses the freshest cookie from the cookie manager). This is the true
+  //      primary path — a clean authenticated GET to the comment permalink JSON endpoint.
+  //   2. Python curl_cffi fallback — browser TLS impersonation for cases where
+  //      Reddit's Cloudflare/CDN blocks the datacenter IP on unauthenticated or
+  //      standard TLS fingerprints.
+  //   3. OAuth API — if REDDIT_CLIENT_ID + REDDIT_CLIENT_SECRET are configured.
+  //
+  // For a comment permalink with context=3, Reddit always returns the focused comment
+  // in the response if it exists. Absence = gone. Failure to fetch = api_unreachable.
   const sub = parsed.isUserPost ? `user/${parsed.subreddit.slice(2)}` : `r/${parsed.subreddit}`;
 
-  logger.info({ commentId: parsed.commentId, sub }, "Deep check: fetching via Python JSON (session cookie, sole source)");
-  const pythonRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
+  logger.info({ commentId: parsed.commentId, sub }, "Deep check: fetching via direct JSON (session cookie) + Python fallback");
 
-  if (!pythonRes?.ok || !Array.isArray(pythonRes.body)) {
+  // ── 1. Direct JSON with session cookie (primary) ──────────────────────────
+  let apiRes = await fetchCommentThreadViaDirectJson(sub, parsed.postId, parsed.commentId).catch(() => null);
+
+  // ── 2. Python curl_cffi fallback ──────────────────────────────────────────
+  if (!apiRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: direct JSON failed — falling back to Python curl_cffi client");
+    apiRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
+  }
+
+  // ── 3. OAuth API last resort ───────────────────────────────────────────────
+  if (!apiRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: Python failed — trying OAuth API");
+    const oauthRes = await fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId).catch(() => null);
+    if (oauthRes?.ok) apiRes = oauthRes;
+  }
+
+  if (!apiRes?.ok || !Array.isArray(apiRes.body)) {
     logger.warn(
-      { commentId: parsed.commentId, ok: pythonRes?.ok },
-      "Deep check: Python JSON fetch failed — api_unreachable"
+      { commentId: parsed.commentId, ok: apiRes?.ok },
+      "Deep check: all JSON sources failed — api_unreachable"
     );
     failures.push("Could not reach Reddit API to verify this comment. Please try again shortly.");
     return {
@@ -434,7 +538,7 @@ async function runDeepCheck(
   }
 
   // ── Parse the JSON response ───────────────────────────────────────────────
-  const data = pythonRes.body;
+  const data = apiRes.body;
   const postData = (data[0] as any)?.data?.children?.[0]?.data;
   let subredditFound: string = ((postData?.subreddit as string | undefined) ?? parsed.subreddit).toLowerCase();
 

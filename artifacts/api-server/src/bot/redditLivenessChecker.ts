@@ -317,11 +317,25 @@ async function tick(client: Client) {
       }
 
       if (newStatus === oldStatus) {
-        await db.execute(
-          sql`UPDATE submissions
-              SET last_checked_at = now()
-              WHERE id = ${parseInt(row.id)}`
-        );
+        // Bug-fix: if live_status is already removed/deleted but review_status
+        // is still 'accepted' (guaranteed by the query), the reversal was missed
+        // — either the bot crashed during the 45-second confirmation window, or a
+        // false-positive abort reverted live_status but then the real removal was
+        // re-detected on a later tick that also aborted.  Re-trigger now so the
+        // submission doesn't stay stuck indefinitely.
+        if (newStatus === "removed" || newStatus === "deleted") {
+          logger.warn(
+            { submissionId: row.id, discordId: row.discord_id, status: newStatus },
+            "Reddit liveness: stuck removed/deleted + accepted — re-triggering reversal"
+          );
+          await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
+        } else {
+          await db.execute(
+            sql`UPDATE submissions
+                SET last_checked_at = now()
+                WHERE id = ${parseInt(row.id)}`
+          );
+        }
         continue;
       }
 
@@ -344,7 +358,10 @@ async function tick(client: Client) {
         try { logSubmissionEvent(parseInt(row.id), "removed"); } catch { /* swallowed */ }
       }
 
-      if ((newStatus === "removed" || newStatus === "deleted") && oldStatus === "live") {
+      // Bug-fix: previously only reversed when oldStatus === "live", which let
+      // unknown → removed/deleted transitions slip through without a reversal.
+      // Now reverse for ANY transition into removed/deleted.
+      if (newStatus === "removed" || newStatus === "deleted") {
         await performReversalWithConfirmation(client, row, oldStatus, newStatus, result.reason, false);
       } else {
         await notifyStatusChange(client, row, oldStatus, newStatus, result.reason, false);

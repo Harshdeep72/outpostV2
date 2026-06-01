@@ -233,6 +233,7 @@ async function tick(client: Client): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - WINDOW_HOURS * 60 * 60 * 1000);
 
+    // ── Pass 1: Normal scan — recently paid-out submissions still showing live ──
     const rows = await db.execute<PaidRow>(
       sql`SELECT s.id::text              AS id,
                  s.proof_link            AS proof_link,
@@ -255,53 +256,102 @@ async function tick(client: Client): Promise<void> {
           LIMIT ${BATCH_SIZE}`
     );
 
-    if (rows.rows.length === 0) return;
+    if (rows.rows.length > 0) {
+      logger.info({ count: rows.rows.length }, "Post-payout checker: scanning batch");
 
-    logger.info({ count: rows.rows.length }, "Post-payout checker: scanning batch");
+      for (const row of rows.rows) {
+        if (!isRedditUrl(row.proof_link)) continue;
 
-    for (const row of rows.rows) {
-      if (!isRedditUrl(row.proof_link)) continue;
+        const result = await recheckRedditLiveness(row.proof_link);
+        const newStatus = result.liveStatus;
 
-      const result = await recheckRedditLiveness(row.proof_link);
-      const newStatus = result.liveStatus;
+        if (newStatus === "unknown") {
+          await db.execute(
+            sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${parseInt(row.id)}`
+          );
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
 
-      if (newStatus === "unknown") {
-        await db.execute(
-          sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${parseInt(row.id)}`
-        );
-        await new Promise((r) => setTimeout(r, 200));
-        continue;
-      }
+        if (newStatus === "live") {
+          await db.execute(
+            sql`UPDATE submissions
+                SET live_status     = 'live',
+                    last_checked_at = now()
+                WHERE id = ${parseInt(row.id)}`
+          );
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
 
-      if (newStatus === "live") {
+        // Post is removed or deleted — run confirmation + clawback.
+        // Update live_status optimistically before the confirmation wait so other
+        // ticks can see the flag and skip re-checking the same row.
         await db.execute(
           sql`UPDATE submissions
-              SET live_status     = 'live',
+              SET live_status     = ${newStatus},
                   last_checked_at = now()
               WHERE id = ${parseInt(row.id)}`
         );
-        await new Promise((r) => setTimeout(r, 200));
-        continue;
-      }
 
-      // Post is removed or deleted — run confirmation + clawback.
-      // Update live_status optimistically before the confirmation wait so other
-      // ticks can see the flag and skip re-checking the same row.
-      await db.execute(
-        sql`UPDATE submissions
-            SET live_status     = ${newStatus},
-                last_checked_at = now()
-            WHERE id = ${parseInt(row.id)}`
+        // Fire clawback concurrently for each row so one slow confirmation wait
+        // doesn't block checking the rest of the batch.
+        clawback(client, row, newStatus as "removed" | "deleted", result.reason)
+          .catch((err) =>
+            logger.error({ err, submissionId: row.id }, "Post-payout checker: clawback error")
+          );
+
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+
+    // ── Pass 2: Stuck-state recovery ──────────────────────────────────────────
+    // Bug-fix: if the server crashed during the 30-second confirmation window
+    // (or the CAS guard raced), a paid-out submission can be left with
+    // live_status = removed/deleted but review_status still = 'accepted' and no
+    // funds clawed back.  Pass 1 excludes these rows (live_status NOT IN filter),
+    // so they would never be retried.  This pass finds them — regardless of
+    // paid_at age — and re-triggers the clawback.
+    const stuckRows = await db.execute<PaidRow>(
+      sql`SELECT s.id::text              AS id,
+                 s.proof_link            AS proof_link,
+                 s.discord_id            AS discord_id,
+                 s.task_id::text         AS task_id,
+                 s.user_id::text         AS user_id,
+                 s.reward::text          AS reward,
+                 s.live_status           AS live_status,
+                 s.paid_at               AS paid_at,
+                 u.reddit_username       AS reddit_username,
+                 u.workspace_channel_id  AS workspace_channel_id
+          FROM submissions s
+          LEFT JOIN users u ON u.id = s.user_id
+          WHERE s.review_status      = 'accepted'
+            AND s.moved_to_available = 1
+            AND s.live_status        IN ('removed', 'deleted')
+            AND s.proof_link ILIKE '%reddit.com%'
+          ORDER BY s.paid_at DESC
+          LIMIT ${BATCH_SIZE}`
+    );
+
+    if (stuckRows.rows.length > 0) {
+      logger.warn(
+        { count: stuckRows.rows.length },
+        "Post-payout checker: found stuck removed/deleted + accepted rows — re-triggering clawback"
       );
 
-      // Fire clawback concurrently for each row so one slow confirmation wait
-      // doesn't block checking the rest of the batch.
-      clawback(client, row, newStatus as "removed" | "deleted", result.reason)
-        .catch((err) =>
-          logger.error({ err, submissionId: row.id }, "Post-payout checker: clawback error")
-        );
+      for (const row of stuckRows.rows) {
+        if (!isRedditUrl(row.proof_link)) continue;
 
-      await new Promise((r) => setTimeout(r, 200));
+        const detectedStatus = row.live_status as "removed" | "deleted";
+
+        // Re-trigger clawback fire-and-forget (it will confirm before executing).
+        clawback(client, row, detectedStatus, undefined)
+          .catch((err) =>
+            logger.error({ err, submissionId: row.id }, "Post-payout checker: stuck-state clawback error")
+          );
+
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
   } catch (err) {
     logger.error({ err }, "Post-payout checker tick failed");

@@ -1396,10 +1396,15 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
   const { taskLogsChannel } = await setupGuild(guild);
 
   if (!needsManualReview && validation?.autoApproved) {
-    // Enforce a 10-minute minimum hold so the early liveness check (fires at 5 min)
-    // always has time to run before the pending processor can release funds.
-    // Without this, tasks with pendingDelayHours=0 would pay out within 60s of
-    // auto-validation — before the deletion check runs.
+    // Proof passed initial Reddit validation. Place the submission in a
+    // "pending_hold" state — the reward is NOT credited yet. The pending
+    // processor re-checks Reddit after the hold period expires; only if the
+    // comment is still live at that point does the reward pay out. This
+    // ensures the hold window is a genuine "comment must stay live" gate, not
+    // just a delay before an irreversible credit.
+    //
+    // Minimum 10-minute hold so there is always a window to catch immediate
+    // deletions even on tasks configured with pendingDelayHours = 0.
     const MIN_HOLD_MS = 10 * 60 * 1000;
     const availableAt = new Date(Math.max(
       Date.now() + task.pendingDelayHours * 60 * 60 * 1000,
@@ -1407,10 +1412,10 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     ));
 
     await db.update(submissions).set({
-      reviewStatus: "accepted",
+      reviewStatus: "pending_hold",
       reviewedAt: new Date(),
       availableAt,
-      reviewReason: `Auto-validated via ${validation.verifiedVia ?? "reddit"}`,
+      reviewReason: `Auto-validated via ${validation.verifiedVia ?? "reddit"} — awaiting hold`,
       reviewerDiscordId: "system",
       liveStatus: "live",
       lastCheckedAt: new Date(),
@@ -1421,21 +1426,17 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     await db.update(claims).set({ status: "accepted" }).where(eq(claims.id, claimId));
     invalidateClaim(claimId);
 
-    // NOTE: total_earned (a.k.a. "Lifetime Earnings") is intentionally NOT
-    // incremented here. It is credited only when funds move from pending →
-    // available in pendingProcessor.ts so the lifetime counter reflects
-    // cleared money, not money that may still be reversed.
-    await db.execute(
-      sql`UPDATE users SET balance_pending = balance_pending + ${sub.reward}::numeric, last_task_completed_at = NOW() WHERE id = ${user.id}`
-    );
-    await db.execute(sql`UPDATE users SET trust_score = GREATEST(0, trust_score + 2) WHERE id = ${user.id}`);
-    await db.insert(trustLogs).values({ userId: user.id, discordId: user.discordId, delta: 2, reason: "auto-validated submission", relatedSubmissionId: sub.id }).catch(() => {});
+    // Balance and trust are credited only after the hold-end liveness
+    // re-check passes — see pendingProcessor.ts (pending_hold branch).
+
     invalidateUser(user.discordId, user.id);
     invalidateLeaderboard(guild.id);
     invalidateStreak(user.discordId);
-    safeSyncEarnerRoles(user.discordId);
 
     const unixAvail = Math.floor(availableAt.getTime() / 1000);
+    const holdHoursDisplay = task.pendingDelayHours > 0
+      ? `${task.pendingDelayHours}h`
+      : "10 minutes";
     const v = validation!;
     const upsLabel = typeof v.upvotes === "number" ? `${v.upvotes} ups` : "—";
     const ageLabel = typeof v.ageMinutes === "number"
@@ -1444,54 +1445,42 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
 
     await taskLogsChannel.send({
       embeds: [
-        makeEmbed(COLORS.SUCCESS)
-          .setTitle(`${v.statusEmoji} Auto-Validated — ${v.statusLabel}`)
+        makeEmbed(COLORS.WARNING)
+          .setTitle(`${v.statusEmoji} Validated — Pending Hold (${holdHoursDisplay})`)
           .addFields(
-            // Worker field carries BOTH the @mention (resolves to a
-            // clickable member if Discord has them cached) AND a direct
-            // profile URL fallback. The operator hit cases where the
-            // mention rendered as the raw ID and tapping it showed
-            // "access denied" on mobile — the discord.com/users/<id>
-            // link always opens the user's profile (DM possible from
-            // there) even if the mention is stale or the user is no
-            // longer in the guild.
             { name: "Worker", value: `<@${interaction.user.id}>\n[💬 Open Profile / DM](https://discord.com/users/${interaction.user.id})${user.workspaceChannelId ? `\n📂 Workspace: <#${user.workspaceChannelId}>` : ""}`, inline: true },
             { name: "Task", value: `#${task.id} — ${task.title}`, inline: true },
             { name: "Reward", value: formatMoney(task.reward), inline: true },
             { name: "Proof Link", value: proofLink },
             { name: "Reddit Status", value: `${v.statusEmoji} **${v.statusLabel}** • ${upsLabel} • ${ageLabel}\nu/${v.authorFound} in r/${v.subredditFound}` },
           )
-          .setFooter({ text: `Submission #${sub.id} — auto-approved | available <t:${unixAvail}:R>` }),
+          .setFooter({ text: `Submission #${sub.id} — pending hold | re-checked <t:${unixAvail}:R>` }),
       ],
     });
 
     await interaction.editReply({
       embeds: [
-        makeEmbed(COLORS.SUCCESS)
-          .setTitle(`${v.statusEmoji} Submission Auto-Approved!`)
-          .setDescription(`Your post is **${v.statusLabel.toLowerCase()}** with **${upsLabel}**.\n\n**${formatMoney(task.reward)}** added to pending balance. Available <t:${unixAvail}:R>.`),
+        makeEmbed(COLORS.WARNING)
+          .setTitle(`${v.statusEmoji} Proof Validated — Hold Period Started`)
+          .setDescription(
+            `Your comment is **${v.statusLabel.toLowerCase()}** with **${upsLabel}**.\n\n` +
+            `Your proof is in the **${holdHoursDisplay} verification hold**. Keep your comment live — ` +
+            `it will be re-checked at <t:${unixAvail}:F>. If it is still live then, **${formatMoney(task.reward)}** will be paid out automatically.`
+          ),
       ],
     });
 
     try {
-      await member_dm(guild, user.discordId, makeEmbed(COLORS.SUCCESS)
-        .setTitle("✅ Task Auto-Approved!")
-        .setDescription(`Your submission for **${task.title}** passed automatic validation!\n\n**${formatMoney(sub.reward)}** added to pending balance. Available <t:${unixAvail}:R>.`));
+      await member_dm(guild, user.discordId, makeEmbed(COLORS.WARNING)
+        .setTitle("⏳ Proof Validated — Verification Hold")
+        .setDescription(
+          `Your submission for **${task.title}** passed initial validation!\n\n` +
+          `**Keep your comment live.** It will be re-checked at <t:${unixAvail}:F>.\n` +
+          `If it is still live at that point, **${formatMoney(sub.reward)}** will be added to your balance automatically.`
+        ));
     } catch {}
 
-    await handleReferralAndLeaderboard(guild, user.discordId, user.id);
-
-    // Schedule a 5-minute early liveness check so we catch workers who
-    // delete their comment immediately after getting auto-validated.
-    scheduleEarlyLivenessCheck({
-      submissionId: sub.id,
-      proofLink,
-      discordId: interaction.user.id,
-      reward: String(sub.reward),
-      redditUsername: validation.authorFound ?? null,
-      workspaceChannelId: user.workspaceChannelId ?? null,
-      taskId: String(task.id),
-    });
+    logger.info({ subId: sub.id, claimId, discordId: interaction.user.id, availableAt, holdHours: task.pendingDelayHours }, "Submission placed in pending_hold");
 
     return;
   }

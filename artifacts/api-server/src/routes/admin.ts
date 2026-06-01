@@ -477,7 +477,7 @@ router.get("/stats", requireAuth, async (req, res) => {
       pool.query("SELECT COUNT(*) FROM users WHERE verified = true"),
       pool.query("SELECT COUNT(*) FROM tasks"),
       pool.query("SELECT COUNT(*) FROM tasks WHERE status = 'open'"),
-      pool.query("SELECT COUNT(*) FROM submissions WHERE review_status = 'pending'"),
+      pool.query("SELECT COUNT(*) FROM submissions WHERE review_status IN ('pending', 'pending_hold')"),
       pool.query("SELECT COUNT(*) FROM submissions WHERE review_status = 'accepted'"),
       pool.query("SELECT COALESCE(SUM(total_earned), 0) FROM users"),
       pool.query("SELECT COALESCE(SUM(balance_pending), 0) FROM users"),
@@ -588,7 +588,7 @@ router.get("/users/:id/profile", requireAuth, async (req, res) => {
         SELECT
           COUNT(*) FILTER (WHERE review_status = 'accepted')             AS accepted,
           COUNT(*) FILTER (WHERE review_status = 'rejected')             AS rejected,
-          COUNT(*) FILTER (WHERE review_status = 'pending')              AS pending,
+          COUNT(*) FILTER (WHERE review_status IN ('pending', 'pending_hold')) AS pending,
           COUNT(*)                                                       AS total,
           COALESCE(SUM(reward) FILTER (WHERE review_status = 'accepted'), 0) AS lifetime_earned,
           AVG(EXTRACT(EPOCH FROM (submitted_at - claimed_at))) FILTER (
@@ -2085,7 +2085,7 @@ router.get("/campaigns/:id/export.csv", requireAuth, async (req, res) => {
         COALESCE((SELECT COUNT(*)::text FROM submissions s WHERE s.task_id = t.id), '0') AS subs_total,
         COALESCE((SELECT COUNT(*)::text FROM submissions s WHERE s.task_id = t.id AND s.review_status = 'accepted'), '0') AS subs_accepted,
         COALESCE((SELECT COUNT(*)::text FROM submissions s WHERE s.task_id = t.id AND s.review_status = 'rejected'), '0') AS subs_rejected,
-        COALESCE((SELECT COUNT(*)::text FROM submissions s WHERE s.task_id = t.id AND s.review_status = 'pending'), '0') AS subs_pending
+        COALESCE((SELECT COUNT(*)::text FROM submissions s WHERE s.task_id = t.id AND s.review_status IN ('pending', 'pending_hold')), '0') AS subs_pending
       FROM campaign_queue cq
       JOIN tasks t ON t.id = cq.posted_task_id
       WHERE cq.campaign_id = ${campaignId} AND cq.posted_task_id IS NOT NULL
@@ -3026,7 +3026,7 @@ router.get("/creator-earnings", requireAuth, async (_req, res) => {
         COALESCE(SUM(s.reward) FILTER (WHERE s.review_status = 'accepted'), 0) AS total_paid,
         COUNT(s.id) FILTER (WHERE s.review_status = 'accepted')          AS total_accepted,
         COUNT(s.id) FILTER (WHERE s.review_status = 'rejected')          AS total_rejected,
-        COUNT(s.id) FILTER (WHERE s.review_status = 'pending')           AS total_pending,
+        COUNT(s.id) FILTER (WHERE s.review_status IN ('pending', 'pending_hold')) AS total_pending,
         AVG(t.reward)::numeric(12,2)                                     AS avg_reward,
         MAX(t.created_at)                                                AS last_task_at,
         MIN(t.created_at)                                                AS first_task_at

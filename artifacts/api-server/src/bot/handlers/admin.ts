@@ -524,6 +524,188 @@ export async function handleNotifyWalletMigration(interaction: ChatInputCommandI
   logger.info({ sent, failed, total, sender: interaction.user.id }, "notifywalletmigration completed");
 }
 
+export async function handleReopenSlot(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can use `/reopenslot`.")],
+    });
+  }
+
+  const submissionId = interaction.options.getInteger("submission_id", true);
+  const reason = interaction.options.getString("reason")?.trim() || "Admin decision";
+  const adminTag = interaction.user.tag;
+
+  const rows = await db.execute<{
+    id: string;
+    discord_id: string;
+    task_id: string;
+    task_title: string;
+    task_status: string;
+    slots_filled: string;
+    max_slots: string;
+    campaign_id: string | null;
+    channel_message_id: string | null;
+    review_status: string;
+    reward: string;
+    user_id: string | null;
+  }>(
+    sql`SELECT
+          s.id::text              AS id,
+          s.discord_id            AS discord_id,
+          s.task_id::text         AS task_id,
+          s.reward::text          AS reward,
+          s.review_status         AS review_status,
+          s.user_id::text         AS user_id,
+          t.title                 AS task_title,
+          t.status                AS task_status,
+          t.slots_filled::text    AS slots_filled,
+          t.max_slots::text       AS max_slots,
+          t.campaign_id::text     AS campaign_id,
+          t.channel_message_id    AS channel_message_id
+        FROM submissions s
+        JOIN tasks t ON t.id = s.task_id
+        WHERE s.id = ${submissionId}
+        LIMIT 1`
+  );
+
+  const row = rows.rows[0];
+  if (!row) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Submission #${submissionId} not found.`)],
+    });
+  }
+
+  if (row.review_status !== "rejected" && row.review_status !== "flagged") {
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.WARNING).setDescription(
+          `⚠️ Submission #${submissionId} is currently **${row.review_status}** — only rejected or flagged submissions can have their slot reopened.`
+        ),
+      ],
+    });
+  }
+
+  const slotsFilled = parseInt(row.slots_filled);
+  const maxSlots = parseInt(row.max_slots);
+  const taskId = parseInt(row.task_id);
+
+  if (slotsFilled <= 0) {
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.WARNING).setDescription(
+          `⚠️ Task #${taskId} already has 0 slots filled — nothing to reopen.`
+        ),
+      ],
+    });
+  }
+
+  // Atomically decrement slots_filled — safe because we verified > 0 above
+  // and GREATEST(0, ...) prevents underflow if another admin races us.
+  await db.execute(
+    sql`UPDATE tasks
+        SET slots_filled = GREATEST(0, slots_filled - 1)
+        WHERE id = ${taskId}`
+  );
+
+  // Audit trail — delta 0 records the event without affecting the user's
+  // trust score. Related to submission for full traceability.
+  await db.execute(
+    sql`INSERT INTO trust_logs (discord_id, delta, reason, related_submission_id, created_at)
+        VALUES (${row.discord_id}, 0,
+                ${`Slot manually reopened by ${adminTag} — submission #${submissionId}. Reason: ${reason}`},
+                ${submissionId}, now())`
+  ).catch(() => {});
+
+  invalidateUser(row.discord_id);
+
+  // Refresh the public #tasks card so the freed slot is immediately visible.
+  try {
+    const { getPrimaryGuild } = await import("../discord-client.js");
+    const { setupGuild: _setupGuild } = await import("../setup.js");
+    const { buildPublicTaskEmbed, buildPublicButtons, buildCampaignProgressEmbed, refreshCampaignSummary } = await import("../task-creation.js");
+    const { db: _db, tasks: _tasks } = await import("@workspace/db");
+    const { eq: _eq } = await import("drizzle-orm");
+
+    const g = getPrimaryGuild();
+    if (g) {
+      const [refreshed] = await _db.select().from(_tasks).where(_eq(_tasks.id, taskId)).limit(1);
+      if (refreshed && refreshed.status === "open" && refreshed.channelMessageId) {
+        const { tasksChannel } = await _setupGuild(g);
+        const card = buildPublicTaskEmbed(refreshed);
+        const prog = refreshed.campaignId
+          ? await buildCampaignProgressEmbed(refreshed.campaignId)
+          : null;
+        const msg = await (tasksChannel as import("discord.js").TextChannel).messages
+          .fetch(refreshed.channelMessageId)
+          .catch(() => null);
+        if (msg) {
+          await msg.edit({
+            embeds: prog ? [card, prog] : [card],
+            components: [buildPublicButtons(refreshed.id, false)],
+          }).catch(() => {});
+        }
+      }
+      if (row.campaign_id) {
+        const { refreshCampaignSummary: rcs } = await import("../task-creation.js");
+        void rcs(parseInt(row.campaign_id));
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, taskId }, "handleReopenSlot: task card refresh failed (non-fatal)");
+  }
+
+  // Best-effort DM to the worker so they know the slot is available again.
+  try {
+    const member = await guild.members.fetch(row.discord_id).catch(() => null);
+    if (member) {
+      const dmEmbed = makeEmbed(COLORS.WARNING)
+        .setTitle("🔓 Task Slot Reopened by Admin")
+        .setDescription(
+          [
+            `An admin has manually reopened the task slot held by your submission **#${submissionId}** for **${row.task_title}**.`,
+            "",
+            `The slot is now available for another earner to claim. Your submission remains rejected.`,
+            "",
+            `If you have questions, please contact staff.`,
+          ].join("\n")
+        );
+      await member.send({ embeds: [dmEmbed] });
+    }
+  } catch {
+    logger.debug({ discordId: row.discord_id }, "handleReopenSlot: could not DM worker");
+  }
+
+  const newSlotsFilled = Math.max(0, slotsFilled - 1);
+
+  return interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle(`🔓 Slot Reopened — Task #${taskId}`)
+        .setDescription(
+          [
+            `**${row.task_title}**`,
+            "",
+            `Submission **#${submissionId}** (was **${row.review_status}**) released its slot.`,
+            `Slots: **${slotsFilled}/${maxSlots}** → **${newSlotsFilled}/${maxSlots}**`,
+            "",
+            `**Reason:** ${reason}`,
+            `The task card in #tasks has been refreshed and the slot is now claimable.`,
+          ].join("\n")
+        )
+        .addFields(
+          { name: "Worker", value: `<@${row.discord_id}>`, inline: true },
+          { name: "Submission", value: `#${submissionId}`, inline: true },
+          { name: "Reward", value: formatMoney(parseFloat(row.reward)), inline: true },
+        )
+        .setFooter({ text: `Reopened by ${adminTag} • ${new Date().toUTCString()}` }),
+    ],
+  });
+}
+
 export async function handleApproveSubmission(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
 

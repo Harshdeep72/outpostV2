@@ -357,6 +357,22 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setMinValue(1)
     );
 
+  const reopenslot = new SlashCommandBuilder()
+    .setName("reopenslot")
+    .setDescription("Reopen a task slot held by a rejected submission, making it claimable again (mod/admin only)")
+    .addIntegerOption((o) =>
+      o.setName("submission_id")
+        .setDescription("ID of the rejected submission whose task slot should be freed (e.g. 1284)")
+        .setRequired(true)
+        .setMinValue(1)
+    )
+    .addStringOption((o) =>
+      o.setName("reason")
+        .setDescription("Reason for reopening (recorded in audit log)")
+        .setRequired(false)
+        .setMaxLength(300)
+    );
+
   const mystatus = new SlashCommandBuilder()
     .setName("mystatus")
     .setDescription("Check your submissions currently in the verification hold — see reward, live status, and time until payout")
@@ -369,7 +385,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, approvesubmission, mystatus,
+    checksubmission, approvesubmission, reopenslot, mystatus,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

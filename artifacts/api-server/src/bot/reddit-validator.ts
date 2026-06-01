@@ -608,17 +608,19 @@ export async function validateRedditProof(
   }
 
   // ── Comment-task guard ─────────────────────────────────────────────────────
-  // A comment task requires a proof URL that contains a specific comment ID
-  // (i.e. the URL must look like /r/sub/comments/POST_ID/title/COMMENT_ID/).
+  // comment / thread_reply / op_reply tasks all require a proof URL that
+  // contains a specific comment ID (i.e. the URL must look like
+  // /r/sub/comments/POST_ID/title/COMMENT_ID/).
   // Without this check, a post-only URL slips through to the RSS post-check
   // path below, which validates the post author — not the comment author —
   // and auto-approves even when the worker never actually commented.
-  if (options?.taskType === "comment" && !parsed.commentId) {
+  const requiresCommentUrl = ["comment", "thread_reply", "op_reply"].includes(options?.taskType ?? "");
+  if (requiresCommentUrl && !parsed.commentId) {
     return {
       passed: false, autoApproved: false, status: "url_invalid",
       failures: [
         "Your proof link points to a Reddit post, not to a specific comment. " +
-        "For comment tasks you must link directly to **your comment**. " +
+        "For this task you must link directly to **your comment**. " +
         "Open your comment on Reddit, tap the three-dot menu → **Share** → **Copy link**, " +
         "then paste that URL here. It should look like: " +
         "`https://www.reddit.com/r/SubName/comments/POSTID/posttitle/COMMENTID/`."

@@ -1,7 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
-import { commentValidationCache } from "./cache.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
 import { executePythonRedditClient } from "./pythonClient.js";
 
@@ -357,27 +356,11 @@ export async function deepCheckComment(
     };
   }
 
-  const expectedLowerList = (Array.isArray(expectedAuthor) ? expectedAuthor : [expectedAuthor])
-    .map((u) => {
-      let name = (u ?? "").toLowerCase().trim();
-      name = name.replace(/^\/?u\//, "");
-      return name;
-    })
-    .filter((u) => u.length > 0);
-
-  const cacheKey = `${parsed.commentId}:${expectedLowerList.sort().join(",")}:${taskRedditLink}:${options?.minCommentChars ?? 0}`;
-  const cached = commentValidationCache.get(cacheKey);
-  if (cached) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: cache hit");
-    return cached;
-  }
-
-  const result = await runDeepCheck(proofUrl, expectedAuthor, taskRedditLink, options);
-  
-  if (result.status !== "api_unreachable") {
-    commentValidationCache.set(cacheKey, result);
-  }
-  return result;
+  // No result caching for initial proof validation. A cache hit here would
+  // return the OLD verdict without re-fetching Reddit — a deleted comment
+  // could stay "live" in cache for minutes after deletion, letting a worker
+  // get paid for a comment they deleted immediately after submission.
+  return runDeepCheck(proofUrl, expectedAuthor, taskRedditLink, options);
 }
 
 async function runDeepCheck(

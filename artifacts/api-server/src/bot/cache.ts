@@ -127,7 +127,6 @@ export const leaderboardSnapshotCache = register(new TTLCache<
 >(60_000));
 
 export const userExistsCache = register(new TTLCache<string, string>(5 * 60_000));
-export const commentValidationCache = register(new TTLCache<string, any>(5 * 60_000));
 
 export function invalidateUser(discordId: string, id?: number): void {
   userCache.delete(discordId);

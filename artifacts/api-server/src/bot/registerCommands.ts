@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 const DM_PUBLIC_COMMANDS = new Set([
   "digest", "referral", "referraluse",
   "setupi", "setpaypal", "setwallet",
-  "wallet", "profile", "ping", "stats",
+  "wallet", "profile", "ping", "stats", "mystatus",
 ]);
 
 export async function registerCommands(): Promise<void> {

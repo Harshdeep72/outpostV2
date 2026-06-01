@@ -449,17 +449,20 @@ async function runDeepCheck(
     fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null),
   ]);
 
-  // Pick the best JSON result: OAuth > Python (prefer whichever actually worked).
+  // Pick the best JSON result: Python is PRIMARY — curl_cffi browser TLS
+  // impersonation is more reliable from datacenter IPs than OAuth (which
+  // still hits Reddit's CDN and can be blocked). OAuth is the fallback for
+  // environments where curl_cffi is unavailable or the Python process fails.
   const pythonRes = pythonJsonRes;
-  const effectiveJsonRes = oauthRes?.ok ? oauthRes : pythonRes;
-  const jsonSource = oauthRes?.ok ? ("oauth" as const) : ("json_proxy" as const);
+  const effectiveJsonRes = pythonRes?.ok ? pythonRes : oauthRes;
+  const jsonSource = pythonRes?.ok ? ("json_proxy" as const) : ("oauth" as const);
 
-  if (oauthRes?.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth JSON succeeded");
-  } else if (pythonRes?.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: Python curl_cffi JSON succeeded (OAuth unavailable/failed)");
+  if (pythonRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: Python curl_cffi JSON succeeded (primary source)");
+  } else if (oauthRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth JSON succeeded (Python unavailable/failed — fallback)");
   } else {
-    logger.info({ commentId: parsed.commentId }, "Deep check: both OAuth and Python JSON failed — falling back to HTML+RSS");
+    logger.info({ commentId: parsed.commentId }, "Deep check: both Python and OAuth JSON failed — falling back to HTML+RSS");
   }
 
   // ── Phase 2: parallel Python fallbacks for any source that proxy missed ───

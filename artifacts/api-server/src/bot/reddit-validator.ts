@@ -895,19 +895,22 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     };
   }
 
-  // ── Post-only liveness via RSS + old.reddit HTML ─────────────────────────
+  // ── Post-only liveness via Python JSON (primary) + RSS + old.reddit HTML ─
   // Comment URLs are handled above by deepCheckComment.
-  // Unauthenticated JSON is deprecated and OAuth is not yet configured, so
-  // RSS and old.reddit HTML are the sources for post liveness checks.
+  // Python curl_cffi browser TLS impersonation is the primary source —
+  // it bypasses datacenter IP blocks that block unauthenticated JSON.
+  // RSS and old.reddit HTML are fallbacks when Python JSON is unavailable.
 
   const subPrefix = parsed.isUserPost
     ? `user/${parsed.subreddit.slice(2)}`
     : `r/${parsed.subreddit}`;
-  const postRssUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/.rss`;
+  const postRssUrl  = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/.rss`;
+  const postJsonUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}.json?raw_json=1`;
+  const postVisitUrl = `https://www.reddit.com/${subPrefix}/comments/${parsed.postId}/`;
 
-  // Fetch RSS and old.reddit HTML in parallel for speed.
-  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post RSS + old.reddit HTML in parallel");
-  const [postRssText, oldRedditHtml] = await Promise.all([
+  // Fire all three sources in parallel so we always pay only one round-trip.
+  logger.info({ postId: parsed.postId }, "recheckRedditLiveness: fetching post Python JSON + RSS + HTML in parallel");
+  const [postRssText, oldRedditHtml, pythonPostRes] = await Promise.all([
     fetchDirectText(postRssUrl, 8_000),
     proxyFetchText(
       [
@@ -916,7 +919,42 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
       ],
       { timeoutMs: 8_000, acceptHeader: "text/html, */*" }
     ).catch(() => null),
+    executePythonRedditClient({
+      url: postJsonUrl,
+      visitFirst: postVisitUrl,
+      isJson: true,
+      useProxy: true,
+      timeout: 8,
+    }).catch(() => null),
   ]);
+
+  // ── 0. Python JSON (primary) ──────────────────────────────────────────────
+  // classifyPost() reads removed_by_category / selftext / author from JSON data.
+  // A null result means no removal signals — post is live.
+  if (pythonPostRes?.ok && Array.isArray(pythonPostRes.body)) {
+    const postData = (pythonPostRes.body as any[])[0]?.data?.children?.[0]?.data;
+    if (postData) {
+      const classification = classifyPost(postData);
+      if (classification === "deleted_by_author") {
+        logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post deleted by author");
+        return { liveStatus: "deleted", detailedStatus: classification, statusLabel: "Post deleted", reason: "Post deleted by author (Python JSON)." };
+      }
+      if (classification === "removed_by_mod" || classification === "removed_by_automod") {
+        logger.info({ postId: parsed.postId, classification }, "recheckRedditLiveness: Python JSON → post removed");
+        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed", reason: `Post removed (${classification}) via Python JSON.` };
+      }
+      if (classification === "removed_by_reddit") {
+        logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post removed by Reddit");
+        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed by Reddit", reason: "Post removed by Reddit (Python JSON)." };
+      }
+      // classification === null → no removal signals — post is live
+      logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post live (no removal signals)");
+      return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
+    }
+    logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON ok but no post data — falling back to HTML+RSS");
+  } else {
+    logger.info({ postId: parsed.postId, ok: pythonPostRes?.ok }, "recheckRedditLiveness: Python JSON unavailable — falling back to HTML+RSS");
+  }
 
   // ── 1. Parse old.reddit HTML ──────────────────────────────────────────────
   // old.reddit is fully server-rendered: a removed post still loads but

@@ -524,6 +524,126 @@ export async function handleNotifyWalletMigration(interaction: ChatInputCommandI
   logger.info({ sent, failed, total, sender: interaction.user.id }, "notifywalletmigration completed");
 }
 
+export async function handleApproveSubmission(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can use `/approvesubmission`.")],
+    });
+  }
+
+  const submissionId = interaction.options.getInteger("id", true);
+
+  const rows = await db.execute<{
+    id: string;
+    discord_id: string;
+    reward: string;
+    live_status: string;
+    review_status: string;
+    review_reason: string | null;
+    moved_to_available: number;
+  }>(
+    sql`SELECT s.id::text            AS id,
+               s.discord_id          AS discord_id,
+               s.reward::text        AS reward,
+               s.live_status         AS live_status,
+               s.review_status       AS review_status,
+               s.review_reason       AS review_reason,
+               s.moved_to_available  AS moved_to_available
+        FROM submissions s
+        WHERE s.id = ${submissionId}
+        LIMIT 1`
+  );
+
+  const row = rows.rows[0];
+  if (!row) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Submission #${submissionId} not found.`)],
+    });
+  }
+
+  if (row.review_status !== "rejected") {
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.WARNING).setDescription(
+          `⚠️ Submission #${submissionId} is currently **${row.review_status}** — only rejected submissions can be manually approved.`
+        ),
+      ],
+    });
+  }
+
+  const reward = parseFloat(row.reward);
+
+  // Credit the reward to balance_available and restore the trust deduction.
+  await db.execute(
+    sql`UPDATE users
+        SET balance_available = balance_available + ${reward}::numeric,
+            total_earned      = total_earned      + ${reward}::numeric,
+            trust_score       = trust_score       + 0.05
+        WHERE discord_id = ${row.discord_id}`
+  );
+
+  const adminTag = interaction.user.tag;
+  const reviewReason = `Manually approved by ${adminTag} — liveness check was incorrect.`;
+
+  await db.execute(
+    sql`UPDATE submissions
+        SET live_status    = 'live',
+            review_status  = 'accepted',
+            removal_reason = NULL,
+            review_reason  = ${reviewReason}
+        WHERE id = ${submissionId}`
+  );
+
+  // Log the correction to trust_logs for audit trail.
+  await db.execute(
+    sql`INSERT INTO trust_logs (discord_id, delta, reason, related_submission_id, created_at)
+        VALUES (${row.discord_id}, 0,
+                ${`Manual approval by ${adminTag}: +${formatMoney(reward)} credited, trust restored +0.05 (submission #${submissionId})`},
+                ${submissionId}, now())`
+  ).catch(() => {});
+
+  invalidateUser(row.discord_id);
+
+  // Best-effort DM to the user.
+  try {
+    const member = await guild.members.fetch(row.discord_id);
+    const dmEmbed = makeEmbed(COLORS.SUCCESS)
+      .setTitle("✅ Submission Approved — Reward Credited")
+      .setDescription(
+        [
+          `Your submission **#${submissionId}** has been manually reviewed and approved.`,
+          "",
+          `**${formatMoney(reward)}** has been added to your available balance.`,
+          "",
+          "We apologise for the inconvenience — the automated liveness check made an error and it has since been corrected.",
+        ].join("\n")
+      );
+    await member.send({ embeds: [dmEmbed] });
+  } catch {
+    logger.warn({ discordId: row.discord_id }, "handleApproveSubmission: could not DM user");
+  }
+
+  return interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle(`✅ Submission #${submissionId} — Manually Approved`)
+        .setDescription(
+          [
+            `**${formatMoney(reward)}** credited to <@${row.discord_id}>'s available balance.`,
+            `Trust score restored (+0.05).`,
+            `Previous status: **${row.live_status}** / **${row.review_status}**`,
+            row.review_reason ? `Previous rejection reason: ${row.review_reason}` : null,
+          ].filter(Boolean).join("\n")
+        )
+        .setFooter({ text: `Approved by ${adminTag} • ${new Date().toUTCString()}` }),
+    ],
+  });
+}
+
 export async function handleCheckSubmission(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
 

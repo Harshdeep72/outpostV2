@@ -347,6 +347,16 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setMinValue(1)
     );
 
+  const approvesubmission = new SlashCommandBuilder()
+    .setName("approvesubmission")
+    .setDescription("Manually approve a wrongly-rejected submission and credit the reward (mod/admin only)")
+    .addIntegerOption((o) =>
+      o.setName("id")
+        .setDescription("Submission ID to approve (e.g. 1284)")
+        .setRequired(true)
+        .setMinValue(1)
+    );
+
   const mystatus = new SlashCommandBuilder()
     .setName("mystatus")
     .setDescription("Check your submissions currently in the verification hold — see reward, live status, and time until payout")
@@ -359,7 +369,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, mystatus,
+    checksubmission, approvesubmission, mystatus,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

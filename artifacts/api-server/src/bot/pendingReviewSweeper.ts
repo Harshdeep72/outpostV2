@@ -91,7 +91,13 @@ function fmtMoney(n: string | number): string {
 }
 
 async function autoAccept(client: Client, row: PendingRow): Promise<boolean> {
-  const availableAt = new Date(Date.now() + row.pending_delay_hours * 60 * 60 * 1000);
+  // Enforce 10-minute minimum hold so the early liveness check always fires
+  // before the pending processor can release funds.
+  const MIN_HOLD_MS = 10 * 60 * 1000;
+  const availableAt = new Date(Math.max(
+    Date.now() + row.pending_delay_hours * 60 * 60 * 1000,
+    Date.now() + MIN_HOLD_MS
+  ));
   // Atomic CAS — admin clicking Accept/Reject in Discord at the same instant
   // must win-or-lose cleanly without double-payout. WHERE review_status='pending'
   // gate ensures only one writer succeeds.

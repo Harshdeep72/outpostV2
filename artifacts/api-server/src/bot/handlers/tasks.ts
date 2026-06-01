@@ -1396,7 +1396,15 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
   const { taskLogsChannel } = await setupGuild(guild);
 
   if (!needsManualReview && validation?.autoApproved) {
-    const availableAt = new Date(Date.now() + task.pendingDelayHours * 60 * 60 * 1000);
+    // Enforce a 10-minute minimum hold so the early liveness check (fires at 5 min)
+    // always has time to run before the pending processor can release funds.
+    // Without this, tasks with pendingDelayHours=0 would pay out within 60s of
+    // auto-validation — before the deletion check runs.
+    const MIN_HOLD_MS = 10 * 60 * 1000;
+    const availableAt = new Date(Math.max(
+      Date.now() + task.pendingDelayHours * 60 * 60 * 1000,
+      Date.now() + MIN_HOLD_MS
+    ));
 
     await db.update(submissions).set({
       reviewStatus: "accepted",
@@ -1575,7 +1583,12 @@ export async function handleSubAccept(interaction: ButtonInteraction, subId: num
   const user = await getUserByDiscordId(sub.discordId);
   if (!user) return interaction.followUp({ content: "❌ User not found.", flags: 64 });
 
-  const availableAt = new Date(Date.now() + task.pendingDelayHours * 60 * 60 * 1000);
+  // Enforce 10-minute minimum hold so early liveness check runs before payout.
+  const MIN_HOLD_MS = 10 * 60 * 1000;
+  const availableAt = new Date(Math.max(
+    Date.now() + task.pendingDelayHours * 60 * 60 * 1000,
+    Date.now() + MIN_HOLD_MS
+  ));
 
   // ATOMIC CAS — the pending-status check above is a read, then this UPDATE
   // is a separate write. Two reviewers clicking Accept at the same instant

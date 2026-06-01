@@ -408,24 +408,42 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
       headers: { "Accept": "application/json" }
     });
 
-    if (!res.ok) return null;
-
     const data = await res.json() as any;
-    if (data.status === "error") return null;
 
+    if (!res.ok) {
+      if (data && data.success === false && data.message?.includes("not found")) {
+        return {
+          passed: false,
+          autoApproved: false,
+          status: "not_found",
+          failures: ["Comment is not_found"],
+          authorFound: null,
+          title: undefined,
+          upvotes: undefined,
+          postLive: true,
+          verifiedVia: "json_proxy",
+          ...meta("not_found"),
+        };
+      }
+      return null;
+    }
+
+    if (!data.success || !data.data) return null;
+
+    const liveness = data.data.liveness;
     let mappedStatus: SubmissionStatus = "live";
-    if (data.status === "deleted") mappedStatus = "deleted_by_author";
-    if (data.status === "removed") mappedStatus = "removed_by_mod";
-    if (data.status === "not_found") mappedStatus = "not_found";
+    if (liveness === "deleted") mappedStatus = "deleted_by_author";
+    if (liveness === "removed") mappedStatus = "removed_by_mod";
+    if (liveness === "not_found") mappedStatus = "not_found";
 
     return {
       passed: mappedStatus === "live",
       autoApproved: mappedStatus === "live",
       status: mappedStatus,
       failures: mappedStatus === "live" ? [] : [`Comment is ${mappedStatus}`],
-      authorFound: data.author,
+      authorFound: data.data.author,
       title: undefined,
-      upvotes: data.upvotes,
+      upvotes: data.data.upvotes,
       postLive: mappedStatus === "live",
       verifiedVia: "json_proxy",
       ...meta(mappedStatus),

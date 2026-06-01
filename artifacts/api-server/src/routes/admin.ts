@@ -9,6 +9,7 @@ import { setupGuild, getOrCreateWorkspaceChannel } from "../bot/setup.js";
 import { makeEmbed } from "../bot/util.js";
 import { COLORS } from "../bot/constants.js";
 import { runLivenessTickNow, startBulkLivenessScanAllTime, isBulkScanRunning } from "../bot/redditLivenessChecker.js";
+import { runPostPayoutCheckNow } from "../bot/postPayoutChecker.js";
 import { invalidateUser } from "../bot/cache.js";
 import { getCooldownConfig, setCooldownConfig, getAutoBumpConfig, setAutoBumpConfig, getMaxRedditAccounts, setMaxRedditAccounts, getProxies, setProxies } from "../lib/settings.js";
 import { reloadProxiesNow, getProxyMetrics } from "../bot/proxy.js";
@@ -2294,6 +2295,15 @@ router.get("/liveness/bulk-scan-status", requireAuth, (_req, res) => {
 router.post("/sweep/run-now", requireAuth, async (req, res) => {
   const { runPendingSweepNow } = await import("../bot/pendingReviewSweeper.js");
   const result = await runPendingSweepNow();
+  if (!result.ok) return res.status(503).json(result);
+  res.json(result);
+});
+
+// Manually trigger one pass of the post-payout checker (24h paid-out comment scan).
+router.post("/post-payout/run-now", requireAdminRole, async (req, res) => {
+  const guild = getPrimaryGuild();
+  if (!guild) return res.status(503).json({ error: "Bot not connected" });
+  const result = await runPostPayoutCheckNow(guild.client);
   if (!result.ok) return res.status(503).json(result);
   res.json(result);
 });

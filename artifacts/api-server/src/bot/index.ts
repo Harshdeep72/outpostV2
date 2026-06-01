@@ -18,6 +18,7 @@ import { startRedditLivenessChecker } from "./redditLivenessChecker.js";
 import { startPendingReviewSweeper } from "./pendingReviewSweeper.js";
 import { startSubmissionRetention } from "./submissionRetention.js";
 import { startCampaignQueueProcessor } from "./campaignQueueProcessor.js";
+import { startPostPayoutChecker } from "./postPayoutChecker.js";
 import { runUpdateNotifierOnBoot } from "./updateNotifier.js";
 import { refreshLeaderboard, checkAndRolloverWeek } from "./handlers/leaderboard.js";
 import { runWeeklyPayouts } from "./handlers/weeklyPayouts.js";
@@ -132,6 +133,7 @@ export async function startBot() {
       // (no trust penalty). Skips non-Reddit URLs (Twitter/Quora always manual).
       startPendingReviewSweeper(client);
       startCampaignQueueProcessor(client);
+      startPostPayoutChecker(client);
       // Daily cleanup: deletes submissions > 22 days old after mirroring each
       // to its Google Sheet (cost control for Neon). Sheet is the long-term
       // archive. See submissionRetention.ts for the safety design.

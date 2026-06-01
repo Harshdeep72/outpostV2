@@ -404,298 +404,90 @@ async function runDeepCheck(
     };
   }
 
-  // ── Parallel fetch URLs targeting the comment specifically ──────────────────
-  // Unauthenticated JSON access has been deprecated by Reddit. OAuth is now the
-  // sole JSON source; RSS and old.reddit HTML remain as secondary fallbacks.
+  // ── Python JSON via session cookie (sole source) ─────────────────────────
+  // RSS and HTML fallbacks have been removed. Both caused reliability problems:
+  // - RSS caches deleted comments, producing false "live" verdicts.
+  // - Shreddit HTML lazy-loads comments, making "not found" inconclusive and
+  //   causing false "removed" verdicts for live comments.
+  //
+  // The Python curl_cffi client impersonates Chrome 120 and sends the Reddit
+  // session cookie (REDDIT_SESSION_COOKIE env var), giving authenticated access
+  // identical to a logged-in browser. For a comment permalink Reddit returns
+  // the focused thread — the target comment MUST appear in the t1 listing if
+  // it exists. Absence = gone. Failure to fetch = api_unreachable (retry later).
   const sub = parsed.isUserPost ? `user/${parsed.subreddit.slice(2)}` : `r/${parsed.subreddit}`;
 
-  const rssUrls = [
-    `https://www.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/.rss`,
-    `https://old.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/.rss`
-  ];
+  logger.info({ commentId: parsed.commentId, sub }, "Deep check: fetching via Python JSON (session cookie, sole source)");
+  const pythonRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
 
-  const htmlUrls = [
-    `https://old.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/`,
-    `https://www.reddit.com/${sub}/comments/${parsed.postId}/_/${parsed.commentId}/`
-  ];
-
-  logger.info({ commentId: parsed.commentId }, "Executing parallel deep comment check");
-
-  // ── Phase 1: fire all sources in parallel ─────────────────────────────────
-  // Python JSON runs alongside OAuth so there is no extra serial hop when
-  // OAuth is not configured (the common case). Proxy HTML+RSS also run at
-  // the same time so every network source starts at t=0.
-  let [rssHtml, htmlContent, oauthRes, pythonJsonRes] = await Promise.all([
-    proxyFetchText(rssUrls, { timeoutMs: 8000 }).catch(() => null),
-    proxyFetchText(htmlUrls, { timeoutMs: 8000 }).catch(() => null),
-    fetchCommentThreadViaOAuth(sub, parsed.postId, parsed.commentId).catch(() => null),
-    fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null),
-  ]);
-
-  // Pick the best JSON result: Python is PRIMARY — curl_cffi browser TLS
-  // impersonation is more reliable from datacenter IPs than OAuth (which
-  // still hits Reddit's CDN and can be blocked). OAuth is the fallback for
-  // environments where curl_cffi is unavailable or the Python process fails.
-  const pythonRes = pythonJsonRes;
-  const effectiveJsonRes = pythonRes?.ok ? pythonRes : oauthRes;
-  const jsonSource = pythonRes?.ok ? ("json_proxy" as const) : ("oauth" as const);
-
-  if (pythonRes?.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: Python curl_cffi JSON succeeded (primary source)");
-  } else if (oauthRes?.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: OAuth JSON succeeded (Python unavailable/failed — fallback)");
-  } else {
-    logger.info({ commentId: parsed.commentId }, "Deep check: both Python and OAuth JSON failed — falling back to HTML+RSS");
-  }
-
-  // ── Phase 2: parallel Python fallbacks for any source that proxy missed ───
-  // Both fallbacks fire simultaneously — only one round of Python latency
-  // regardless of how many sources need it.
-  // Proxy may return a Cloudflare challenge page or login wall instead of null.
-  // Trigger Python curl_cffi fallback whenever the returned content doesn't
-  // look like a real Reddit page, not just when the proxy returned null.
-  const htmlLooksValid =
-    !!htmlContent &&
-    (htmlContent.includes('class="commentarea"') ||
-     htmlContent.includes('id="siteTable"') ||
-     htmlContent.includes('data-subreddit=') ||
-     htmlContent.includes('<shreddit-comment-tree') ||
-     htmlContent.includes('<shreddit-app') ||
-     htmlContent.includes('shreddit-'));
-  const rssLooksValid = !!rssHtml && rssHtml.includes('<feed');
-  const needPyHtml = !htmlLooksValid;
-  const needPyRss  = !rssLooksValid;
-
-  if (needPyHtml || needPyRss) {
-    logger.info(
-      { commentId: parsed.commentId, needPyHtml, needPyRss },
-      "Deep check: proxy missed sources — running Python curl_cffi fallbacks in parallel"
+  if (!pythonRes?.ok || !Array.isArray(pythonRes.body)) {
+    logger.warn(
+      { commentId: parsed.commentId, ok: pythonRes?.ok },
+      "Deep check: Python JSON fetch failed — api_unreachable"
     );
-    const [pyHtmlRes, pyRssRes] = await Promise.all([
-      needPyHtml
-        ? executePythonRedditClient({ url: htmlUrls[0]!, isJson: false, useProxy: true, timeout: 8 }).catch(() => null)
-        : Promise.resolve(null),
-      needPyRss
-        ? executePythonRedditClient({ url: rssUrls[0]!, isJson: false, useProxy: true, timeout: 8 }).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-    if (needPyHtml && pyHtmlRes?.ok && typeof pyHtmlRes.body === "string") {
-      htmlContent = pyHtmlRes.body;
-      logger.info({ commentId: parsed.commentId }, "Deep check: Python client supplied HTML");
-    }
-    if (needPyRss && pyRssRes?.ok && typeof pyRssRes.body === "string") {
-      rssHtml = pyRssRes.body;
-      logger.info({ commentId: parsed.commentId }, "Deep check: Python client supplied RSS");
-    }
+    failures.push("Could not reach Reddit API to verify this comment. Please try again shortly.");
+    return {
+      passed: false, autoApproved: false, status: "api_unreachable",
+      failures, subredditFound: parsed.subreddit, postLive: true,
+      ...meta("api_unreachable"),
+    };
   }
 
-  let authorFound: string | null = null;
-  let subredditFound: string | null = null;
-  let createdAt: string | null = null;
-  let bodyText: string | null = null;
-  let commentStatus: SubmissionStatus = "live";
-  // Which source ultimately confirmed the comment's state (for proofVerifiedVia).
-  let verifiedVia: ValidationResult["verifiedVia"] = undefined;
-  // Track whether the JSON fetch itself succeeded so HTML-only "not found"
-  // results can be treated as inconclusive rather than confirmed-removed.
-  let jsonSucceeded = false;
+  // ── Parse the JSON response ───────────────────────────────────────────────
+  const data = pythonRes.body;
+  const postData = (data[0] as any)?.data?.children?.[0]?.data;
+  let subredditFound: string = ((postData?.subreddit as string | undefined) ?? parsed.subreddit).toLowerCase();
 
-  // 1. Evaluate JSON result (OAuth preferred, proxy JSON fallback)
-  if (effectiveJsonRes && effectiveJsonRes.ok) {
-    logger.info({ commentId: parsed.commentId, source: jsonSource }, "Deep check: JSON fetch succeeded");
-    jsonSucceeded = true;
-    const data = effectiveJsonRes.body;
-    const postListing = Array.isArray(data) ? data[0] : null;
-    const postData = postListing?.data?.children?.[0]?.data;
-    if (postData) {
-      subredditFound = (postData.subreddit ?? "").toLowerCase();
-    }
-
-    const commentsListing = Array.isArray(data) ? data[1] : null;
-    const allComments: any[] = [];
-    function flatten(children: any[]) {
-      for (const child of children ?? []) {
-        if (child.kind === "t1") {
-          allComments.push(child.data);
-          if (child.data.replies?.data?.children) {
-            flatten(child.data.replies.data.children);
-          }
-        }
-      }
-    }
-    flatten(commentsListing?.data?.children ?? []);
-    const target = allComments.find((c) => c.id === parsed.commentId);
-    
-    if (target) {
-      authorFound = (target.author ?? "").toLowerCase();
-      bodyText = target.body ?? "";
-      createdAt = target.created_utc ? new Date(target.created_utc * 1000).toISOString() : null;
-      const cstate = classifyComment(target);
-      if (cstate) {
-        commentStatus = cstate;
-      }
-      verifiedVia = jsonSource;
-    } else {
-      // JSON API succeeded (real response, not a network error) but the specific
-      // comment was NOT present in the thread. This is authoritative — Reddit
-      // returns the permalink thread focused on that comment, so a missing entry
-      // means the comment no longer exists (deleted/removed/never existed).
-      //
-      // In liveness-only mode (expectedLowerList empty — called by /checksubmission
-      // and the background liveness checker) we stop here immediately. Falling
-      // through to RSS would let stale cached RSS entries resurrect a gone comment
-      // and incorrectly report it as "live", which is exactly the false-positive
-      // that causes /checksubmission to say "Status: live" for deleted comments.
-      //
-      // In initial-validation mode (expectedLowerList non-empty) we allow the
-      // HTML/RSS fallback to continue because collapsed/paginated threads can
-      // omit deep-nested comments from the JSON response even when they exist.
-      if (expectedLowerList.length === 0) {
-        logger.warn(
-          { commentId: parsed.commentId, source: jsonSource },
-          "Deep check (liveness): JSON succeeded but comment absent from thread — treating as deleted"
-        );
-        failures.push(`Comment ID "${parsed.commentId}" not found on the post — it was likely removed by Reddit/Automod.`);
-        return {
-          passed: false, autoApproved: false, status: "comment_missing",
-          failures, subredditFound: subredditFound ?? parsed.subreddit, postLive: true,
-          ...meta("comment_missing"),
-        };
-      }
-    }
-  }
-
-  // 2. Evaluate HTML result if JSON did not fully resolve the comment
-  if (!authorFound && htmlContent) {
-    logger.info({ commentId: parsed.commentId, htmlLength: htmlContent.length }, "Deep check: falling back to HTML parser");
-    const parsedHtml = parseHtmlComment(htmlContent, parsed.commentId);
-    logger.info({ commentId: parsed.commentId, parsedHtmlFound: parsedHtml.found, parsedHtmlIsRemoved: parsedHtml.isRemoved, parsedHtmlValid: parsedHtml.validPage }, "HTML parse result");
-    if (parsedHtml.validPage) {
-      if (parsedHtml.found) {
-        subredditFound = parsedHtml.subreddit || subredditFound;
-        createdAt = parsedHtml.createdAt || createdAt;
-        bodyText = parsedHtml.body || bodyText;
-        verifiedVia = "html";
-        if (parsedHtml.isRemoved) {
-          commentStatus = "comment_deleted";
-          // Use a sentinel so the flow reaches the liveness check instead of
-          // falling through to RSS and returning comment_missing.
-          authorFound = parsedHtml.author ?? (expectedLowerList.length === 0 ? "__removed__" : null);
-        } else {
-          // Comment is visible on old.reddit HTML.
-          // If we can read the author from HTML, use it; otherwise in liveness-only
-          // mode (expectedLowerList empty) use a sentinel so we don't fall through
-          // to RSS and risk returning comment_missing for a live comment.
-          authorFound = parsedHtml.author ?? (expectedLowerList.length === 0 ? "__live__" : null);
-        }
-      } else {
-        // Comment not found on a valid Reddit page.
-        //
-        // Only old.reddit is fully server-rendered, so only old.reddit's
-        // "not found" is a reliable removal signal (parsedHtml.isRemoved: true).
-        // Shreddit lazy-loads comments via JS — absence in initial HTML is
-        // inconclusive, so we fall through to RSS instead of locking in "deleted".
-        if (!parsedHtml.isRemoved) {
-          logger.info(
-            { commentId: parsed.commentId },
-            "Deep check: shreddit page didn't include comment (lazy-loaded?) — deferring to RSS"
-          );
-          // Leave authorFound null so execution falls through to the RSS step.
-        } else {
-          // old.reddit confirmed the comment is not present — treat as removed.
-          // In liveness-only mode still require JSON corroboration to avoid
-          // false reversals from a bad/intercepted proxy page.
-          if (expectedLowerList.length === 0 && !jsonSucceeded) {
-            logger.warn(
-              { commentId: parsed.commentId },
-              "Deep check: old.reddit HTML says not found but JSON was unavailable — treating as inconclusive (liveness mode)"
-            );
-            return {
-              passed: false,
-              autoApproved: false,
-              status: "api_unreachable",
-              failures: ["Comment not found in HTML verification — treating as inconclusive pending manual review."],
-              subredditFound: subredditFound ?? parsed.subreddit,
-              postLive: true,
-              ...meta("api_unreachable"),
-            };
-          }
-          commentStatus = "comment_deleted";
-          authorFound = Array.isArray(expectedAuthor) ? expectedAuthor[0] : expectedAuthor;
-          if (!authorFound) authorFound = "__deleted__";
+  const allComments: any[] = [];
+  function flatten(children: any[]) {
+    for (const child of children ?? []) {
+      if (child.kind === "t1") {
+        allComments.push(child.data);
+        if (child.data.replies?.data?.children) {
+          flatten(child.data.replies.data.children);
         }
       }
     }
   }
+  flatten((data[1] as any)?.data?.children ?? []);
 
-  // 3. Evaluate RSS result if still not resolved
-  if (!authorFound && rssHtml && rssHtml.includes("<feed")) {
-    logger.info({ commentId: parsed.commentId, rssLength: rssHtml.length }, "Deep check: falling back to RSS parser");
-    const catMatch = /<category\s+[^>]*term="([^"]+)"/i.exec(rssHtml);
-    subredditFound = catMatch ? catMatch[1].toLowerCase() : subredditFound;
+  const target = allComments.find((c) => c.id === parsed.commentId);
 
-    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
-    let match;
-    while ((match = entryRegex.exec(rssHtml)) !== null) {
-      const entryContent = match[1];
-      if (entryContent.includes(`<id>t1_${parsed.commentId}</id>`) || entryContent.includes(`<id>t1_${parsed.commentId.toLowerCase()}</id>`)) {
-        const authMatch = /<author>\s*<name>\/u\/([A-Za-z0-9_-]+)<\/name>/i.exec(entryContent);
-        if (authMatch) {
-          authorFound = authMatch[1].toLowerCase();
-          bodyText = entryContent; // Contains raw XML, but we only need it for length/date checks
-          const pubMatch = /<(?:published|updated)>([\s\S]*?)<\/(?:published|updated)>/i.exec(entryContent);
-          createdAt = pubMatch ? pubMatch[1].trim() : null;
-          verifiedVia = "rss";
-          break;
-        }
-      }
-    }
-    
-    // RSS requires HTML cross-check since RSS caches deleted comments.
-    // However, only old.reddit is authoritative — shreddit lazy-loads comments
-    // so "not found in shreddit HTML" is inconclusive and we trust RSS instead.
-    if (authorFound && htmlContent) {
-      const parsedHtml = parseHtmlComment(htmlContent, parsed.commentId);
-      if (parsedHtml.validPage) {
-        // parsedHtml.isRemoved is true ONLY for old.reddit confirmed removal.
-        // For shreddit not-found it is false — in that case trust RSS.
-        if (parsedHtml.isRemoved) {
-          commentStatus = "comment_deleted";
-        }
-      } else {
-        logger.warn({ commentId: parsed.commentId }, "Deep check: RSS found comment but HTML verification page was invalid/blocked");
-        return {
-          passed: false,
-          autoApproved: false,
-          status: "api_unreachable",
-          failures: ["Relying on RSS but HTML verification page returned a login wall or rate limit."],
-          authorFound,
-          subredditFound: subredditFound ?? parsed.subreddit,
-          postLive: true,
-          ...meta("api_unreachable"),
-        };
-      }
-    } else if (authorFound && !htmlContent) {
-      // HTML is blocked (server IP rate-limited / 403 from Reddit).
-      // The permalink-specific RSS already confirmed the comment exists — trust it
-      // and continue so the comment can be approved instead of always blocking.
-      logger.info({ commentId: parsed.commentId }, "Deep check: RSS found comment, HTML unavailable (IP blocked) — trusting RSS");
-    }
-  }
-
-  // If no source could resolve the comment details
-  if (!authorFound) {
-    logger.warn({ commentId: parsed.commentId }, "Deep check: comment not found in any source");
-    failures.push(`Comment ID "${parsed.commentId}" not found on the post — it was likely removed by Reddit/Automod.`);
+  if (!target) {
+    // JSON succeeded but the comment is not in the focused thread.
+    // For a comment permalink this is definitive — the comment no longer exists.
+    logger.warn(
+      { commentId: parsed.commentId },
+      "Deep check: Python JSON succeeded but comment absent from thread — comment_missing"
+    );
+    failures.push(`Comment ID "${parsed.commentId}" was not found on the post — it may have been deleted or removed.`);
     return {
       passed: false, autoApproved: false, status: "comment_missing",
-      failures, subredditFound: subredditFound ?? parsed.subreddit, postLive: true,
+      failures, subredditFound, postLive: true,
       ...meta("comment_missing"),
     };
   }
 
-  // ── Subreddit Check ────────────────────────────────────────────────────────
-  subredditFound = subredditFound ?? parsed.subreddit;
+  // ── Extract comment fields ────────────────────────────────────────────────
+  const authorFound = (target.author ?? "").toLowerCase();
+  const bodyText: string = target.body ?? "";
+  const createdAt: string | null = target.created_utc
+    ? new Date((target.created_utc as number) * 1000).toISOString()
+    : null;
+
+  // ── Liveness / removal classification ────────────────────────────────────
+  const cstate = classifyComment(target);
+  if (cstate) {
+    const reasonText = STATUS_META[cstate]?.label.toLowerCase() ?? "removed";
+    failures.push(`Comment is **${reasonText}**.`);
+    return {
+      passed: false, autoApproved: false, status: cstate,
+      failures, authorFound, subredditFound, postLive: true,
+      ...meta(cstate),
+    };
+  }
+
+  // ── Subreddit check ───────────────────────────────────────────────────────
   if (taskSubreddit && subredditFound !== taskSubreddit) {
     failures.push(`Post is in r/${subredditFound} but task requires r/${taskSubreddit}.`);
     return {
@@ -705,7 +497,7 @@ async function runDeepCheck(
     };
   }
 
-  // ── Author Check ───────────────────────────────────────────────────────────
+  // ── Author check ──────────────────────────────────────────────────────────
   if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
     const expectedDisplay = expectedLowerList.length === 1
       ? `u/${expectedLowerList[0]}`
@@ -718,18 +510,7 @@ async function runDeepCheck(
     };
   }
 
-  // ── Liveness Check ─────────────────────────────────────────────────────────
-  if (commentStatus !== "live") {
-    const reasonText = STATUS_META[commentStatus]?.label.toLowerCase() ?? "removed";
-    failures.push(`Comment is **${reasonText}**.`);
-    return {
-      passed: false, autoApproved: false, status: commentStatus,
-      failures, authorFound, subredditFound, postLive: true,
-      ...meta(commentStatus),
-    };
-  }
-
-  // ── Freshness Check ────────────────────────────────────────────────────────
+  // ── Freshness check ───────────────────────────────────────────────────────
   if (options?.taskCreatedAt && createdAt) {
     const commentDate = new Date(createdAt);
     if (isFinite(commentDate.getTime())) {
@@ -748,10 +529,10 @@ async function runDeepCheck(
     }
   }
 
-  // ── Character Length Check ──────────────────────────────────────────────────
+  // ── Character length check ────────────────────────────────────────────────
   const minChars = options?.minCommentChars ?? MIN_COMMENT_CHARS;
   if (minChars > 0 && bodyText) {
-    const plain = bodyText.includes("<") && bodyText.includes(">") ? decodeRssContent(bodyText) : bodyText.trim();
+    const plain = bodyText.trim();
     if (plain.length < minChars) {
       failures.push(
         `Comment is too short (${plain.length} characters). ` +
@@ -775,8 +556,8 @@ async function runDeepCheck(
     subredditFound,
     postLive: true,
     createdAt: createdAt ?? undefined,
-    verifiedVia,
-    bodyText: bodyText ?? undefined,
+    verifiedVia: "json_proxy",
+    bodyText: bodyText || undefined,
     ...meta("live"),
   };
 }

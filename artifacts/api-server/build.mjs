@@ -16,24 +16,34 @@ async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
-  // Automatically build/update Python virtual environment on Linux (e.g. Render / Replit / local Linux)
+  // Automatically install curl_cffi for Reddit client on Linux (e.g. Replit / Render)
   if (process.platform === "linux") {
     try {
       console.log("Checking python3 availability for Reddit curl_cffi client...");
       execSync("which python3", { stdio: "ignore" });
-      
-      const venvPython = path.resolve(artifactDir, "../../venv/bin/python");
-      if (!existsSync(venvPython)) {
-        console.log("Creating python virtual environment at repository root...");
-        execSync("python3 -m venv ../../venv", { cwd: artifactDir, stdio: "inherit" });
+
+      // Try system pip first (works on Replit NixOS), fall back to venv
+      let pipCmd = null;
+      try {
+        execSync("pip install curl_cffi --quiet", { cwd: artifactDir, stdio: "ignore" });
+        pipCmd = "system";
+        console.log("Python curl_cffi installed via system pip.");
+      } catch {
+        // System pip failed — use venv
+        const venvPython = path.resolve(artifactDir, "../../venv/bin/python");
+        if (!existsSync(venvPython)) {
+          console.log("Creating python virtual environment at repository root...");
+          execSync("python3 -m venv ../../venv", { cwd: artifactDir, stdio: "inherit" });
+        }
+        console.log("Installing curl_cffi inside venv...");
+        execSync("../../venv/bin/pip install --upgrade pip --quiet", { cwd: artifactDir, stdio: "inherit" });
+        execSync("../../venv/bin/pip install curl_cffi --quiet", { cwd: artifactDir, stdio: "inherit" });
+        pipCmd = "venv";
+        console.log("Python environment setup completed via venv.");
       }
-      
-      console.log("Installing/upgrading curl_cffi inside venv...");
-      execSync("../../venv/bin/pip install --upgrade pip", { cwd: artifactDir, stdio: "inherit" });
-      execSync("../../venv/bin/pip install curl_cffi", { cwd: artifactDir, stdio: "inherit" });
-      console.log("Python environment setup completed successfully.");
+      void pipCmd;
     } catch (err) {
-      console.warn("Warning: Failed to setup python virtual environment:", err.message);
+      console.warn("Warning: Failed to setup Python curl_cffi client:", err.message);
     }
   }
 

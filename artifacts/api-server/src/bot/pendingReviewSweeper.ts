@@ -205,24 +205,11 @@ async function autoReject(client: Client, row: PendingRow, reason: string): Prom
   await db.execute(
     sql`UPDATE claims SET status = 'rejected' WHERE id = ${parseInt(row.claim_id)}`,
   );
-  // Free the slot — same as manual reject. NO trust penalty here: the worker
-  // submitted in good faith and the post got filtered/removed by mod/automod;
-  // we don't punish for that. Manual reject still applies admin's judgement.
-  await db.execute(
-    sql`UPDATE tasks SET slots_filled = GREATEST(0, slots_filled - 1) WHERE id = ${parseInt(row.task_id)}`,
-  );
-
-  // Refresh merge-mode campaign summary if this task is part of one.
-  try {
-    const cRow = await db.execute<{ campaign_id: number | null }>(
-      sql`SELECT campaign_id FROM tasks WHERE id = ${parseInt(row.task_id)} LIMIT 1`
-    );
-    const cid = (cRow as any).rows?.[0]?.campaign_id;
-    if (cid) {
-      const { refreshCampaignSummary } = await import("./task-creation.js");
-      void refreshCampaignSummary(Number(cid));
-    }
-  } catch { /* swallow */ }
+  // INTENTIONALLY do NOT decrement tasks.slots_filled here.
+  // Once a task has been claimed and submitted, that slot is permanently
+  // occupied until an admin explicitly reopens it. Automatic reopening on
+  // deletion, removal, or filtering is prohibited — it would allow the slot
+  // to be claimed again without any admin approval.
 
   await editLogMessage(client, row.log_message_id, (e) =>
     e.setColor(0xed4245).setFooter({
@@ -238,7 +225,7 @@ async function autoReject(client: Client, row: PendingRow, reason: string): Prom
       .setDescription(
         `Your submission for **${row.task_title}** was re-checked after 24h and the post is still not live on Reddit.\n\n` +
         `**Reason:** ${reason}\n\n` +
-        `No trust penalty was applied. If the post comes back live, ask an admin to review manually.`,
+        `No trust penalty was applied. The task slot remains held — an admin must manually reopen it if needed.`,
       ),
   );
 

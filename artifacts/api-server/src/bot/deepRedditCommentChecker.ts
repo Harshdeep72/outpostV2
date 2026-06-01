@@ -2,7 +2,6 @@ import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
-import { executePythonRedditClient } from "./pythonClient.js";
 import { getRedditSessionCookie, forceRefreshCookie } from "./redditCookieManager.js";
 
 const MIN_COMMENT_CHARS = Number(process.env.MIN_COMMENT_CHARS ?? 0);
@@ -208,31 +207,6 @@ async function fetchCommentThreadViaDirectJson(
   }
 }
 
-async function fetchCommentThreadViaPythonClient(
-  sub: string,
-  postId: string,
-  commentId: string
-): Promise<{ ok: boolean; body: any } | null> {
-  try {
-    const url = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?context=3&raw_json=1`;
-    const visitFirst = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}/`;
-
-    const result = await executePythonRedditClient({
-      url,
-      visitFirst,
-      isJson: true,
-      useProxy: true,
-    });
-
-    if (result.ok && result.body) {
-      return { ok: true, body: result.body };
-    }
-  } catch (err) {
-    logger.warn({ err, sub, postId, commentId }, "fetchCommentThreadViaPythonClient failed");
-  }
-  return null;
-}
-
 export interface ParsedHtmlComment {
   found: boolean;
   author: string | null;
@@ -423,30 +397,51 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
   return { found: false, author: null, subreddit: null, createdAt: null, isRemoved: false, body: null, validPage: false };
 }
 
-/**
- * Deep check for a specific Reddit comment.
- * Performs validation of the comment link using parallel JSON, RSS, and HTML fetches.
- * Highly robust against IP rate limits, API blocks, and cached RSS feeds.
- */
+
+async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult | null> {
+  try {
+    const osintUrl = process.env.REDDIT_OSINT_URL;
+    if (!osintUrl) return null;
+
+    const { fetch: undiciFetch } = await import("undici");
+    const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
+      headers: { "Accept": "application/json" }
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json() as any;
+    if (data.status === "error") return null;
+
+    let mappedStatus: SubmissionStatus = "live";
+    if (data.status === "deleted") mappedStatus = "deleted_by_author";
+    if (data.status === "removed") mappedStatus = "removed_by_mod";
+    if (data.status === "not_found") mappedStatus = "not_found";
+
+    return {
+      passed: mappedStatus === "live",
+      autoApproved: mappedStatus === "live",
+      status: mappedStatus,
+      failures: mappedStatus === "live" ? [] : [`Comment is ${mappedStatus}`],
+      authorFound: data.author,
+      title: null,
+      upvotes: data.upvotes,
+      postLive: mappedStatus === "live",
+      verifiedVia: "json_proxy",
+      ...meta(mappedStatus),
+    };
+  } catch (err) {
+    logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");
+    return null;
+  }
+}
+
 export async function deepCheckComment(
   proofUrl: string,
   expectedAuthor: string | string[],
   taskRedditLink: string,
   options?: { minCommentChars?: number; taskCreatedAt?: Date }
 ): Promise<ValidationResult> {
-  const parsed = parseRedditProofUrl(proofUrl);
-  if (!parsed || !parsed.commentId) {
-    return {
-      passed: false, autoApproved: false, status: "url_invalid",
-      failures: ["Proof URL is not a valid reddit.com comment URL."],
-      ...meta("url_invalid"),
-    };
-  }
-
-  // No result caching for initial proof validation. A cache hit here would
-  // return the OLD verdict without re-fetching Reddit — a deleted comment
-  // could stay "live" in cache for minutes after deletion, letting a worker
-  // get paid for a comment they deleted immediately after submission.
   return runDeepCheck(proofUrl, expectedAuthor, taskRedditLink, options);
 }
 
@@ -491,6 +486,31 @@ async function runDeepCheck(
     };
   }
 
+  // ── 0. redditOSITN (PRIMARY) ──────────────────────────────────────────────
+  const osintRes = await fetchCommentViaRedditOsint(proofUrl);
+  if (osintRes) {
+    logger.info({ proofUrl }, "Comment check: using redditOSITN data");
+    
+    let authorFound = osintRes.authorFound?.toLowerCase() || "";
+    if (!osintRes.passed) {
+      return osintRes;
+    }
+
+    if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+      const expectedDisplay = expectedLowerList.length === 1
+        ? `u/${expectedLowerList[0]}`
+        : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+      failures.push(`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`);
+      return {
+        passed: false, autoApproved: false, status: "author_mismatch",
+        failures, authorFound, postLive: true,
+        ...meta("author_mismatch"),
+      };
+    }
+
+    return osintRes;
+  }
+
   // ── JSON via session cookie (primary: direct undici → fallback: Python curl_cffi) ──
   //
   // Strategy:
@@ -510,12 +530,6 @@ async function runDeepCheck(
 
   // ── 1. Direct JSON with session cookie (primary) ──────────────────────────
   let apiRes = await fetchCommentThreadViaDirectJson(sub, parsed.postId, parsed.commentId).catch(() => null);
-
-  // ── 2. Python curl_cffi fallback ──────────────────────────────────────────
-  if (!apiRes?.ok) {
-    logger.info({ commentId: parsed.commentId }, "Deep check: direct JSON failed — falling back to Python curl_cffi client");
-    apiRes = await fetchCommentThreadViaPythonClient(sub, parsed.postId, parsed.commentId).catch(() => null);
-  }
 
   // ── 3. OAuth API last resort ───────────────────────────────────────────────
   if (!apiRes?.ok) {

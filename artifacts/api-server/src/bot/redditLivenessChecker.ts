@@ -7,13 +7,13 @@ import { deepCheckComment } from "./deepRedditCommentChecker.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 
-const TICK_MS = 5 * 60 * 1000;            // run every 5 minutes
-const RECHECK_INTERVAL_MS = 30 * 60 * 1000; // re-check each row no more than once per 30 min
-const MAX_AGE_DAYS = 14;                   // stop checking after 14 days
+const TICK_MS = 12 * 60 * 60 * 1000;            // run every 12 hours
+const RECHECK_INTERVAL_MS = 11 * 60 * 60 * 1000; // re-check each row no more than once per 11 hours
+const MAX_AGE_DAYS = 7;                   // stop checking after 7 days
 const BATCH_SIZE = 30;                     // max rows per pass
 
 /** How long to wait before running the early post-approval check. */
-const EARLY_CHECK_DELAY_MS = 5 * 60 * 1000; // 5 minutes
+
 
 let started = false;
 let isRunning = false;
@@ -377,137 +377,7 @@ async function tick(client: Client) {
 }
 
 // ---------------------------------------------------------------------------
-// Early liveness check — scheduled immediately after auto-approval.
-// Fires once after EARLY_CHECK_DELAY_MS (5 min) to catch workers who delete
-// their comment right after getting auto-validated.
-// ---------------------------------------------------------------------------
 
-export interface EarlyCheckArgs {
-  submissionId: number;
-  proofLink: string;
-  discordId: string;
-  reward: string;
-  redditUsername: string | null;
-  workspaceChannelId: string | null;
-  taskId: string;
-}
-
-async function runEarlyCheck(client: Client, args: EarlyCheckArgs): Promise<void> {
-  logger.info({ submissionId: args.submissionId }, "Early liveness check: starting 5-min post-approval check");
-
-  // Re-fetch submission to confirm it's still in a reversible state.
-  // (The 12-hour checker or a manual action may have already processed it.)
-  const fresh = await db.execute<{ review_status: string; moved_to_available: number; live_status: string }>(
-    sql`SELECT review_status, moved_to_available, live_status
-        FROM submissions
-        WHERE id = ${args.submissionId}
-        LIMIT 1`
-  );
-  const row = fresh.rows[0];
-  if (!row) {
-    logger.warn({ submissionId: args.submissionId }, "Early liveness check: submission not found, skipping");
-    return;
-  }
-  if (row.review_status !== "accepted" || row.moved_to_available !== 0) {
-    logger.info(
-      { submissionId: args.submissionId, reviewStatus: row.review_status, movedToAvailable: row.moved_to_available },
-      "Early liveness check: submission no longer in reversible state, skipping"
-    );
-    return;
-  }
-
-  if (!isRedditUrl(args.proofLink)) {
-    logger.info({ submissionId: args.submissionId }, "Early liveness check: non-Reddit URL, skipping");
-    return;
-  }
-
-  const result = await recheckRedditLiveness(args.proofLink);
-  const oldStatus = row.live_status as LiveStatus;
-  const newStatus = result.liveStatus;
-
-  logger.info(
-    { submissionId: args.submissionId, oldStatus, newStatus },
-    "Early liveness check: result"
-  );
-
-  if (newStatus === "unknown") {
-    // Transient — just bump last_checked_at; 12-hour checker will follow up.
-    await db.execute(
-      sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${args.submissionId}`
-    );
-    return;
-  }
-
-  if (newStatus === oldStatus) {
-    await db.execute(
-      sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${args.submissionId}`
-    );
-    logger.info({ submissionId: args.submissionId, status: newStatus }, "Early liveness check: still live, no action needed");
-    return;
-  }
-
-  // Status changed — update DB immediately.
-  await db.execute(
-    sql`UPDATE submissions
-        SET live_status = ${newStatus},
-            last_checked_at = now(),
-            live_status_changed_at = now(),
-            removal_reason = ${result.reason ?? null}
-        WHERE id = ${args.submissionId}`
-  );
-
-  logger.info(
-    { submissionId: args.submissionId, discordId: args.discordId, oldStatus, newStatus, reason: result.reason },
-    "Early liveness check: status changed"
-  );
-
-  if (newStatus === "removed" || newStatus === "deleted") {
-    const syntheticRow: SubmissionRow = {
-      id: String(args.submissionId),
-      proof_link: args.proofLink,
-      discord_id: args.discordId,
-      task_id: args.taskId,
-      reward: args.reward,
-      live_status: oldStatus,
-      reddit_username: args.redditUsername,
-      workspace_channel_id: args.workspaceChannelId,
-    };
-    await performReversalWithConfirmation(client, syntheticRow, oldStatus, newStatus, result.reason, true);
-  } else {
-    // Went live→unknown or some other non-removal change — notify without reversal.
-    const syntheticRow: SubmissionRow = {
-      id: String(args.submissionId),
-      proof_link: args.proofLink,
-      discord_id: args.discordId,
-      task_id: args.taskId,
-      reward: args.reward,
-      live_status: oldStatus,
-      reddit_username: args.redditUsername,
-      workspace_channel_id: args.workspaceChannelId,
-    };
-    await notifyStatusChange(client, syntheticRow, oldStatus, newStatus, result.reason, true);
-  }
-}
-
-/**
- * Schedule a one-shot liveness check 5 minutes after a submission is
- * auto-approved, to catch workers who delete their comment immediately after
- * getting validated.  Safe to call fire-and-forget — uses the cached Discord
- * client and re-validates the submission state at check time.
- */
-export function scheduleEarlyLivenessCheck(args: EarlyCheckArgs): void {
-  setTimeout(() => {
-    if (!cachedClient) {
-      logger.warn({ submissionId: args.submissionId }, "Early liveness check: no Discord client cached, skipping");
-      return;
-    }
-    runEarlyCheck(cachedClient, args).catch((err) => {
-      logger.error({ err, submissionId: args.submissionId }, "Early liveness check: unhandled error");
-    });
-  }, EARLY_CHECK_DELAY_MS).unref();
-
-  logger.info({ submissionId: args.submissionId, delayMs: EARLY_CHECK_DELAY_MS }, "Early liveness check: scheduled");
-}
 
 // ---------------------------------------------------------------------------
 // On-demand single-submission check — called by /checksubmission command.

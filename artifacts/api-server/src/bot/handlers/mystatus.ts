@@ -89,7 +89,7 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
     if (row.review_status === "pending") {
       statusLine = "🕐 Awaiting manual review";
     } else if (row.review_status === "pending_hold") {
-      statusLine = `${liveEmoji} ${liveLabel} — verification hold`;
+      statusLine = `⏳ Pending — verification hold`;
       if (row.available_at) {
         const availTs = new Date(row.available_at).getTime();
         const msLeft = availTs - now;

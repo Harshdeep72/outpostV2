@@ -845,8 +845,62 @@ async function fetchViaPythonHtml(name: string): Promise<RedditFetchResult | nul
 }
 
 
+async function fetchViaRedditOsint(name: string): Promise<RedditFetchResult | null> {
+  try {
+    const osintUrl = process.env.REDDIT_OSINT_URL;
+    if (!osintUrl) return null;
+
+    const { fetch: undiciFetch } = await import("undici");
+    const res = await undiciFetch(`${osintUrl}/api/external/check/user/${encodeURIComponent(name)}`, {
+      headers: { "Accept": "application/json" }
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json() as any;
+
+    if (data.status === "not_found") {
+      return { ok: false, notFound: true };
+    }
+    if (data.status === "error") {
+      return null; // fallback to other methods
+    }
+
+    if (data.status === "valid") {
+      logger.info({ name, karma: data.karma }, "Reddit profile via redditOSITN");
+      const createdUtc = data.created_utc || 0;
+      const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+      
+      return {
+        ok: true,
+        profile: {
+          name: data.username || name,
+          createdUtc,
+          linkKarma: data.karma?.link || 0,
+          commentKarma: data.karma?.comment || 0,
+          totalKarma: data.karma?.total || 0,
+          iconImg: data.icon_img,
+          accountAgeDays: ageDays,
+          karmaVerified: true,
+        },
+      };
+    }
+  } catch (err) {
+    logger.warn({ err, name }, "fetchViaRedditOsint failed");
+  }
+  return null;
+}
+
 async function fetchFresh(name: string): Promise<RedditFetchResult> {
-  // ── 1. Python curl_cffi JSON (PRIMARY) + OAuth (FALLBACK) — in parallel ───
+  // ── 0. redditOSITN (PRIMARY) ──────────────────────────────────────────────
+  // Use the local/external redditOSITN Python API for verification.
+  const osintResult = await fetchViaRedditOsint(name);
+  if (osintResult !== null) {
+    logger.info({ name, ok: osintResult.ok }, "Reddit profile via redditOSITN (primary)");
+    return osintResult;
+  }
+
+  // ── 1. Python curl_cffi JSON (FALLBACK) + OAuth (FALLBACK) — in parallel ───
   // Python browser TLS impersonation bypasses datacenter IP blocks that reject
   // unauthenticated Reddit API calls from server IPs.
   // Both fire simultaneously so we pay only one round-trip of latency.

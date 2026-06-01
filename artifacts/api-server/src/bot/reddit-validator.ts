@@ -1,7 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
-import { executePythonRedditClient } from "./pythonClient.js";
 import { getRedditSessionCookie } from "./redditCookieManager.js";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -15,18 +14,6 @@ const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | null> {
   try {
     let text = await proxyFetchText([url], { timeoutMs, acceptHeader: "application/xml, text/xml, text/html, */*" });
-    if (!text) {
-      logger.info({ url }, "fetchDirectText: proxy fetch returned null, trying Python client fallback");
-      const pyRes = await executePythonRedditClient({
-        url,
-        isJson: false,
-        useProxy: true,
-        timeout: Math.floor(timeoutMs / 1000),
-      }).catch(() => null);
-      if (pyRes && pyRes.ok && typeof pyRes.body === "string") {
-        text = pyRes.body;
-      }
-    }
     return text;
   } catch (err) {
     logger.warn({ url, err }, "fetchDirectText proxy fetch unexpected error");
@@ -662,6 +649,70 @@ export async function validateRedditProof(
         ...meta("wrong_post"),
       };
     }
+  }
+
+
+async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | null> {
+  try {
+    const osintUrl = process.env.REDDIT_OSINT_URL;
+    if (!osintUrl) return null;
+
+    const { fetch: undiciFetch } = await import("undici");
+    const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(url)}`, {
+      headers: { "Accept": "application/json" }
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json() as any;
+    if (data.status === "error") return null;
+
+    let mappedStatus: SubmissionStatus = "live";
+    if (data.status === "deleted") mappedStatus = "deleted_by_author";
+    if (data.status === "removed") mappedStatus = "removed_by_mod";
+    if (data.status === "not_found") mappedStatus = "not_found";
+
+    return {
+      passed: mappedStatus === "live",
+      autoApproved: mappedStatus === "live",
+      status: mappedStatus,
+      failures: mappedStatus === "live" ? [] : [`Post is ${mappedStatus}`],
+      authorFound: data.author,
+      title: data.title,
+      upvotes: data.upvotes,
+      postLive: mappedStatus === "live",
+      verifiedVia: "json_proxy",
+      ...meta(mappedStatus),
+    };
+  } catch (err) {
+    logger.warn({ err, url }, "fetchPostViaRedditOsint failed");
+    return null;
+  }
+}
+
+  // ── 0. redditOSITN (PRIMARY) ──────────────────────────────────────────────
+  const osintRes = await fetchPostViaRedditOsint(resolvedProofUrl);
+  if (osintRes) {
+    logger.info({ proofUrl: resolvedProofUrl }, "Post check: using redditOSITN data");
+    
+    let authorFound = osintRes.authorFound?.toLowerCase() || "";
+    if (!osintRes.passed) {
+      return osintRes; 
+    }
+
+    if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+      const expectedDisplay = expectedLowerList.length === 1
+        ? `u/${expectedLowerList[0]}`
+        : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+      const failures = [`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`];
+      return {
+        passed: false, autoApproved: false, status: "author_mismatch",
+        failures, authorFound, postLive: true,
+        ...meta("author_mismatch"),
+      };
+    }
+
+    return osintRes;
   }
 
   // ── Fetch strategy ────────────────────────────────────────────────────────

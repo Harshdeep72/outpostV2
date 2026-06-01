@@ -15,7 +15,6 @@ const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
-
   // Automatically install curl_cffi for Reddit client on Linux (e.g. Replit / Render)
   if (process.platform === "linux") {
     try {

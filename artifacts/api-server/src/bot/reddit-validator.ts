@@ -726,7 +726,7 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
       subredditFound: data.subreddit,
       title: data.title,
       upvotes: data.upvotes,
-      createdAt: data.created_utc,
+      createdAt: data.created_utc ? new Date(data.created_utc * 1000).toISOString() : undefined,
       postLive: mappedStatus === "live",
       verifiedVia: "json_proxy",
       ...meta(mappedStatus),

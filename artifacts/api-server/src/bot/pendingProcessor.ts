@@ -313,7 +313,8 @@ export async function runPendingProcessorNow(client: Client): Promise<{
 
           await db.execute(
             sql`UPDATE users
-                SET balance_available = balance_available + ${row.reward}::numeric,
+                SET balance_pending   = GREATEST(0, balance_pending - ${row.reward}::numeric),
+                    balance_available = balance_available + ${row.reward}::numeric,
                     total_earned      = total_earned + ${row.reward}::numeric,
                     trust_score       = LEAST(1000, trust_score + 2),
                     last_task_completed_at = NOW()
@@ -397,7 +398,8 @@ export async function runPendingProcessorNow(client: Client): Promise<{
 
             await db.execute(
               sql`UPDATE users
-                  SET balance_available = balance_available + ${row.reward}::numeric,
+                  SET balance_pending   = GREATEST(0, balance_pending - ${row.reward}::numeric),
+                      balance_available = balance_available + ${row.reward}::numeric,
                       total_earned      = total_earned + ${row.reward}::numeric,
                       trust_score       = LEAST(1000, trust_score + 2),
                       last_task_completed_at = NOW()
@@ -451,7 +453,8 @@ export async function runPendingProcessorNow(client: Client): Promise<{
             // or inconclusive first reads.
             await db.execute(
               sql`UPDATE users
-                  SET trust_score = GREATEST(0, trust_score - 3)
+                  SET balance_pending = GREATEST(0, balance_pending - ${row.reward}::numeric),
+                      trust_score = GREATEST(0, trust_score - 3)
                   WHERE id = ${userId}`
             );
             invalidateUser(row.discord_id, userId);

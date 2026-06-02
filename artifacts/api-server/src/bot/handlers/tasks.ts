@@ -1403,13 +1403,9 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     // ensures the hold window is a genuine "comment must stay live" gate, not
     // just a delay before an irreversible credit.
     //
-    // Minimum 10-minute hold so there is always a window to catch immediate
-    // deletions even on tasks configured with pendingDelayHours = 0.
-    const MIN_HOLD_MS = 10 * 60 * 1000;
-    const availableAt = new Date(Math.max(
-      Date.now() + task.pendingDelayHours * 60 * 60 * 1000,
-      Date.now() + MIN_HOLD_MS
-    ));
+    // Minimum 7-day hold so there is always a window to catch deletions.
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const availableAt = new Date(Date.now() + SEVEN_DAYS_MS);
 
     await db.update(submissions).set({
       reviewStatus: "pending_hold",
@@ -1426,17 +1422,18 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     await db.update(claims).set({ status: "accepted" }).where(eq(claims.id, claimId));
     invalidateClaim(claimId);
 
-    // Balance and trust are credited only after the hold-end liveness
+    // Reward is credited to balance_pending immediately. It is moved to available,
+    // and trust is credited, only after the hold-end liveness
     // re-check passes — see pendingProcessor.ts (pending_hold branch).
-
+    await db.execute(
+      sql`UPDATE users SET balance_pending = balance_pending + ${task.reward}::numeric WHERE id = ${user.id}`
+    );
     invalidateUser(user.discordId, user.id);
     invalidateLeaderboard(guild.id);
     invalidateStreak(user.discordId);
 
     const unixAvail = Math.floor(availableAt.getTime() / 1000);
-    const holdHoursDisplay = task.pendingDelayHours > 0
-      ? `${task.pendingDelayHours}h`
-      : "10 minutes";
+    const holdHoursDisplay = "7 days";
     const v = validation!;
     const upsLabel = typeof v.upvotes === "number" ? `${v.upvotes} ups` : "—";
     const ageLabel = typeof v.ageMinutes === "number"
@@ -1476,7 +1473,7 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
         .setDescription(
           `Your submission for **${task.title}** passed initial validation!\n\n` +
           `**Keep your comment live.** It will be re-checked at <t:${unixAvail}:F>.\n` +
-          `If it is still live at that point, **${formatMoney(sub.reward)}** will be added to your balance automatically.`
+          `If it is still live at that point, **${formatMoney(sub.reward)}** will be moved from your pending balance to available automatically.`
         ));
     } catch {}
 

@@ -665,13 +665,16 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
 
     if (!res.ok) return null;
 
-    const data = await res.json() as any;
-    if (data.status === "error") return null;
+    const json = await res.json() as any;
+    if (json.success === false) return null;
+
+    const data = json.data;
+    if (!data) return null;
 
     let mappedStatus: SubmissionStatus = "live";
-    if (data.status === "deleted") mappedStatus = "deleted_by_author";
-    if (data.status === "removed") mappedStatus = "removed_by_mod";
-    if (data.status === "not_found") mappedStatus = "not_found";
+    if (data.liveness === "deleted") mappedStatus = "deleted_by_author";
+    if (data.liveness === "removed") mappedStatus = "removed_by_mod";
+    if (data.liveness === "not_found") mappedStatus = "not_found";
 
     return {
       passed: mappedStatus === "live",

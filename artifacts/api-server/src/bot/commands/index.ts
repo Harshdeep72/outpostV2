@@ -378,6 +378,10 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDescription("View your pending submissions — reward, live status, and time until payout")
     .setDMPermission(true);
 
+  const processholds = new SlashCommandBuilder()
+    .setName("processholds")
+    .setDescription("Force-run the pending holds processor immediately (admin/mod only)");
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -385,7 +389,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, approvesubmission, reopenslot, mystatus,
+    checksubmission, approvesubmission, reopenslot, mystatus, processholds,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

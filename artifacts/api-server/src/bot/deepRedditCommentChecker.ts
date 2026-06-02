@@ -398,7 +398,7 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
 }
 
 
-async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult | null> {
+async function fetchCommentViaRedditOsint(url: string): Promise<any> {
   try {
     const osintUrl = process.env.REDDIT_OSINT_URL;
     if (!osintUrl) return null;
@@ -407,58 +407,11 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
     const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
       headers: { "Accept": "application/json" }
     });
-
-    const data = await res.json() as any;
-
-    if (!res.ok) {
-      if (data && data.success === false && data.message?.includes("not found")) {
-        return {
-          passed: false,
-          autoApproved: false,
-          status: "not_found",
-          failures: ["Comment is not_found"],
-          authorFound: null,
-          title: undefined,
-          upvotes: undefined,
-          postLive: true,
-          verifiedVia: "json_proxy",
-          ...meta("not_found"),
-        };
-      }
-      return null;
-    }
-
-    if (!data.success || !data.data) return null;
-
-    const liveness = data.data.liveness;
-    let mappedStatus: SubmissionStatus = "live";
-    if (liveness === "deleted") mappedStatus = "deleted_by_author";
-    if (liveness === "removed") mappedStatus = "removed_by_mod";
-    if (liveness === "not_found") mappedStatus = "not_found";
-
-    let ageMinutes: number | undefined;
-    const createdAtSec = data.data.createdAt;
-    let createdAtIso: string | undefined;
-    if (typeof createdAtSec === "number") {
-      ageMinutes = Math.floor((Date.now() - createdAtSec * 1000) / 60000);
-      createdAtIso = new Date(createdAtSec * 1000).toISOString();
-    }
-
-    return {
-      passed: mappedStatus === "live",
-      autoApproved: mappedStatus === "live",
-      status: mappedStatus,
-      failures: mappedStatus === "live" ? [] : [`**${STATUS_META[mappedStatus]?.label || mappedStatus}**`],
-      authorFound: data.data.author,
-      title: undefined,
-      upvotes: data.data.upvotes,
-      ageMinutes,
-      createdAt: createdAtIso,
-      postLive: mappedStatus === "live",
-      verifiedVia: "json_proxy",
-      ...meta(mappedStatus),
-    };
-  } catch (err) {
+    if (!res.ok) return null;
+    const json = await res.json() as any;
+    if (json.success === false || !json.data) return null;
+    return json.data;
+  } catch (err: any) {
     logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");
     return null;
   }
@@ -515,28 +468,65 @@ async function runDeepCheck(
   }
 
   // ── 0. redditOSITN (PRIMARY) ──────────────────────────────────────────────
-  const osintRes = await fetchCommentViaRedditOsint(proofUrl);
-  if (osintRes) {
+  const osintData = await fetchCommentViaRedditOsint(proofUrl);
+  if (osintData) {
     logger.info({ proofUrl }, "Comment check: using redditOSITN data");
     
-    let authorFound = osintRes.authorFound?.toLowerCase() || "";
-    if (!osintRes.passed) {
-      return osintRes;
+    let cstate: SubmissionStatus | null = null;
+    if (osintData.liveness === "removed" || osintData.liveness === "deleted") {
+      cstate = "comment_deleted";
+    }
+
+    let subredditFound = (osintData.subreddit || "").toLowerCase();
+    let authorFound = (osintData.author || "").toLowerCase();
+    let bodyText = osintData.body_snippet || "";
+    let createdAt = osintData.createdAt ? new Date(osintData.createdAt * 1000).toISOString() : null;
+
+    if (cstate) {
+      const reasonText = STATUS_META[cstate]?.label || "Removed";
+      failures.push(`**${reasonText}**.`);
+      return { passed: false, autoApproved: false, status: cstate, failures, authorFound, subredditFound, postLive: true, ...meta(cstate) };
+    }
+
+    if (taskSubreddit && subredditFound !== taskSubreddit) {
+      failures.push(`Post is in r/${subredditFound} but task requires r/${taskSubreddit}.`);
+      return { passed: false, autoApproved: false, status: "wrong_subreddit", failures, subredditFound, postLive: false, ...meta("wrong_subreddit") };
     }
 
     if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
-      const expectedDisplay = expectedLowerList.length === 1
-        ? `u/${expectedLowerList[0]}`
-        : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+      const expectedDisplay = expectedLowerList.length === 1 ? `u/${expectedLowerList[0]}` : expectedLowerList.map((u) => `u/${u}`).join(" or ");
       failures.push(`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`);
-      return {
-        passed: false, autoApproved: false, status: "author_mismatch",
-        failures, authorFound, postLive: true,
-        ...meta("author_mismatch"),
-      };
+      return { passed: false, autoApproved: false, status: "author_mismatch", failures, authorFound, subredditFound, postLive: true, ...meta("author_mismatch") };
     }
 
-    return osintRes;
+    if (options?.taskCreatedAt && createdAt) {
+      const commentDate = new Date(createdAt);
+      if (isFinite(commentDate.getTime())) {
+        const earliest = options.taskCreatedAt.getTime() - TASK_GRACE_MS;
+        if (commentDate.getTime() < earliest) {
+          failures.push(`Your comment was posted before this task was created — recycled old comments are not accepted. Comment date: ${commentDate.toUTCString()}. Task created: ${options.taskCreatedAt.toUTCString()}.`);
+          return { passed: false, autoApproved: false, status: "stale_proof", failures, authorFound, subredditFound, postLive: true, ...meta("stale_proof") };
+        }
+      }
+    }
+
+    const minChars = options?.minCommentChars ?? MIN_COMMENT_CHARS;
+    if (minChars > 0 && bodyText) {
+      const plain = bodyText.trim();
+      if (plain.length < minChars) {
+        failures.push(`Comment is too short (${plain.length} characters). This task requires a genuine comment of at least ${minChars} characters.`);
+        return { passed: false, autoApproved: false, status: "comment_too_short", failures, authorFound, subredditFound, postLive: true, ...meta("comment_too_short") };
+      }
+    }
+
+    return {
+      passed: true, autoApproved: true, status: "live", failures: [],
+      authorFound, subredditFound, postLive: true,
+      createdAt: createdAt ?? undefined,
+      verifiedVia: "json_proxy",
+      bodyText: bodyText || undefined,
+      ...meta("live"),
+    };
   }
 
   // ── JSON via session cookie (primary: direct undici → fallback: Python curl_cffi) ──

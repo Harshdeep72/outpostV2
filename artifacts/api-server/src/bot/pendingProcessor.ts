@@ -195,8 +195,6 @@ export async function runPendingProcessorNow(client: Client): Promise<{
 }> {
   let acceptedProcessed = 0;
   let holdProcessed = 0;
-  
-
     // -----------------------------------------------------------------------
     // Branch 1: accepted submissions — move balance_pending → balance_available
     // These were manually accepted by an admin (or accepted via the old flow).
@@ -325,69 +323,151 @@ export async function runPendingProcessorNow(client: Client): Promise<{
           safeSyncEarnerRoles(row.discord_id);
           logSubmissionEvent(subId, "paid");
           await notifySubmissionCleared(client, row);
-          await notifyFalsePositiveOverride(row, firstDetected);
 
-          logger.info({ subId, discordId: row.discord_id, reward: row.reward }, "Hold processor: transient false-positive overridden, comment is actually live");
+          logger.info({ subId, discordId: row.discord_id, reward: row.reward }, "Hold processor: comment still live — payout issued");
           holdProcessed++;
 
-        } else if (confirmation.liveStatus === "unknown") {
-          // Both reads inconclusive enough that we can't be certain.
-          // Manual review is the only safe outcome.
-          logger.warn(
-            { subId, firstDetected },
-            "Hold processor: confirmation inconclusive — sending to manual review"
-          );
+        } else if (liveness.liveStatus === "unknown") {
+          // Transient / inconclusive first reading — Reddit API blip, proxy
+          // block, or AutoMod temporary filter window. Do NOT reject on a
+          // single inconclusive result. Send to manual review so no valid
+          // work is silently discarded.
+          logger.warn({ subId, proofLink: row.proof_link }, "Hold processor: first check returned unknown — sending to manual review");
           await db.execute(
             sql`UPDATE submissions
                    SET review_status  = 'pending',
-                       live_status    = ${firstDetected},
                        last_checked_at = NOW(),
-                       removal_reason = ${firstReason ?? null},
-                       review_reason  = ${'Hold-end check inconclusive after confirmation (first: ' + firstDetected + ') — needs manual review'}
+                       review_reason  = 'Hold-end liveness check inconclusive (unknown) — needs manual review'
                  WHERE id = ${subId} AND review_status = 'checking'`
           );
-          void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check also inconclusive — cannot determine final status.`);
+          void notifyManualReview(row, "Hold-end liveness check returned an inconclusive result (Reddit API blip or proxy issue). Comment status could not be determined.");
 
         } else {
-          // Both reads agree: removed or deleted. Now it is safe to reject.
-          const confirmedStatus = confirmation.liveStatus === "deleted" ? "deleted" : "removed";
+          // First check says removed or deleted. Run a 45-second confirmation
+          // pass before making any permanent decision — a single bad reading
+          // (transient AutoMod window, Reddit API inconsistency, proxy blip)
+          // must never permanently reject a valid submission.
+          const firstDetected = liveness.liveStatus === "deleted" ? "deleted" : "removed";
+          const firstReason = liveness.reason;
 
           logger.warn(
-            { subId, discordId: row.discord_id, confirmedStatus },
-            "Hold processor: confirmed removed/deleted — rejecting submission"
+            { subId, firstDetected, proofLink: row.proof_link },
+            "Hold processor: first check says removed/deleted — waiting 45s for confirmation"
           );
 
-          await db.execute(
-            sql`UPDATE submissions
-                   SET review_status  = 'rejected',
-                       live_status    = ${confirmedStatus},
-                       last_checked_at = NOW(),
-                       removal_reason = ${confirmation.reason ?? firstReason ?? null},
-                       review_reason  = ${"Hold-end check (confirmed): comment " + confirmedStatus + " before hold cleared"}
-                 WHERE id = ${subId} AND review_status = 'checking'`
-          );
+          await new Promise((r) => setTimeout(r, 45_000));
 
-          // Trust deduction only on confirmed removal — not on transient
-          // or inconclusive first reads.
-          await db.execute(
-            sql`UPDATE users
-                SET trust_score = GREATEST(0, trust_score - 3)
-                WHERE id = ${userId}`
-          );
-          invalidateUser(row.discord_id, userId);
-          logSubmissionEvent(subId, "removed");
-          await notifyHoldRejected(client, { ...row, live_status: confirmedStatus });
-          holdProcessed++;
+          let confirmation: Awaited<ReturnType<typeof recheckRedditLiveness>>;
+          try {
+            confirmation = await recheckRedditLiveness(row.proof_link);
+          } catch (err) {
+            // Confirmation check threw — can't be certain. Manual review.
+            logger.warn({ err, subId }, "Hold processor: confirmation check threw — sending to manual review");
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'pending',
+                         last_checked_at = NOW(),
+                         review_reason  = 'Hold-end liveness confirmation check errored — needs manual review'
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+            void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check errored — cannot determine final status.`);
+            continue;
+          }
+
+          if (confirmation.liveStatus === "live") {
+            // Confirmation says live — the first reading was a false positive
+            // (transient remove / AutoMod temporary filter). Pay out.
+            logger.info(
+              { subId, discordId: row.discord_id, firstDetected },
+              "Hold processor: confirmation check says LIVE — false positive detected, paying out"
+            );
+
+            const accepted = await db.execute<{ id: string }>(
+              sql`UPDATE submissions
+                     SET review_status     = 'accepted',
+                         moved_to_available = 1,
+                         paid_at           = NOW(),
+                         live_status       = 'live',
+                         last_checked_at   = NOW(),
+                         review_reason     = ${'Hold cleared live (confirmation overrode transient ' + firstDetected + ' reading)'}
+                   WHERE id = ${subId} AND review_status = 'checking'
+                   RETURNING id`
+            );
+            if (accepted.rows.length === 0) continue;
+
+            await db.execute(
+              sql`UPDATE users
+                  SET balance_available = balance_available + ${row.reward}::numeric,
+                      total_earned      = total_earned + ${row.reward}::numeric,
+                      trust_score       = LEAST(1000, trust_score + 2),
+                      last_task_completed_at = NOW()
+                  WHERE id = ${userId}`
+            );
+            invalidateUser(row.discord_id, userId);
+            safeSyncEarnerRoles(row.discord_id);
+            logSubmissionEvent(subId, "paid");
+            await notifySubmissionCleared(client, row);
+            void notifyFalsePositiveOverride(row, firstDetected);
+            holdProcessed++;
+
+          } else if (confirmation.liveStatus === "unknown") {
+            // Both reads inconclusive enough that we can't be certain.
+            // Manual review is the only safe outcome.
+            logger.warn(
+              { subId, firstDetected },
+              "Hold processor: confirmation inconclusive — sending to manual review"
+            );
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'pending',
+                         live_status    = ${firstDetected},
+                         last_checked_at = NOW(),
+                         removal_reason = ${firstReason ?? null},
+                         review_reason  = ${'Hold-end check inconclusive after confirmation (first: ' + firstDetected + ') — needs manual review'}
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+            void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check also inconclusive — cannot determine final status.`);
+
+          } else {
+            // Both reads agree: removed or deleted. Now it is safe to reject.
+            const confirmedStatus = confirmation.liveStatus === "deleted" ? "deleted" : "removed";
+
+            logger.warn(
+              { subId, discordId: row.discord_id, confirmedStatus },
+              "Hold processor: confirmed removed/deleted — rejecting submission"
+            );
+
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status  = 'rejected',
+                         live_status    = ${confirmedStatus},
+                         last_checked_at = NOW(),
+                         removal_reason = ${confirmation.reason ?? firstReason ?? null},
+                         review_reason  = ${"Hold-end check (confirmed): comment " + confirmedStatus + " before hold cleared"}
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+
+            // Trust deduction only on confirmed removal — not on transient
+            // or inconclusive first reads.
+            await db.execute(
+              sql`UPDATE users
+                  SET trust_score = GREATEST(0, trust_score - 3)
+                  WHERE id = ${userId}`
+            );
+            invalidateUser(row.discord_id, userId);
+            logSubmissionEvent(subId, "removed");
+            await notifyHoldRejected(client, { ...row, live_status: confirmedStatus });
+            holdProcessed++;
+          }
         }
       }
-    }
 
-    if (holdRows.rows.length > 0) {
-      logger.info({ count: holdRows.rows.length }, "Hold processor: batch complete");
+      if (holdRows.rows.length > 0) {
+        logger.info({ count: holdRows.rows.length }, "Hold processor: batch complete");
+      }
+    } catch (err) {
+      logger.error({ err }, "Pending processor error (pending_hold branch)");
     }
-  } catch (err) {
-    logger.error({ err }, "Pending processor error (pending_hold branch)");
-  }
 
   return { ok: true, acceptedProcessed, holdProcessed };
 }

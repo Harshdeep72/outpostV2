@@ -250,7 +250,6 @@ async function tick(client: Client): Promise<void> {
           WHERE s.review_status      = 'accepted'
             AND s.moved_to_available = 1
             AND s.paid_at           >= ${cutoff}
-            AND s.live_status NOT IN ('removed', 'deleted')
             AND s.proof_link ILIKE '%reddit.com%'
           ORDER BY s.paid_at DESC
           LIMIT ${BATCH_SIZE}`

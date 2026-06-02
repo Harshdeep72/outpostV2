@@ -724,7 +724,7 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
             FROM submissions s
             LEFT JOIN users u ON u.id = s.user_id
             WHERE s.review_status = 'accepted'
-              AND s.live_status = 'live'
+              AND s.live_status IN ('live', 'removed', 'deleted')
               AND s.proof_link ILIKE '%reddit.com%'
               AND s.id > ${lastId}
             ORDER BY s.id ASC
@@ -747,7 +747,9 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
           continue;
         }
 
-        if (newStatus === oldStatus) {
+        const needsReversal = newStatus === "removed" || newStatus === "deleted";
+
+        if (newStatus === oldStatus && !needsReversal) {
           await db.execute(
             sql`UPDATE submissions SET last_checked_at = now() WHERE id = ${parseInt(row.id)}`
           );

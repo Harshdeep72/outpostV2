@@ -407,9 +407,16 @@ async function fetchCommentViaRedditOsint(url: string): Promise<any> {
     const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
       headers: { "Accept": "application/json" }
     });
-    if (!res.ok) return null;
-    const json = await res.json() as any;
-    if (json.success === false || !json.data) return null;
+    const json = await res.json().catch(() => null) as any;
+    
+    if (!res.ok) {
+      if (res.status === 404 || (json && json.message?.includes("not found"))) {
+        return { liveness: "not_found", author: "", subreddit: "", body_snippet: "" };
+      }
+      return null;
+    }
+    
+    if (!json || json.success === false || !json.data) return null;
     return json.data;
   } catch (err: any) {
     logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");
@@ -473,7 +480,7 @@ async function runDeepCheck(
     logger.info({ proofUrl }, "Comment check: using redditOSITN data");
     
     let cstate: SubmissionStatus | null = null;
-    if (osintData.liveness === "removed" || osintData.liveness === "deleted") {
+    if (osintData.liveness === "removed" || osintData.liveness === "deleted" || osintData.liveness === "not_found") {
       cstate = "comment_deleted";
     }
 

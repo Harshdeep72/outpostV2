@@ -119,8 +119,11 @@ export default function Submissions() {
     queryKey: ["admin-submissions", page, statusTab],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-      // The API accepts "accepted" (not "approved") — normalize here too.
-      if (statusTab !== "all") params.set("status", statusTab === "approved" ? "accepted" : statusTab);
+      if (statusTab !== "all") {
+        if (statusTab === "approved") params.set("status", "accepted");
+        else if (statusTab === "pending") params.set("status", "pending,pending_hold");
+        else params.set("status", statusTab);
+      }
       return get<SubmissionListResponse>(`/admin/submissions?${params}`);
     },
     refetchInterval: 15_000,

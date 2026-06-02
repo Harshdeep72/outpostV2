@@ -1781,14 +1781,14 @@ router.get("/submissions", requireAuth, async (req, res) => {
          ra.discord_id = s.reviewer_discord_id
          OR (s.reviewer_discord_id LIKE 'dashboard:%' AND ra.username = substring(s.reviewer_discord_id from 11))
        )
-       ${status ? `WHERE s.review_status = $3` : ""}
+       ${status ? `WHERE s.review_status = ANY(string_to_array($3, ','))` : ""}
        ORDER BY s.submitted_at DESC
        LIMIT $1 OFFSET $2`,
       status ? [limit, offset, status] : [limit, offset]
     );
 
     const countRow = await pool.query(
-      `SELECT COUNT(*) FROM submissions ${status ? `WHERE review_status = $1` : ""}`,
+      `SELECT COUNT(*) FROM submissions ${status ? `WHERE review_status = ANY(string_to_array($1, ','))` : ""}`,
       status ? [status] : []
     );
 

@@ -30,23 +30,38 @@ const directAgent = new Agent({
 });
 
 function normalizeProxyLine(raw: string): string | null {
-  const line = raw.trim();
+  let line = raw.trim();
   if (!line || line.startsWith("#")) return null;
-  if (/^https?:\/\//i.test(line) || /^socks/i.test(line)) return line;
+  
+  // Strip common protocols if they were pasted accidentally so we can cleanly split by colon
+  line = line.replace(/^https?:\/\//i, "");
+  line = line.replace(/^socks5?:\/\//i, "");
 
-  // Webshare-style "host:port:user:pass" — 4 colon-separated parts where
-  // the 2nd part is numeric. Convert to "http://user:pass@host:port" so
-  // operators can paste the raw download from webshare directly.
+  // Now split by colon. It might be:
+  // - host:port
+  // - host:port:user:pass
+  // - host:port:user:pass:extra_ip
+  // - user:pass@host:port (already URL-ish)
+  
+  if (line.includes("@")) {
+    return `http://${line}`;
+  }
+
   const parts = line.split(":");
-  if (parts.length === 4) {
-    const [host, port, user, pass] = parts as [string, string, string, string];
+  
+  // Webshare / generic format: host:port:user:pass (and optionally :extra)
+  if (parts.length >= 4) {
+    const host = parts[0];
+    const port = parts[1];
+    const user = parts[2];
+    const pass = parts[3];
+    
     if (/^\d+$/.test(port) && host && user && pass) {
       return `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}`;
     }
   }
 
-  // "user:pass@host:port" — already URL-ish, just prepend scheme.
-  // Otherwise assume plain "host:port" (no auth).
+  // Fallback: assume plain host:port
   return `http://${line}`;
 }
 

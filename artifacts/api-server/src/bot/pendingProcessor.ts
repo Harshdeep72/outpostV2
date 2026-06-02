@@ -188,7 +188,7 @@ export function startPendingProcessor(client: Client) {
       const pendingCount = parseInt(res.rows[0]?.count ?? "0");
       
       if (pendingCount > 20) {
-        logger.info({ pendingCount }, "Pending submissions > 20, auto-triggering aggressive hold processor");
+        logger.debug({ pendingCount }, "Pending submissions > 20, auto-triggering aggressive hold processor");
         await runPendingProcessorNow(client, true);
       } else {
         await runPendingProcessorNow(client, false);

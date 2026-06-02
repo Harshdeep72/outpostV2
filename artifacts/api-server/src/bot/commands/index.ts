@@ -380,7 +380,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
 
   const processholds = new SlashCommandBuilder()
     .setName("processholds")
-    .setDescription("Force-run the pending holds processor immediately (admin/mod only)");
+    .setDescription("Force-run the pending holds processor immediately (admin only)");
 
   return [
     verify, setup, createtask, bulktask, referral, referralUse,

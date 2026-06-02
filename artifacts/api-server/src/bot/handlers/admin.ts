@@ -953,9 +953,9 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
   await interaction.deferReply({ flags: 64 });
   const guild = interaction.guild!;
   const actingMember = await guild.members.fetch(interaction.user.id);
-  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+  if (!hasAdminRole(actingMember, guild)) {
     return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can use `/processholds`.")],
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins can use `/processholds`.")],
     });
   }
 

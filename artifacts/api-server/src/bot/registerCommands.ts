@@ -21,12 +21,14 @@ export async function registerCommands(): Promise<void> {
   const builders = getCommandBuilders();
   const body = builders.map((b) => b.toJSON());
 
-  logger.info({ count: body.length }, "Registering slash commands (guild scope)");
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
+  const guildBody = body.filter((c) => !DM_PUBLIC_COMMANDS.has(c.name));
+
+  logger.info({ count: guildBody.length }, "Registering slash commands (guild scope)");
+  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: guildBody });
   logger.info("Slash commands registered (guild scope)");
 
-  // Also publish the DM-safe subset globally so they work in bot DMs.
-  // Inside the guild, guild-scoped duplicates win — no behavior change there.
+  // Also publish the DM-safe subset globally so they work in bot DMs and in all guilds.
+  // By excluding these from the guild-scoped array above, we prevent Discord from showing duplicate commands in the UI.
   const globalBody = body.filter((c) => DM_PUBLIC_COMMANDS.has(c.name));
   try {
     logger.info({ count: globalBody.length }, "Registering DM-safe slash commands (global scope)");

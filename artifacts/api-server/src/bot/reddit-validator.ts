@@ -506,7 +506,7 @@ function classifyPost(data: any): SubmissionStatus | null {
     return "deleted_by_author";
   }
   if (cat === "moderator") return "removed_by_mod";
-  if (cat === "anti_evil_ops" || cat === "reddit" || cat === "copyright_takedown") {
+  if (cat === "anti_evil_ops" || cat === "reddit" || cat === "copyright_takedown" || cat === "reddit_filters") {
     return "removed_by_reddit";
   }
   if (cat === "automod_filtered") return "removed_by_automod";

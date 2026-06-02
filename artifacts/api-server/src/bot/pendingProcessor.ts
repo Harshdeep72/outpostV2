@@ -180,7 +180,23 @@ export function startPendingProcessor(client: Client) {
   if (started) return;
   started = true;
 
-  setInterval(() => void runPendingProcessorNow(client), 60 * 1000).unref();
+  setInterval(async () => {
+    try {
+      const res = await db.execute<{ count: string }>(
+        sql`SELECT COUNT(*)::text as count FROM submissions WHERE review_status = 'pending_hold'`
+      );
+      const pendingCount = parseInt(res.rows[0]?.count ?? "0");
+      
+      if (pendingCount > 20) {
+        logger.info({ pendingCount }, "Pending submissions > 20, auto-triggering aggressive hold processor");
+        await runPendingProcessorNow(client, true);
+      } else {
+        await runPendingProcessorNow(client, false);
+      }
+    } catch (err) {
+      logger.error({ err }, "Error in pending processor interval loop");
+    }
+  }, 60 * 1000).unref();
 }
 
 /**

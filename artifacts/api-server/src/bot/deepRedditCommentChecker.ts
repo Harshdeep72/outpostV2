@@ -436,6 +436,14 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
     if (liveness === "removed") mappedStatus = "removed_by_mod";
     if (liveness === "not_found") mappedStatus = "not_found";
 
+    let ageMinutes: number | undefined;
+    const createdAtSec = data.data.createdAt;
+    let createdAtIso: string | undefined;
+    if (typeof createdAtSec === "number") {
+      ageMinutes = Math.floor((Date.now() - createdAtSec * 1000) / 60000);
+      createdAtIso = new Date(createdAtSec * 1000).toISOString();
+    }
+
     return {
       passed: mappedStatus === "live",
       autoApproved: mappedStatus === "live",
@@ -444,6 +452,8 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
       authorFound: data.data.author,
       title: undefined,
       upvotes: data.data.upvotes,
+      ageMinutes,
+      createdAt: createdAtIso,
       postLive: mappedStatus === "live",
       verifiedVia: "json_proxy",
       ...meta(mappedStatus),

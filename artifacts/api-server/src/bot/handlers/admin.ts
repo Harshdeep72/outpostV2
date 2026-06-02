@@ -948,3 +948,44 @@ export async function handleCheckSubmission(interaction: ChatInputCommandInterac
 
   return interaction.editReply({ embeds: [embed] });
 }
+
+export async function handleProcessHolds(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can use `/processholds`.")],
+    });
+  }
+
+  try {
+    const { runPendingProcessorNow } = await import("../pendingProcessor.js");
+    const { runPendingSweepNow } = await import("../pendingReviewSweeper.js");
+
+    const processorResult = await runPendingProcessorNow(interaction.client);
+    const sweeperResult = await runPendingSweepNow();
+
+    const lines = [
+      `**10-Min / Configured Holds (Pending Processor):**`,
+      `• Processed to Available: ${processorResult.acceptedProcessed}`,
+      `• Re-checked Reddit Liveness: ${processorResult.holdProcessed}`,
+      ``,
+      `**24h Sweeper (Pending Review):**`,
+      `• Triggered 1 batch of 100 submissions (check logs for results).`,
+    ];
+
+    await interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.SUCCESS)
+          .setTitle("🧹 Background Processors Triggered")
+          .setDescription(lines.join("\n")),
+      ],
+    });
+  } catch (err) {
+    logger.error({ err }, "handleProcessHolds failed");
+    await interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Failed to run processors: ${String(err)}`)],
+    });
+  }
+}

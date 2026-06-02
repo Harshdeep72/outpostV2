@@ -14,11 +14,11 @@ import {
 } from "discord.js";
 import { eq, and } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { users, redditAccounts } from "@workspace/db";
+import { users, redditAccounts, referrals } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { parseRedditInput, fetchRedditProfile } from "../reddit.js";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
-import { upsertUser, getUserByDiscordId } from "../db.js";
+import { upsertUser, getUserByDiscordId, getUserByReferralCode } from "../db.js";
 import { invalidateUser } from "../cache.js";
 import { markReferralVerified } from "./referral.js";
 import { makeEmbed, formatMoney, hasAdminRole, hasModRole } from "../util.js";
@@ -153,6 +153,20 @@ export async function handleVerifyStart(interaction: ButtonInteraction) {
     .setMaxLength(300);
 
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+
+  const existing = await getUserByDiscordId(interaction.user.id);
+  const isAdditional = !!existing?.verified;
+
+  if (!isAdditional && !existing?.referredBy) {
+    const referralInput = new TextInputBuilder()
+      .setCustomId("referral_input")
+      .setLabel("Referral Code (Optional)")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(20);
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(referralInput));
+  }
+
   await interaction.showModal(modal);
 }
 
@@ -226,6 +240,38 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
     return interaction.editReply({
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid Reddit username format. Please enter a valid username (3-20 characters, letters/numbers/underscores/hyphens).")],
     });
+  }
+
+  let referralCode = "";
+  try {
+    referralCode = interaction.fields.getTextInputValue("referral_input").trim().toUpperCase();
+  } catch (e) {}
+
+  if (!isAdditional && referralCode && !existing?.referredBy) {
+    const referrer = await getUserByReferralCode(referralCode);
+    if (!referrer) {
+      return interaction.editReply({
+        embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Referral code not found. Double-check and try again, or leave it blank.")],
+      });
+    }
+    if (referrer.discordId === interaction.user.id) {
+      return interaction.editReply({
+        embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You cannot use your own referral code.")],
+      });
+    }
+    
+    const existingRef = await db.select().from(referrals).where(eq(referrals.referredDiscordId, interaction.user.id)).limit(1);
+    if (existingRef.length === 0) {
+      await db.update(users).set({ referredBy: referrer.discordId }).where(eq(users.discordId, interaction.user.id));
+      await db.insert(referrals).values({
+        referrerDiscordId: referrer.discordId,
+        referredDiscordId: interaction.user.id,
+        codeUsed: referralCode,
+        status: "pending",
+      });
+      invalidateUser(interaction.user.id);
+      logger.info({ discordId: interaction.user.id, referrerDiscordId: referrer.discordId, code: referralCode }, "Referral code applied during verification");
+    }
   }
 
   const guild = interaction.guild!;

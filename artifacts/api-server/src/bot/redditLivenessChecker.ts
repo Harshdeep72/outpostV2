@@ -678,8 +678,9 @@ export async function startBulkLivenessScanAllTime(): Promise<{ ok: boolean; rea
     sql`SELECT COUNT(*)::text AS n
         FROM submissions
         WHERE review_status = 'accepted'
-          AND live_status = 'live'
-          AND proof_link ILIKE '%reddit.com%'`
+          AND live_status IN ('live', 'removed', 'deleted')
+          AND proof_link ILIKE '%reddit.com%'
+          AND submitted_at >= NOW() - INTERVAL '3 days'`
   );
   const total = parseInt(countRes.rows[0]?.n ?? "0");
 
@@ -726,6 +727,7 @@ async function runBulkScan(client: Client, total: number): Promise<void> {
             WHERE s.review_status = 'accepted'
               AND s.live_status IN ('live', 'removed', 'deleted')
               AND s.proof_link ILIKE '%reddit.com%'
+              AND s.submitted_at >= NOW() - INTERVAL '3 days'
               AND s.id > ${lastId}
             ORDER BY s.id ASC
             LIMIT ${BATCH_SIZE}`

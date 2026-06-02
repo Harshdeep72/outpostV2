@@ -187,7 +187,7 @@ export function startPendingProcessor(client: Client) {
  * Run a single pass of the pending processor (both accepted and pending_hold branches).
  * Returns an object with the number of processed submissions for diagnostics.
  */
-export async function runPendingProcessorNow(client: Client): Promise<{
+export async function runPendingProcessorNow(client: Client, forceAggressive = false): Promise<{
   ok: boolean;
   acceptedProcessed: number;
   holdProcessed: number;
@@ -250,11 +250,13 @@ export async function runPendingProcessorNow(client: Client): Promise<{
     // -----------------------------------------------------------------------
     try {
       const now = new Date();
-      const holdRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string }>(
-        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link
+      const holdRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string; available_at: Date | string }>(
+        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.available_at
             FROM submissions s
-            WHERE s.review_status = 'pending_hold' AND s.available_at <= ${now}
-            LIMIT 20`
+            WHERE s.review_status = 'pending_hold'
+              ${forceAggressive ? sql`AND (s.last_checked_at IS NULL OR s.last_checked_at < NOW() - INTERVAL '1 hour')` : sql`AND s.available_at <= ${now}`}
+            ORDER BY s.last_checked_at ASC NULLS FIRST
+            LIMIT ${forceAggressive ? 50 : 20}`
       );
 
       for (const row of holdRows.rows) {
@@ -295,6 +297,14 @@ export async function runPendingProcessorNow(client: Client): Promise<{
         }
 
         if (liveness.liveStatus === "live") {
+          const availableDate = new Date(row.available_at);
+          if (availableDate > now) {
+            // Still in hold period. Aggressive check proved it's live, but not ready for payout.
+            logger.info({ subId }, "Hold processor (aggressive): comment live but hold not yet expired — putting back to sleep");
+            await db.execute(sql`UPDATE submissions SET review_status = 'pending_hold', last_checked_at = NOW() WHERE id = ${subId}`);
+            continue;
+          }
+
           // Comment is still live — pay out now.
           // Funds were never in balance_pending for pending_hold rows, so we
           // credit balance_available and total_earned directly in one step.
@@ -376,6 +386,13 @@ export async function runPendingProcessorNow(client: Client): Promise<{
           }
 
           if (confirmation.liveStatus === "live") {
+            const availableDate = new Date(row.available_at);
+            if (availableDate > now) {
+              logger.info({ subId, firstDetected }, "Hold processor (aggressive): confirmation check says LIVE — false positive overridden, hold not yet expired — putting back to sleep");
+              await db.execute(sql`UPDATE submissions SET review_status = 'pending_hold', last_checked_at = NOW() WHERE id = ${subId}`);
+              continue;
+            }
+
             // Confirmation says live — the first reading was a false positive
             // (transient remove / AutoMod temporary filter). Pay out.
             logger.info(

@@ -963,7 +963,7 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
     const { runPendingProcessorNow } = await import("../pendingProcessor.js");
     const { runPendingSweepNow } = await import("../pendingReviewSweeper.js");
 
-    const processorResult = await runPendingProcessorNow(interaction.client);
+    const processorResult = await runPendingProcessorNow(interaction.client, true);
     const sweeperResult = await runPendingSweepNow();
 
     const lines = [

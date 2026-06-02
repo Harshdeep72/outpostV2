@@ -973,14 +973,14 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
       if (res.ok) {
         const data = await res.json() as any;
         if (data.success === false && data.message?.includes("not found")) {
-          return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404) via redditOSINT." };
+          return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404)." };
         }
         if (data.success) {
           const liveness = data.liveness || (data.data && data.data.liveness);
           if (liveness === "live") {
             return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
           } else if (liveness === "removed" || liveness === "deleted") {
-            return { liveStatus: "removed", detailedStatus: "removed_by_reddit", statusLabel: "Post removed", reason: "Post removed or deleted via redditOSINT." };
+            return { liveStatus: "removed", detailedStatus: "removed_by_reddit", statusLabel: "Post removed", reason: "Post removed or deleted." };
           }
         }
       }
@@ -1043,15 +1043,15 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
       const classification = classifyPost(postData);
       if (classification === "deleted_by_author") {
         logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post deleted by author");
-        return { liveStatus: "deleted", detailedStatus: classification, statusLabel: "Post deleted", reason: "Post deleted by author (Python JSON)." };
+        return { liveStatus: "deleted", detailedStatus: classification, statusLabel: "Post deleted", reason: "Post deleted by author." };
       }
       if (classification === "removed_by_mod" || classification === "removed_by_automod") {
         logger.info({ postId: parsed.postId, classification }, "recheckRedditLiveness: Python JSON → post removed");
-        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed", reason: `Post removed (${classification}) via Python JSON.` };
+        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed", reason: `Post removed (${classification}).` };
       }
       if (classification === "removed_by_reddit") {
         logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post removed by Reddit");
-        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed by Reddit", reason: "Post removed by Reddit (Python JSON)." };
+        return { liveStatus: "removed", detailedStatus: classification, statusLabel: "Post removed by Reddit", reason: "Post removed by Reddit." };
       }
       // classification === null → no removal signals — post is live
       logger.info({ postId: parsed.postId }, "recheckRedditLiveness: Python JSON → post live (no removal signals)");

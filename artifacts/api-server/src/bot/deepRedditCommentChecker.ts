@@ -448,7 +448,7 @@ async function fetchCommentViaRedditOsint(url: string): Promise<ValidationResult
       passed: mappedStatus === "live",
       autoApproved: mappedStatus === "live",
       status: mappedStatus,
-      failures: mappedStatus === "live" ? [] : [`Comment is ${mappedStatus}`],
+      failures: mappedStatus === "live" ? [] : [`**${STATUS_META[mappedStatus]?.label || mappedStatus}**`],
       authorFound: data.data.author,
       title: undefined,
       upvotes: data.data.upvotes,
@@ -624,8 +624,8 @@ async function runDeepCheck(
   // ── Liveness / removal classification ────────────────────────────────────
   const cstate = classifyComment(target);
   if (cstate) {
-    const reasonText = STATUS_META[cstate]?.label.toLowerCase() ?? "removed";
-    failures.push(`Comment is **${reasonText}**.`);
+    const reasonText = STATUS_META[cstate]?.label || "Removed";
+    failures.push(`**${reasonText}**.`);
     return {
       passed: false, autoApproved: false, status: cstate,
       failures, authorFound, subredditFound, postLive: true,

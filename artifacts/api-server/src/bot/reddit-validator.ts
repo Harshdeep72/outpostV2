@@ -1,7 +1,7 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
 import { fetch as undiciFetch } from "undici";
-import { getRedditSessionCookie } from "./redditCookieManager.js";
+import { getRedditSessionCookie, forceRefreshCookie } from "./redditCookieManager.js";
 import { executePythonRedditClient } from "./pythonClient.js";
 
 const DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -515,8 +515,8 @@ function classifyPost(data: any): SubmissionStatus | null {
   return null;
 }
 
-function classifyComment(c: any): SubmissionStatus | null {
-  const body = c.body ?? "";
+function classifyPostOrComment(c: any): SubmissionStatus | null {
+  const body = c.selftext ?? c.body ?? "";
   const author = c.author ?? "";
   const cat = c.removed_by_category as string | undefined;
 
@@ -653,6 +653,47 @@ export async function validateRedditProof(
   }
 
 
+async function fetchPostViaDirectJson(sub: string, postId: string): Promise<{ ok: boolean; body: any } | null> {
+  const sessionCookie = getRedditSessionCookie();
+  if (!sessionCookie) return null;
+
+  try {
+    const { fetch: undiciFetch, Agent } = await import("undici");
+    const agent = new Agent({ connect: { timeout: 8_000 }, bodyTimeout: 15_000, headersTimeout: 10_000 });
+    const url = `https://www.reddit.com/${sub}/comments/${postId}.json?raw_json=1`;
+    const res = await undiciFetch(url, {
+      dispatcher: agent,
+      headers: {
+        "User-Agent": DEFAULT_UA,
+        "Cookie": sessionCookie,
+        "Accept": "application/json",
+        "Referer": `https://www.reddit.com/${sub}/comments/${postId}/`,
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+
+    if (res.status === 403 || res.status === 401) {
+      logger.warn({ status: res.status, sub, postId }, "fetchPostViaDirectJson: auth error — triggering cookie refresh");
+      void forceRefreshCookie();
+      return null;
+    }
+
+    if (!res.ok) return null;
+    const text = await res.text();
+    const trimmed = text.trimStart();
+    if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return null;
+
+    let body: any;
+    try { body = JSON.parse(text); } catch { return null; }
+    if (!Array.isArray(body)) return null;
+
+    return { ok: true, body };
+  } catch (err) {
+    logger.warn({ err, sub, postId }, "fetchPostViaDirectJson failed");
+    return null;
+  }
+}
+
 async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | null> {
   try {
     const osintUrl = process.env.REDDIT_OSINT_URL;
@@ -719,6 +760,61 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
     }
 
     return osintRes;
+  }
+
+  // ── 0.5. JSON via session cookie ─────────────────────────────────────────
+  // Primary fallback if OSINT is unavailable (direct authenticated JSON fetch).
+  const sub = parsed.isUserPost ? `user/${parsed.subreddit.slice(2)}` : `r/${parsed.subreddit}`;
+  const directJsonRes = await fetchPostViaDirectJson(sub, parsed.postId);
+  
+  if (directJsonRes?.ok && Array.isArray(directJsonRes.body)) {
+    const postData = (directJsonRes.body[0] as any)?.data?.children?.[0]?.data;
+    if (postData) {
+      const status = classifyPostOrComment(postData);
+      const postSubreddit = postData.subreddit?.toLowerCase() ?? parsed.subreddit;
+      
+      if (status) {
+        return {
+          passed: false, autoApproved: false, status,
+          failures: [`Post is ${status.replace(/_/g, " ")}`],
+          authorFound: postData.author?.toLowerCase(), subredditFound: postSubreddit, postLive: false,
+          ...meta(status),
+        };
+      }
+
+      const authorFound = (postData.author ?? "").toLowerCase();
+      
+      if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+        const expectedDisplay = expectedLowerList.length === 1
+          ? `u/${expectedLowerList[0]}`
+          : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+        return {
+          passed: false, autoApproved: false, status: "author_mismatch",
+          failures: [`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`],
+          authorFound, subredditFound: postSubreddit, postLive: true,
+          ...meta("author_mismatch"),
+        };
+      }
+
+      if (taskSubreddit && postSubreddit !== taskSubreddit) {
+        return {
+          passed: false, autoApproved: false, status: "wrong_subreddit",
+          failures: [`Post is in r/${postSubreddit} but task requires r/${taskSubreddit}.`],
+          authorFound, subredditFound: postSubreddit, postLive: true,
+          ...meta("wrong_subreddit"),
+        };
+      }
+
+      return {
+        passed: true, autoApproved: true, status: "live",
+        failures: [],
+        authorFound, subredditFound: postSubreddit, postLive: true,
+        title: postData.title,
+        createdAt: postData.created_utc ? new Date(postData.created_utc * 1000).toISOString() : undefined,
+        verifiedVia: "json_proxy",
+        ...meta("live"),
+      };
+    }
   }
 
   // ── Fetch strategy ────────────────────────────────────────────────────────

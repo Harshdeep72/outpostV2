@@ -519,10 +519,17 @@ async function runDeepCheck(
       }
     }
 
+    let ageMinutes: number | undefined;
+    if (typeof osintData.createdAt === "number") {
+      ageMinutes = Math.floor((Date.now() - osintData.createdAt * 1000) / 60000);
+    }
+
     return {
       passed: true, autoApproved: true, status: "live", failures: [],
       authorFound, subredditFound, postLive: true,
       createdAt: createdAt ?? undefined,
+      upvotes: osintData.upvotes,
+      ageMinutes: ageMinutes,
       verifiedVia: "json_proxy",
       bodyText: bodyText || undefined,
       ...meta("live"),

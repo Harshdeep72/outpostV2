@@ -1,6 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { proxyFetchText } from "./proxy.js";
-import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult } from "./reddit-validator.js";
+import { parseRedditProofUrl, extractTaskSubreddit, extractTaskPostId, SubmissionStatus, ValidationResult, detectAppUrl, resolveShareLink } from "./reddit-validator.js";
 import { getOAuthToken, invalidateOAuthToken } from "./reddit.js";
 import { getRedditSessionCookie, forceRefreshCookie } from "./redditCookieManager.js";
 

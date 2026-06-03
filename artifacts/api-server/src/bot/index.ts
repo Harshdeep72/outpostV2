@@ -1,3 +1,4 @@
+import cron from "node-cron";
 import {
   Client,
   GatewayIntentBits,
@@ -151,7 +152,8 @@ export async function startBot() {
         }
       }, 5 * 60 * 1000);
 
-      setInterval(async () => {
+      cron.schedule("0 0 * * 3", async () => {
+        logger.info("Weekly payout cron triggered (00:00 UTC Wednesday)");
         for (const guild of client.guilds.cache.values()) {
           try {
             await runWeeklyPayouts(guild);
@@ -159,7 +161,7 @@ export async function startBot() {
             logger.error({ err, guildId: guild.id }, "Weekly payout scheduler error");
           }
         }
-      }, 60 * 60 * 1000);
+      });
 
       // Initial warm-up: refresh leaderboard once for each guild so the snapshot cache
       // is hot before the first user runs /leaderboard.

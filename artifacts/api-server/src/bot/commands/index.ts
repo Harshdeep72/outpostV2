@@ -382,6 +382,10 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setName("processholds")
     .setDescription("Force-run the pending holds processor immediately (admin only)");
 
+  const forcepayout = new SlashCommandBuilder()
+    .setName("forcepayout")
+    .setDescription("Manually trigger the weekly bulk payout process (admin only)");
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -389,7 +393,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, approvesubmission, reopenslot, mystatus, processholds,
+    checksubmission, approvesubmission, reopenslot, mystatus, processholds, forcepayout,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

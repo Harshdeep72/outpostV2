@@ -45,30 +45,32 @@ async function getOrCreateConfig(guildId: string) {
   return row!;
 }
 
-export async function runWeeklyPayouts(guild: Guild) {
+export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ processed: number; totalAmount: number; skipped: number }> {
   const now = new Date();
-  if (now.getUTCDay() !== PAYOUT_DAY_UTC) return;
+  if (!force && now.getUTCDay() !== PAYOUT_DAY_UTC) return { processed: 0, totalAmount: 0, skipped: 0 };
 
   await getOrCreateConfig(guild.id); // ensure row exists for the CAS below
   const weekStart = getISOWeekStart(now);
 
-  // ATOMIC WEEK CLAIM — the prior code read last_weekly_payout_at, decided
-  // whether this week was already paid, then much later (L152) updated it.
-  // Two cron ticks racing here would BOTH pass the check and BOTH process
-  // the eligible-user loop → users get paid twice, balances double-zeroed
-  // (or worse: deduct+insert+refund interleavings). Pin the claim into a
-  // single conditional UPDATE so exactly one tick wins the week.
-  const claim = await db.execute<{ guild_id: string }>(
-    sql`UPDATE server_config
-           SET last_weekly_payout_at = ${now}, updated_at = ${now}
-         WHERE guild_id = ${guild.id}
-           AND (last_weekly_payout_at IS NULL
-                OR last_weekly_payout_at < ${weekStart})
-         RETURNING guild_id`
-  );
-  if (claim.rows.length === 0) {
-    logger.info({ guildId: guild.id, weekStart }, "Weekly payouts: already claimed this week, skipping");
-    return;
+  if (!force) {
+    // ATOMIC WEEK CLAIM — the prior code read last_weekly_payout_at, decided
+    // whether this week was already paid, then much later (L152) updated it.
+    // Two cron ticks racing here would BOTH pass the check and BOTH process
+    // the eligible-user loop → users get paid twice, balances double-zeroed
+    // (or worse: deduct+insert+refund interleavings). Pin the claim into a
+    // single conditional UPDATE so exactly one tick wins the week.
+    const claim = await db.execute<{ guild_id: string }>(
+      sql`UPDATE server_config
+             SET last_weekly_payout_at = ${now}, updated_at = ${now}
+           WHERE guild_id = ${guild.id}
+             AND (last_weekly_payout_at IS NULL
+                  OR last_weekly_payout_at < ${weekStart})
+           RETURNING guild_id`
+    );
+    if (claim.rows.length === 0) {
+      logger.info({ guildId: guild.id, weekStart }, "Weekly payouts: already claimed this week, skipping");
+      return { processed: 0, totalAmount: 0, skipped: 0 };
+    }
   }
 
   const { withdrawalLogChannel } = await setupGuild(guild);
@@ -82,7 +84,7 @@ export async function runWeeklyPayouts(guild: Guild) {
     await withdrawalLogChannel.send({
       embeds: [makeEmbed(COLORS.MUTED).setDescription("💤 No eligible balances to pay out this week.")],
     });
-    return;
+    return { processed: 0, totalAmount: 0, skipped: 0 };
   }
 
   await withdrawalLogChannel.send({
@@ -238,4 +240,5 @@ export async function runWeeklyPayouts(guild: Guild) {
   // lastWeeklyPayoutAt already stamped by the atomic week-claim CAS at the
   // top of this function — no second write needed.
   logger.info({ guildId: guild.id, processed, skipped, totalAmount }, "Weekly payouts completed");
+  return { processed, totalAmount, skipped };
 }

@@ -13,6 +13,7 @@ import { makeEmbed, formatMoney, hasAdminRole, hasModRole } from "../util.js";
 import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { checkSubmissionNow } from "../redditLivenessChecker.js";
+import { runWeeklyPayouts } from "./weeklyPayouts.js";
 
 export async function handleSetupCommand(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
@@ -78,7 +79,7 @@ export async function handleAddMod(interaction: ChatInputCommandInteraction) {
   invalidateUser(target.id);
 
   await interaction.editReply({
-    embeds: [makeEmbed(COLORS.SUCCESS).setDescription(`✅ <@${target.id}> is now a Mod.`)],
+    embeds: [makeEmbed(COLORS.SUCCESS).setDescription(`✅ <@${target.id}> is now a Mod.`)]
   });
 }
 
@@ -988,4 +989,42 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
       embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Failed to run processors: ${String(err)}`)],
     });
   }
+}
+
+export async function handleForcePayout(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  
+  if (!hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins can force a bulk payout.")] });
+  }
+
+  const { withdrawalLogChannel } = await setupGuild(guild);
+  
+  await interaction.editReply({
+    embeds: [makeEmbed(COLORS.SUCCESS).setDescription("⏳ Processing forced bulk payout...")],
+  });
+
+  const { processed, totalAmount, skipped } = await runWeeklyPayouts(guild, true);
+
+  await withdrawalLogChannel.send({
+    embeds: [
+      makeEmbed(COLORS.ACCENT)
+        .setTitle("⚠️ Manual Bulk Payout Triggered")
+        .setDescription(`Admin <@${interaction.user.id}> manually triggered a forced bulk payout.`)
+    ]
+  });
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ Bulk Payout Complete")
+        .addFields(
+          { name: "Users Processed", value: String(processed), inline: true },
+          { name: "Total Owed", value: formatMoney(totalAmount), inline: true },
+          { name: "Skipped (No Wallet)", value: String(skipped), inline: true }
+        )
+    ]
+  });
 }

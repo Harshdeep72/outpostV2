@@ -875,7 +875,7 @@ export async function runCampaignLivenessCheck(
         s.proof_link              AS proof_link,
         s.reddit_username_used    AS reddit_username_used,
         t.type                    AS task_type,
-        t.task_link               AS task_link,
+        t.reddit_link             AS task_link,
         u.reddit_username         AS reddit_username
       FROM submissions s
       JOIN tasks t ON t.id = s.task_id

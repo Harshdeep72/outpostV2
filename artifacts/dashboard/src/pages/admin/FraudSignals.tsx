@@ -39,9 +39,15 @@ export default function FraudSignals() {
     queryFn: () => get<SignalsResp>("/admin/fraud-signals"),
   });
 
+  const dupDest = data?.duplicateDestinations || [];
+
   const totalSignals = data
-    ? data.highRejection.length + data.fastSubmissions.length + data.sharedReddit.length +
-      data.ghostClaims.length + data.fastWithdrawals.length + data.duplicateDestinations.length
+    ? (data.highRejection?.length || 0) + 
+      (data.fastSubmissions?.length || 0) + 
+      (data.sharedReddit?.length || 0) +
+      (data.ghostClaims?.length || 0) + 
+      (data.fastWithdrawals?.length || 0) + 
+      dupDest.length
     : 0;
 
   return (
@@ -71,15 +77,15 @@ export default function FraudSignals() {
               {totalSignals === 0 ? "✓ All clear" : `${totalSignals} signal${totalSignals === 1 ? "" : "s"} flagged`}
             </span>
             <span className="text-zinc-600"> · </span>
-            <span>{data.highRejection.length} high-reject · {data.fastSubmissions.length} fast-subs · {data.sharedReddit.length} shared reddit · {data.duplicateDestinations.length} shared dest · {data.ghostClaims.length} ghost claimers · {data.fastWithdrawals.length} fast cash-out</span>
+            <span>{(data.highRejection || []).length} high-reject · {(data.fastSubmissions || []).length} fast-subs · {(data.sharedReddit || []).length} shared reddit · {dupDest.length} shared dest · {(data.ghostClaims || []).length} ghost claimers · {(data.fastWithdrawals || []).length} fast cash-out</span>
           </div>
 
           <SignalCard
             title="High rejection rate"
             help="Users with ≥5 reviewed submissions and >50% rejected."
-            empty={data.highRejection.length === 0}
+            empty={(data.highRejection || []).length === 0}
             emptyMsg="No workers tripping this signal."
-            rows={data.highRejection.map((u) => ({
+            rows={(data.highRejection || []).map((u) => ({
               key: u.id,
               user: u,
               cells: [
@@ -92,9 +98,9 @@ export default function FraudSignals() {
           <SignalCard
             title="Suspiciously fast submitters"
             help="Avg time from claim to submit < 30 seconds across ≥5 subs."
-            empty={data.fastSubmissions.length === 0}
+            empty={(data.fastSubmissions || []).length === 0}
             emptyMsg="No workers tripping this signal."
-            rows={data.fastSubmissions.map((u) => ({
+            rows={(data.fastSubmissions || []).map((u) => ({
               key: u.id,
               user: u,
               cells: [
@@ -104,16 +110,16 @@ export default function FraudSignals() {
             }))}
           />
 
-          <SharedRedditCard rows={data.sharedReddit} />
+          <SharedRedditCard rows={data.sharedReddit || []} />
 
-          <DuplicateDestCard rows={data.duplicateDestinations} />
+          <DuplicateDestCard rows={dupDest} />
 
           <SignalCard
             title="Ghost claimers"
             help="Claim a lot but rarely submit — ≥5 claims, submit rate < 30%."
-            empty={data.ghostClaims.length === 0}
+            empty={(data.ghostClaims || []).length === 0}
             emptyMsg="No workers tripping this signal."
-            rows={data.ghostClaims.map((u) => ({
+            rows={(data.ghostClaims || []).map((u) => ({
               key: u.id,
               user: u,
               cells: [
@@ -126,9 +132,9 @@ export default function FraudSignals() {
           <SignalCard
             title="Fast cash-out"
             help="Withdrew ≥80% of lifetime earnings (and ≥$5) in the last 7 days."
-            empty={data.fastWithdrawals.length === 0}
+            empty={(data.fastWithdrawals || []).length === 0}
             emptyMsg="No workers tripping this signal."
-            rows={data.fastWithdrawals.map((u) => ({
+            rows={(data.fastWithdrawals || []).map((u) => ({
               key: u.id,
               user: u,
               cells: [

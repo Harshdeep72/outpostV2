@@ -1043,7 +1043,10 @@ export async function handleRequeueCommand(interaction: ChatInputCommandInteract
         last_checked_at = NOW(),
         review_reason = NULL
     WHERE review_status = 'pending'
-    AND review_reason ILIKE '%hold-end liveness check%'
+    AND (
+      review_reason ILIKE '%hold-end liveness check%'
+      OR review_reason ILIKE '%Post is in r/%'
+    )
     RETURNING id
   `);
   

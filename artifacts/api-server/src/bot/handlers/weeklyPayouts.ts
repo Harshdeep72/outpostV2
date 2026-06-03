@@ -215,10 +215,20 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
       }
     }
 
+    let displayName = `<@${user.discordId}>`;
+    try {
+      const discordUser = await guild.client.users.fetch(user.discordId);
+      if (discordUser) {
+        displayName = discordUser.username || discordUser.globalName || displayName;
+      }
+    } catch {
+      // fallback to mention
+    }
+
     const wdEmbed = makeEmbed(COLORS.WARNING)
       .setTitle("💸 Payout Pending")
       .addFields(
-        { name: "User", value: `<@${user.discordId}>`, inline: true },
+        { name: "User", value: displayName, inline: true },
         { name: "Amount", value: formatMoney(amount), inline: true },
         { name: "Method", value: method, inline: true },
         { name: "Destination", value: destination },

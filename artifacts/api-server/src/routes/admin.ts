@@ -1760,10 +1760,39 @@ router.get("/submissions", requireAuth, async (req, res) => {
   const page = Math.max(1, parseInt(String(req.query.page ?? "1")));
   const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "20"))));
   const status = req.query.status as string | undefined;
+  const taskIdStr = req.query.taskId as string | undefined;
+  const taskId = taskIdStr ? parseInt(taskIdStr, 10) : undefined;
   const offset = (page - 1) * limit;
 
   try {
-    const statusFilter = status ? eq(submissions.reviewStatus, status) : undefined;
+    const conditions: string[] = [];
+    const values: any[] = [limit, offset];
+    let paramIdx = 3;
+
+    if (status) {
+      conditions.push(`s.review_status = ANY(string_to_array($${paramIdx++}, ','))`);
+      values.push(status);
+    }
+    if (taskId && !isNaN(taskId)) {
+      conditions.push(`s.task_id = $${paramIdx++}`);
+      values.push(taskId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const countConditions: string[] = [];
+    const countValues: any[] = [];
+    let countParamIdx = 1;
+
+    if (status) {
+      countConditions.push(`review_status = ANY(string_to_array($${countParamIdx++}, ','))`);
+      countValues.push(status);
+    }
+    if (taskId && !isNaN(taskId)) {
+      countConditions.push(`task_id = $${countParamIdx++}`);
+      countValues.push(taskId);
+    }
+    const countWhereClause = countConditions.length > 0 ? `WHERE ${countConditions.join(" AND ")}` : "";
 
     const rows = await pool.query(
       `SELECT s.*, u.discord_username,
@@ -1781,15 +1810,15 @@ router.get("/submissions", requireAuth, async (req, res) => {
          ra.discord_id = s.reviewer_discord_id
          OR (s.reviewer_discord_id LIKE 'dashboard:%' AND ra.username = substring(s.reviewer_discord_id from 11))
        )
-       ${status ? `WHERE s.review_status = ANY(string_to_array($3, ','))` : ""}
+       ${whereClause}
        ORDER BY s.submitted_at DESC
        LIMIT $1 OFFSET $2`,
-      status ? [limit, offset, status] : [limit, offset]
+      values
     );
 
     const countRow = await pool.query(
-      `SELECT COUNT(*) FROM submissions ${status ? `WHERE review_status = ANY(string_to_array($1, ','))` : ""}`,
-      status ? [status] : []
+      `SELECT COUNT(*) FROM submissions ${countWhereClause}`,
+      countValues
     );
 
     const mapped = rows.rows.map((r: any) => {

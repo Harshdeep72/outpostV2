@@ -82,6 +82,8 @@ const STATUS_TABS: { label: string; value: string }[] = [
 export default function Submissions() {
   const [page, setPage] = useState(1);
   const [statusTab, setStatusTab] = useState("all");
+  const [taskIdFilter, setTaskIdFilter] = useState("");
+  const [appliedTaskId, setAppliedTaskId] = useState("");
   const [selected, setSelected] = useState<AdminSubmission | null>(null);
   const [reason, setReason] = useState("");
   const [scanStatus, setScanStatus] = useState<{ running: boolean; total?: number; toast?: string } | null>(null);
@@ -116,13 +118,16 @@ export default function Submissions() {
   });
 
   const { data, isLoading, isFetching, dataUpdatedAt } = useQuery<SubmissionListResponse>({
-    queryKey: ["admin-submissions", page, statusTab],
+    queryKey: ["admin-submissions", page, statusTab, appliedTaskId],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (statusTab !== "all") {
         if (statusTab === "approved") params.set("status", "accepted");
         else if (statusTab === "pending") params.set("status", "pending,pending_hold");
         else params.set("status", statusTab);
+      }
+      if (appliedTaskId.trim()) {
+        params.set("taskId", appliedTaskId.trim().replace(/^#/, ""));
       }
       return get<SubmissionListResponse>(`/admin/submissions?${params}`);
     },
@@ -198,21 +203,42 @@ export default function Submissions() {
         </div>
       )}
 
-      <div className="flex gap-1 p-1 bg-secondary/50 rounded-lg w-fit">
-        {STATUS_TABS.map(tab => (
-          <button
-            key={tab.value}
-            onClick={() => { setStatusTab(tab.value); setPage(1); }}
-            className={cn(
-              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-              statusTab === tab.value
-                ? "bg-card text-foreground shadow-sm border border-border"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex gap-1 p-1 bg-secondary/50 rounded-lg w-fit">
+          {STATUS_TABS.map(tab => (
+            <button
+              key={tab.value}
+              onClick={() => { setStatusTab(tab.value); setPage(1); }}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                statusTab === tab.value
+                  ? "bg-card text-foreground shadow-sm border border-border"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setAppliedTaskId(taskIdFilter);
+            setPage(1);
+          }}
+          className="relative max-w-xs w-full"
+        >
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search Task ID..."
+            value={taskIdFilter}
+            onChange={(e) => setTaskIdFilter(e.target.value)}
+            className="w-full pl-9 pr-4 py-1.5 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-shadow"
+          />
+        </form>
       </div>
 
       <div className="rounded-xl border border-border bg-card overflow-hidden">

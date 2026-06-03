@@ -51,47 +51,47 @@ export function registerInteractionHandler(client: Client) {
 
       if (interaction.isChatInputCommand()) {
         const name = interaction.commandName;
-        if (name === "ping") return timed(name, () => handlePingCommand(interaction));
-        if (name === "verify") return timed(name, () => handleVerifyCommand(interaction));
-        if (name === "verifyuser") return timed(name, () => handleAdminVerifyCommand(interaction));
-        if (name === "setup") return timed(name, () => handleSetupCommand(interaction));
-        if (name === "createtask") return timed(name, () => handleCreateTaskCommand(interaction));
-        if (name === "bulktask") return timed(name, () => handleBulkTaskCommand(interaction));
-        if (name === "canceltask") return timed(name, () => handleCancelTaskCommand(interaction));
-        if (name === "cancelcampaign") return timed(name, () => handleCancelCampaignCommand(interaction));
-        if (name === "referral") return timed(name, () => handleReferralCommand(interaction));
-        if (name === "referraluse") return timed(name, () => handleReferralUseCommand(interaction));
-        if (name === "setupi") return timed(name, () => handleSetupI(interaction));
-        if (name === "setpaypal") return timed(name, () => handleSetPaypal(interaction));
-        if (name === "setwallet") return timed(name, () => handleSetWallet(interaction));
-        if (name === "wallet") return timed(name, () => handleWalletCommand(interaction));
-        if (name === "leaderboard") return timed(name, () => handleLeaderboardCommand(interaction));
-        if (name === "resetleaderboard") return timed(name, () => handleResetLeaderboard(interaction));
-        if (name === "addmod") return timed(name, () => handleAddMod(interaction));
-        if (name === "removemod") return timed(name, () => handleRemoveMod(interaction));
-        if (name === "addadmin") return timed(name, () => handleAddAdmin(interaction));
-        if (name === "flag") return timed(name, () => handleFlagUser(interaction));
-        if (name === "unflag") return timed(name, () => handleUnflagUser(interaction));
-        if (name === "profile") return timed(name, () => handleProfileCommand(interaction));
-        if (name === "digest") return timed(name, () => handleDigestCommand(interaction));
-        if (name === "massdm") return timed(name, () => handleMassDmCommand(interaction));
-        if (name === "sendstats") return timed(name, () => handleSendStatsCommand(interaction));
-        if (name === "notifywalletmigration") return timed(name, () => handleNotifyWalletMigration(interaction));
-        if (name === "taskhistory") return timed(name, () => handleTaskHistoryCommand(interaction));
-        if (name === "payouthistory") return timed(name, () => handlePayoutHistoryCommand(interaction));
-        if (name === "adminpayouthistory") return timed(name, () => handleAdminPayoutHistoryCommand(interaction));
-        if (name === "stats") return timed(name, () => handleStatsCommand(interaction));
-        if (name === "health") return timed(name, () => handleHealthCommand(interaction));
-        if (name === "testurl") return timed(name, () => handleTestUrlCommand(interaction));
-        if (name === "addbalance") return timed(name, () => handleAddBalance(interaction));
-        if (name === "removebalance") return timed(name, () => handleRemoveBalance(interaction));
-        if (name === "checksubmission") return timed(name, () => handleCheckSubmission(interaction));
-        if (name === "approvesubmission") return timed(name, () => handleApproveSubmission(interaction));
-        if (name === "reopenslot") return timed(name, () => handleReopenSlot(interaction));
-        if (name === "mystatus") return timed(name, () => handleMyStatusCommand(interaction));
-        if (name === "processholds") return timed(name, () => handleProcessHolds(interaction));
-        if (name === "forcepayout") return timed(name, () => handleForcePayout(interaction));
-        if (name === "requeue") return timed(name, () => handleRequeueCommand(interaction));
+        if (name === "ping") return await timed(name, () => handlePingCommand(interaction));
+        if (name === "verify") return await timed(name, () => handleVerifyCommand(interaction));
+        if (name === "verifyuser") return await timed(name, () => handleAdminVerifyCommand(interaction));
+        if (name === "setup") return await timed(name, () => handleSetupCommand(interaction));
+        if (name === "createtask") return await timed(name, () => handleCreateTaskCommand(interaction));
+        if (name === "bulktask") return await timed(name, () => handleBulkTaskCommand(interaction));
+        if (name === "canceltask") return await timed(name, () => handleCancelTaskCommand(interaction));
+        if (name === "cancelcampaign") return await timed(name, () => handleCancelCampaignCommand(interaction));
+        if (name === "referral") return await timed(name, () => handleReferralCommand(interaction));
+        if (name === "referraluse") return await timed(name, () => handleReferralUseCommand(interaction));
+        if (name === "setupi") return await timed(name, () => handleSetupI(interaction));
+        if (name === "setpaypal") return await timed(name, () => handleSetPaypal(interaction));
+        if (name === "setwallet") return await timed(name, () => handleSetWallet(interaction));
+        if (name === "wallet") return await timed(name, () => handleWalletCommand(interaction));
+        if (name === "leaderboard") return await timed(name, () => handleLeaderboardCommand(interaction));
+        if (name === "resetleaderboard") return await timed(name, () => handleResetLeaderboard(interaction));
+        if (name === "addmod") return await timed(name, () => handleAddMod(interaction));
+        if (name === "removemod") return await timed(name, () => handleRemoveMod(interaction));
+        if (name === "addadmin") return await timed(name, () => handleAddAdmin(interaction));
+        if (name === "flag") return await timed(name, () => handleFlagUser(interaction));
+        if (name === "unflag") return await timed(name, () => handleUnflagUser(interaction));
+        if (name === "profile") return await timed(name, () => handleProfileCommand(interaction));
+        if (name === "digest") return await timed(name, () => handleDigestCommand(interaction));
+        if (name === "massdm") return await timed(name, () => handleMassDmCommand(interaction));
+        if (name === "sendstats") return await timed(name, () => handleSendStatsCommand(interaction));
+        if (name === "notifywalletmigration") return await timed(name, () => handleNotifyWalletMigration(interaction));
+        if (name === "taskhistory") return await timed(name, () => handleTaskHistoryCommand(interaction));
+        if (name === "payouthistory") return await timed(name, () => handlePayoutHistoryCommand(interaction));
+        if (name === "adminpayouthistory") return await timed(name, () => handleAdminPayoutHistoryCommand(interaction));
+        if (name === "stats") return await timed(name, () => handleStatsCommand(interaction));
+        if (name === "health") return await timed(name, () => handleHealthCommand(interaction));
+        if (name === "testurl") return await timed(name, () => handleTestUrlCommand(interaction));
+        if (name === "addbalance") return await timed(name, () => handleAddBalance(interaction));
+        if (name === "removebalance") return await timed(name, () => handleRemoveBalance(interaction));
+        if (name === "checksubmission") return await timed(name, () => handleCheckSubmission(interaction));
+        if (name === "approvesubmission") return await timed(name, () => handleApproveSubmission(interaction));
+        if (name === "reopenslot") return await timed(name, () => handleReopenSlot(interaction));
+        if (name === "mystatus") return await timed(name, () => handleMyStatusCommand(interaction));
+        if (name === "processholds") return await timed(name, () => handleProcessHolds(interaction));
+        if (name === "forcepayout") return await timed(name, () => handleForcePayout(interaction));
+        if (name === "requeue") return await timed(name, () => handleRequeueCommand(interaction));
         logger.warn({ name }, "Unknown command");
         return;
       }
@@ -103,34 +103,34 @@ export function registerInteractionHandler(client: Client) {
         const tag = `btn:${scope}:${action}`;
 
         if (scope === "verify") {
-          if (action === "start") return timed(tag, () => handleVerifyStart(interaction));
+          if (action === "start") return await timed(tag, () => handleVerifyStart(interaction));
           // verify:accept:<discordId>[:<redditUsernameLower>]
           // p2 is empty for legacy (pre-deploy) in-flight buttons —
           // handleVerifyAccept falls back to legacy behavior when missing.
-          if (action === "accept") return timed(tag, () => handleVerifyAccept(interaction, p1, p2));
-          if (action === "reject") return timed(tag, () => handleVerifyReject(interaction, p1));
-          if (action === "revoke") return timed(tag, () => handleVerifyRevoke(interaction, p1));
-          if (action === "dismiss") return timed(tag, () => handleVerifyDismiss(interaction));
+          if (action === "accept") return await timed(tag, () => handleVerifyAccept(interaction, p1, p2));
+          if (action === "reject") return await timed(tag, () => handleVerifyReject(interaction, p1));
+          if (action === "revoke") return await timed(tag, () => handleVerifyRevoke(interaction, p1));
+          if (action === "dismiss") return await timed(tag, () => handleVerifyDismiss(interaction));
           // verify:unlinkacc:<discordId>:<redditUsernameLower> — unlink a
           // single additional Reddit account from the verification log.
-          if (action === "unlinkacc") return timed(tag, () => handleVerifyUnlinkAccount(interaction, p1, p2));
+          if (action === "unlinkacc") return await timed(tag, () => handleVerifyUnlinkAccount(interaction, p1, p2));
         }
 
         if (scope === "task") {
-          if (action === "claim") return timed(tag, () => handleTaskClaim(interaction, parseInt(p1)));
-          if (action === "details") return timed(tag, () => handleTaskDetails(interaction, parseInt(p1)));
+          if (action === "claim") return await timed(tag, () => handleTaskClaim(interaction, parseInt(p1)));
+          if (action === "details") return await timed(tag, () => handleTaskDetails(interaction, parseInt(p1)));
         }
 
         if (scope === "campaign") {
-          if (action === "claimnext") return timed(tag, () => handleCampaignClaimNext(interaction, parseInt(p1)));
+          if (action === "claimnext") return await timed(tag, () => handleCampaignClaimNext(interaction, parseInt(p1)));
         }
 
         if (scope === "claim") {
-          if (action === "submit") return timed(tag, () => handleClaimSubmit(interaction, parseInt(p1)));
-          if (action === "copy") return timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "comment"));
-          if (action === "copytitle") return timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "title"));
-          if (action === "copybody") return timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "body"));
-          if (action === "reject") return timed(tag, () => handleClaimReject(interaction, parseInt(p1)));
+          if (action === "submit") return await timed(tag, () => handleClaimSubmit(interaction, parseInt(p1)));
+          if (action === "copy") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "comment"));
+          if (action === "copytitle") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "title"));
+          if (action === "copybody") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "body"));
+          if (action === "reject") return await timed(tag, () => handleClaimReject(interaction, parseInt(p1)));
         }
 
         // Disabled placeholder buttons we put on a workspace message after
@@ -159,7 +159,7 @@ export function registerInteractionHandler(client: Client) {
         if (scope === "lb") {
           // Paginated leaderboard channel post — `page:N` switches page,
           // `noop` is the (disabled) middle "Page X / Y" indicator.
-          if (action === "page") return timed(tag, () => handleLeaderboardPageButton(interaction, p1));
+          if (action === "page") return await timed(tag, () => handleLeaderboardPageButton(interaction, p1));
           if (action === "noop") {
             await interaction.deferUpdate().catch(() => {});
             return;
@@ -167,11 +167,11 @@ export function registerInteractionHandler(client: Client) {
         }
 
         if (scope === "wd") {
-          if (action === "approve") return timed(tag, () => handleWdApprove(interaction, parseInt(p1)));
-          if (action === "reject") return timed(tag, () => handleWdReject(interaction, parseInt(p1)));
+          if (action === "approve") return await timed(tag, () => handleWdApprove(interaction, parseInt(p1)));
+          if (action === "reject") return await timed(tag, () => handleWdReject(interaction, parseInt(p1)));
           if (action === "cpay") {
             const parts = interaction.customId.split(":");
-            return timed(tag, () => handleWdCreatorPay(interaction, parseInt(parts[2]!), parseInt(parts[3]!)));
+            return await timed(tag, () => handleWdCreatorPay(interaction, parseInt(parts[2]!), parseInt(parts[3]!)));
           }
         }
 
@@ -186,8 +186,8 @@ export function registerInteractionHandler(client: Client) {
         const tag = `modal:${scope}:${action}`;
 
         if (scope === "verify") {
-          if (action === "modal") return timed(tag, () => handleVerifyModal(interaction));
-          if (action === "rejectreason") return timed(tag, () => handleVerifyRejectReason(interaction, parts[2]!, parts[3]!));
+          if (action === "modal") return await timed(tag, () => handleVerifyModal(interaction));
+          if (action === "rejectreason") return await timed(tag, () => handleVerifyRejectReason(interaction, parts[2]!, parts[3]!));
         }
 
         if (scope === "task" && action === "create") {
@@ -200,7 +200,7 @@ export function registerInteractionHandler(client: Client) {
           const [type, reward, slots, time, hold, trust] = rest;
           const cooldownEnabled = hasCooldown ? rest[6] !== "0" : true;
           const nonce = hasCooldown ? rest[7] : rest[6];
-          return timed(tag, () => handleTaskCreateModal(
+          return await timed(tag, () => handleTaskCreateModal(
             interaction,
             type!,
             parseFloat(reward!),
@@ -214,36 +214,40 @@ export function registerInteractionHandler(client: Client) {
         }
 
         if (scope === "claim" && action === "submitmodal") {
-          return timed(tag, () => handleClaimSubmitModal(interaction, parseInt(parts[2]!)));
+          return await timed(tag, () => handleClaimSubmitModal(interaction, parseInt(parts[2]!)));
         }
 
         if (scope === "claim" && action === "rejectmodal") {
-          return timed(tag, () => handleClaimRejectModal(interaction, parseInt(parts[2]!)));
+          return await timed(tag, () => handleClaimRejectModal(interaction, parseInt(parts[2]!)));
         }
 
         if (scope === "sub" && action === "reason") {
           const subAction = parts[2] as "reject" | "flag";
-          return timed(tag, () => handleSubReviewReason(interaction, subAction, parseInt(parts[3]!)));
+          return await timed(tag, () => handleSubReviewReason(interaction, subAction, parseInt(parts[3]!)));
         }
 
         if (scope === "wd" && action === "reason") {
-          return timed(tag, () => handleWdRejectReason(interaction, parseInt(parts[2]!)));
+          return await timed(tag, () => handleWdRejectReason(interaction, parseInt(parts[2]!)));
         }
 
         if (scope === "bulktask" && action === "csvmodal") {
-          return timed(tag, () => handleBulkTaskCsvModal(interaction));
+          return await timed(tag, () => handleBulkTaskCsvModal(interaction));
         }
 
         if (scope === "massdm" && action === "modal") {
-          return timed(tag, () => handleMassDmModal(interaction, parts[2], parts[3]));
+          return await timed(tag, () => handleMassDmModal(interaction, parts[2], parts[3]));
         }
 
         logger.warn({ customId: interaction.customId }, "Unknown modal interaction");
         return;
       }
     } catch (err: any) {
-      logger.error({ err, customId: (interaction as any).customId ?? (interaction as any).commandName }, "Interaction handler error");
       const raw = String(err?.message ?? err ?? "unknown error");
+      // Silently ignore Discord 10062 "Unknown interaction" (interaction expired after 3 seconds)
+      if (err?.code === 10062 || raw.includes("10062")) {
+        return;
+      }
+      logger.error({ err, customId: (interaction as any).customId ?? (interaction as any).commandName }, "Interaction handler error");
       const isMissingTable = /relation ".*" does not exist/i.test(raw);
       const userMessage = isMissingTable
         ? "❌ The database isn't set up yet. An admin needs to run the database migration (`pnpm --filter @workspace/db push`) so the bot's tables exist."

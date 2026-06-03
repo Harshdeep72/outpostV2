@@ -965,7 +965,7 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
     const { runPendingSweepNow } = await import("../pendingReviewSweeper.js");
 
     const processorResult = await runPendingProcessorNow(interaction.client, true);
-    const sweeperResult = await runPendingSweepNow();
+    const sweeperResult = await runPendingSweepNow(true);
 
     const lines = [
       `**10-Min / Configured Holds (Pending Processor):**`,

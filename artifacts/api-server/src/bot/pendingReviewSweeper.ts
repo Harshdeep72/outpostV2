@@ -281,15 +281,15 @@ async function autoReject(client: Client, row: PendingRow, reason: string): Prom
   return true;
 }
 
-async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500) {
+async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500, forceAggressive = false) {
   if (isRunning) {
     logger.info("pending-sweeper: previous tick still running, skipping");
     return;
   }
   isRunning = true;
   try {
-    const decideCutoff = new Date(Date.now() - AUTO_DECIDE_AFTER_MS);
-    const stopCutoff = new Date(Date.now() - STOP_AFTER_MS);
+    const decideCutoff = forceAggressive ? new Date() : new Date(Date.now() - AUTO_DECIDE_AFTER_MS);
+    const stopCutoff = forceAggressive ? new Date(0) : new Date(Date.now() - STOP_AFTER_MS);
 
     const rows = await db.execute<PendingRow>(
       sql`SELECT s.id::text                          AS id,
@@ -404,9 +404,9 @@ export function startPendingReviewSweeper(client: Client) {
 }
 
 /** Run a single fast pass on demand (100 submissions, 500ms gap). */
-export async function runPendingSweepNow(): Promise<{ ok: boolean; reason?: string }> {
+export async function runPendingSweepNow(forceAggressive = false): Promise<{ ok: boolean; reason?: string }> {
   if (!cachedClient) return { ok: false, reason: "Pending-review sweeper not started yet" };
-  await tick(cachedClient, BATCH_SIZE, 500);
+  await tick(cachedClient, BATCH_SIZE, 500, forceAggressive);
   return { ok: true };
 }
 

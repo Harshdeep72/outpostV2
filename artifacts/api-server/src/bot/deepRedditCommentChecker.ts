@@ -441,7 +441,27 @@ async function runDeepCheck(
 ): Promise<ValidationResult> {
   const failures: string[] = [];
   
-  const parsed = parseRedditProofUrl(proofUrl);
+  let resolvedUrl = proofUrl;
+  const appKind = detectAppUrl(proofUrl);
+  if (appKind === "share_link_resolvable") {
+    logger.info({ proofUrl }, "Resolving share link via HEAD redirect");
+    const resolved = await resolveShareLink(proofUrl);
+    if (resolved) {
+      resolvedUrl = resolved;
+      logger.info({ proofUrl, resolvedUrl }, "Share link resolved to canonical URL");
+    } else {
+      return {
+        passed: false, autoApproved: false, status: "url_invalid",
+        failures: [
+          "Your proof link is a Reddit share short-link that could not be resolved automatically. " +
+          "Please open it in a browser, copy the full URL from the address bar, and resubmit."
+        ],
+        ...meta("url_invalid"),
+      };
+    }
+  }
+
+  const parsed = parseRedditProofUrl(resolvedUrl);
   if (!parsed || !parsed.commentId) {
     return {
       passed: false, autoApproved: false, status: "url_invalid",
@@ -475,9 +495,9 @@ async function runDeepCheck(
   }
 
   // ── 0. redditOSITN (PRIMARY) ──────────────────────────────────────────────
-  const osintData = await fetchCommentViaRedditOsint(proofUrl);
+  const osintData = await fetchCommentViaRedditOsint(resolvedUrl);
   if (osintData) {
-    logger.info({ proofUrl }, "Comment check: using redditOSITN data");
+    logger.info({ proofUrl: resolvedUrl }, "Comment check: using redditOSITN data");
     
     let cstate: SubmissionStatus | null = null;
     if (osintData.liveness === "removed" || osintData.liveness === "deleted" || osintData.liveness === "not_found") {
@@ -486,6 +506,7 @@ async function runDeepCheck(
 
     let subredditFound = (osintData.subreddit || "").toLowerCase();
     let authorFound = (osintData.author || "").toLowerCase();
+    if (!authorFound) authorFound = "unknown";
     let bodyText = osintData.body_snippet || "";
     let createdAt = osintData.createdAt ? new Date(osintData.createdAt * 1000).toISOString() : null;
 
@@ -500,7 +521,7 @@ async function runDeepCheck(
       return { passed: false, autoApproved: false, status: "wrong_subreddit", failures, subredditFound, postLive: false, ...meta("wrong_subreddit") };
     }
 
-    if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+    if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
       const expectedDisplay = expectedLowerList.length === 1 ? `u/${expectedLowerList[0]}` : expectedLowerList.map((u) => `u/${u}`).join(" or ");
       failures.push(`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`);
       return { passed: false, autoApproved: false, status: "author_mismatch", failures, authorFound, subredditFound, postLive: true, ...meta("author_mismatch") };
@@ -619,7 +640,8 @@ async function runDeepCheck(
   }
 
   // ── Extract comment fields ────────────────────────────────────────────────
-  const authorFound = (target.author ?? "").toLowerCase();
+  let authorFound = (target.author ?? "").toLowerCase();
+  if (!authorFound) authorFound = "unknown";
   const bodyText: string = target.body ?? "";
   const createdAt: string | null = target.created_utc
     ? new Date((target.created_utc as number) * 1000).toISOString()
@@ -648,7 +670,7 @@ async function runDeepCheck(
   }
 
   // ── Author check ──────────────────────────────────────────────────────────
-  if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+  if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
     const expectedDisplay = expectedLowerList.length === 1
       ? `u/${expectedLowerList[0]}`
       : expectedLowerList.map((u) => `u/${u}`).join(" or ");

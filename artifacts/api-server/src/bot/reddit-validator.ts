@@ -743,11 +743,13 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
     logger.info({ proofUrl: resolvedProofUrl }, "Post check: using redditOSITN data");
     
     let authorFound = osintRes.authorFound?.toLowerCase() || "";
+    if (!authorFound) authorFound = "unknown";
+    
     if (!osintRes.passed) {
       return osintRes; 
     }
 
-    if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+    if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
       const expectedDisplay = expectedLowerList.length === 1
         ? `u/${expectedLowerList[0]}`
         : expectedLowerList.map((u) => `u/${u}`).join(" or ");
@@ -782,9 +784,10 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
         };
       }
 
-      const authorFound = (postData.author ?? "").toLowerCase();
+      let authorFound = (postData.author ?? "").toLowerCase();
+      if (!authorFound) authorFound = "unknown";
       
-      if (expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+      if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
         const expectedDisplay = expectedLowerList.length === 1
           ? `u/${expectedLowerList[0]}`
           : expectedLowerList.map((u) => `u/${u}`).join(" or ");

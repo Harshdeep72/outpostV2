@@ -1041,7 +1041,8 @@ export async function handleRequeueCommand(interaction: ChatInputCommandInteract
     UPDATE submissions
     SET review_status = 'pending_hold',
         last_checked_at = NOW(),
-        review_reason = NULL
+        review_reason = NULL,
+        available_at = COALESCE(available_at, NOW() + INTERVAL '7 days')
     WHERE review_status = 'pending'
     AND (
       review_reason ILIKE '%hold-end liveness check%'

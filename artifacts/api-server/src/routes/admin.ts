@@ -2931,7 +2931,7 @@ router.post("/tasks/:id/auto-bump", requireAdminRole, async (req, res) => {
  */
 router.get("/fraud-signals", requireAuth, async (_req, res) => {
   try {
-    const [highReject, fastSubs, sharedReddit, ghostClaims, fastWithdraws] = await Promise.all([
+    const [highReject, fastSubs, sharedReddit, ghostClaims, fastWithdraws, allDestUsers] = await Promise.all([
       // (1) High rejection rate — >=5 reviewed subs, rejection rate > 50%.
       pool.query(`
         SELECT u.id, u.discord_id, u.discord_username, u.trust_score, u.flagged,

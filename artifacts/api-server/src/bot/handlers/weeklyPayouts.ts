@@ -184,6 +184,37 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
       continue;
     }
 
+    const normDest = destination.toLowerCase();
+    const duplicateRows = await db.select({ 
+      discordId: users.discordId,
+      upiId: users.upiId,
+      paypalEmail: users.paypalEmail,
+      cryptoWallets: users.cryptoWallets
+    })
+      .from(users)
+      .where(sql`discord_id != ${user.discordId} AND (
+        LOWER(upi_id) = ${normDest} OR 
+        LOWER(paypal_email) = ${normDest} OR 
+        LOWER(crypto_wallets::text) LIKE ${"%" + normDest + "%"}
+      )`);
+      
+    let duplicateUsers: string[] = [];
+    for (const row of duplicateRows) {
+      let match = false;
+      if (row.upiId?.toLowerCase() === normDest) match = true;
+      if (row.paypalEmail?.toLowerCase() === normDest) match = true;
+      const cw = row.cryptoWallets as Record<string, unknown> | null;
+      if (cw) {
+        for (const val of Object.values(cw)) {
+          if (typeof val === "string" && val.toLowerCase() === normDest) match = true;
+          if (typeof val === "object" && val !== null && (val as any).address?.toLowerCase() === normDest) match = true;
+        }
+      }
+      if (match) {
+        duplicateUsers.push(`<@${row.discordId}>`);
+      }
+    }
+
     const wdEmbed = makeEmbed(COLORS.WARNING)
       .setTitle("💸 Payout Pending")
       .addFields(
@@ -191,8 +222,13 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
         { name: "Amount", value: formatMoney(amount), inline: true },
         { name: "Method", value: method, inline: true },
         { name: "Destination", value: destination },
-      )
-      .setFooter({ text: `Withdrawal #${wd.id}` });
+      );
+      
+    if (duplicateUsers.length > 0) {
+      wdEmbed.addFields({ name: "⚠️ DUPLICATE DESTINATION DETECTED", value: `Shared with: ${duplicateUsers.join(", ")}` });
+    }
+    
+    wdEmbed.setFooter({ text: `Withdrawal #${wd.id}` });
 
     const wdRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`wd:approve:${wd.id}`).setLabel("Mark as Paid").setStyle(ButtonStyle.Success),

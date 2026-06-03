@@ -19,12 +19,18 @@ interface SharedReddit {
   user_count: number;
   users: { id: number; discordId: string; username: string; flagged: boolean }[];
 }
+interface DuplicateDestination {
+  destination: string;
+  userCount: number;
+  users: { id: number; discordId: string; username: string; flagged: boolean }[];
+}
 interface SignalsResp {
   highRejection: HighReject[];
   fastSubmissions: FastSubs[];
   sharedReddit: SharedReddit[];
   ghostClaims: GhostClaim[];
   fastWithdrawals: FastWd[];
+  duplicateDestinations: DuplicateDestination[];
 }
 
 export default function FraudSignals() {
@@ -35,7 +41,7 @@ export default function FraudSignals() {
 
   const totalSignals = data
     ? data.highRejection.length + data.fastSubmissions.length + data.sharedReddit.length +
-      data.ghostClaims.length + data.fastWithdrawals.length
+      data.ghostClaims.length + data.fastWithdrawals.length + data.duplicateDestinations.length
     : 0;
 
   return (
@@ -65,7 +71,7 @@ export default function FraudSignals() {
               {totalSignals === 0 ? "✓ All clear" : `${totalSignals} signal${totalSignals === 1 ? "" : "s"} flagged`}
             </span>
             <span className="text-zinc-600"> · </span>
-            <span>{data.highRejection.length} high-reject · {data.fastSubmissions.length} fast-subs · {data.sharedReddit.length} shared reddit · {data.ghostClaims.length} ghost claimers · {data.fastWithdrawals.length} fast cash-out</span>
+            <span>{data.highRejection.length} high-reject · {data.fastSubmissions.length} fast-subs · {data.sharedReddit.length} shared reddit · {data.duplicateDestinations.length} shared dest · {data.ghostClaims.length} ghost claimers · {data.fastWithdrawals.length} fast cash-out</span>
           </div>
 
           <SignalCard
@@ -99,6 +105,8 @@ export default function FraudSignals() {
           />
 
           <SharedRedditCard rows={data.sharedReddit} />
+
+          <DuplicateDestCard rows={data.duplicateDestinations} />
 
           <SignalCard
             title="Ghost claimers"
@@ -186,6 +194,42 @@ function SharedRedditCard({ rows }: { rows: SharedReddit[] }) {
               <div className="flex items-baseline gap-3 mb-1.5">
                 <span className="text-[13px] text-zinc-100 font-mono">u/{r.reddit_username}</span>
                 <span className="text-[11px] text-zinc-500">used by {r.user_count} accounts</span>
+              </div>
+              <ul className="text-[12px] space-y-1 ml-2">
+                {r.users.map((u) => (
+                  <li key={u.id} className="flex items-center gap-2">
+                    {u.flagged && <span className="text-red-400 text-[10px]">🚩</span>}
+                    <span className="text-zinc-200">{u.username}</span>
+                    <span className="font-mono text-zinc-500 text-[10.5px]">{u.discordId}</span>
+                    <Link href={`/admin/workers/${u.id}`} className="text-emerald-400 hover:text-emerald-300 text-[11px] ml-auto">Profile →</Link>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function DuplicateDestCard({ rows }: { rows: DuplicateDestination[] }) {
+  return (
+    <div className="border border-zinc-800 rounded-md bg-zinc-900/40 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-zinc-800 flex items-baseline gap-3">
+        <h2 className="text-[13px] font-medium text-zinc-100">Duplicate payment destinations</h2>
+        <span className="text-[10.5px] uppercase tracking-wide text-zinc-500">{rows.length}</span>
+        <span className="text-[11.5px] text-zinc-500 ml-auto">Same UPI, PayPal, or Crypto address on multiple Discord IDs.</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-5 text-[12.5px] text-zinc-500 italic">No workers tripping this signal.</p>
+      ) : (
+        <ul className="divide-y divide-zinc-800">
+          {rows.map((r) => (
+            <li key={r.destination} className="px-4 py-3">
+              <div className="flex items-baseline gap-3 mb-1.5">
+                <span className="text-[13px] text-zinc-100 font-mono">{r.destination}</span>
+                <span className="text-[11px] text-zinc-500">used by {r.userCount} accounts</span>
               </div>
               <ul className="text-[12px] space-y-1 ml-2">
                 {r.users.map((u) => (

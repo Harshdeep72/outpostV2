@@ -4,7 +4,7 @@ import {
 } from "discord.js";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { users } from "@workspace/db";
+import { users, serverConfig } from "@workspace/db";
 import { getUserByDiscordId } from "../db.js";
 import { walletStatsCache, invalidateUser } from "../cache.js";
 import { makeEmbed, formatMoney, nextPayoutDate, trustBadge, getISOWeekStart, smokyFooterText } from "../util.js";
@@ -12,6 +12,71 @@ import { COLORS } from "../constants.js";
 import { getUserStreak } from "../streak.js";
 import { renderWalletCard } from "../card-renderer.js";
 import { logger } from "../../lib/logger.js";
+import { setupGuild } from "../setup.js";
+
+async function checkDuplicateDestination(
+  interaction: ChatInputCommandInteraction,
+  destinationValue: string,
+  methodName: string,
+  userDiscordId: string
+): Promise<boolean> {
+  const normDest = destinationValue.toLowerCase();
+
+  const rows = await db.select({ 
+    discordId: users.discordId, 
+    discordUsername: users.discordUsername, 
+    upiId: users.upiId, 
+    paypalEmail: users.paypalEmail, 
+    cryptoWallets: users.cryptoWallets 
+  })
+    .from(users)
+    .where(sql`discord_id != ${userDiscordId} AND (
+      LOWER(upi_id) = ${normDest} OR 
+      LOWER(paypal_email) = ${normDest} OR 
+      LOWER(crypto_wallets::text) LIKE ${"%" + normDest + "%"}
+    )`);
+  
+  let duplicateFound = false;
+  let duplicateUsers: string[] = [];
+  
+  for (const row of rows) {
+    let match = false;
+    if (row.upiId?.toLowerCase() === normDest) match = true;
+    if (row.paypalEmail?.toLowerCase() === normDest) match = true;
+    const cw = row.cryptoWallets as Record<string, unknown> | null;
+    if (cw) {
+      for (const val of Object.values(cw)) {
+        if (typeof val === "string" && val.toLowerCase() === normDest) match = true;
+        if (typeof val === "object" && val !== null && (val as any).address?.toLowerCase() === normDest) match = true;
+      }
+    }
+    if (match) {
+      duplicateFound = true;
+      duplicateUsers.push(`<@${row.discordId}>`);
+    }
+  }
+
+  if (duplicateFound) {
+    await interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ The destination \`${destinationValue}\` is already linked to another account.\n\nSharing payment destinations is a violation of our terms.`)],
+    });
+
+    if (interaction.guild) {
+      const { taskLogsChannel, adminRole } = await setupGuild(interaction.guild);
+      await taskLogsChannel.send({
+        content: adminRole ? `<@&${adminRole.id}>` : "",
+        embeds: [
+          makeEmbed(COLORS.DANGER)
+            .setTitle("🚨 Fraud Alert: Duplicate Wallet Setup")
+            .setDescription(`User <@${userDiscordId}> attempted to link **${methodName}** \`${destinationValue}\`.\n\nThis exact destination is already linked to: ${duplicateUsers.join(", ")}`)
+        ],
+      });
+    }
+    return true;
+  }
+  
+  return false;
+}
 
 export async function handleWalletCommand(interaction: ChatInputCommandInteraction) {
   // Public — visible to everyone in the channel.
@@ -126,6 +191,9 @@ export async function handleSetPaypal(interaction: ChatInputCommandInteraction) 
     });
   }
 
+  const duplicateFound = await checkDuplicateDestination(interaction, email, "PayPal email", interaction.user.id);
+  if (duplicateFound) return;
+
   await db.update(users).set({ paypalEmail: email }).where(eq(users.discordId, interaction.user.id));
   invalidateUser(interaction.user.id);
 
@@ -157,6 +225,9 @@ export async function handleSetupI(interaction: ChatInputCommandInteraction) {
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
     });
   }
+
+  const duplicateFound = await checkDuplicateDestination(interaction, upiId, "UPI ID", interaction.user.id);
+  if (duplicateFound) return;
 
   await db.update(users).set({ upiId }).where(eq(users.discordId, interaction.user.id));
   invalidateUser(interaction.user.id);
@@ -255,6 +326,9 @@ export async function handleSetWallet(interaction: ChatInputCommandInteraction) 
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
     });
   }
+
+  const duplicateFound = await checkDuplicateDestination(interaction, address, isBinance ? "Binance Pay ID" : coin + " wallet", interaction.user.id);
+  if (duplicateFound) return;
 
   // Storage shape: { address, network } object per coin. Backward-compat with
   // older string entries (from before this option existed) is handled by

@@ -1047,6 +1047,7 @@ export async function handleRequeueCommand(interaction: ChatInputCommandInteract
     AND (
       review_reason ILIKE '%hold-end liveness check%'
       OR review_reason ILIKE '%Post is in r/%'
+      OR review_reason ILIKE '%Reddit API unreachable%'
     )
     RETURNING id
   `);

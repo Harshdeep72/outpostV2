@@ -47,6 +47,7 @@ interface PendingRow extends Record<string, unknown> {
   user_reddit_username: string | null;
   /** Task type (comment / post / upvote / etc.) — passed to validateRedditProof. */
   task_type: string;
+  submitted_at: Date | string;
 }
 
 function isRedditUrl(url: string): boolean {
@@ -91,13 +92,59 @@ function fmtMoney(n: string | number): string {
 }
 
 async function autoAccept(client: Client, row: PendingRow): Promise<boolean> {
+  const now = new Date();
+  
   // Enforce 10-minute minimum hold so the early liveness check always fires
   // before the pending processor can release funds.
   const MIN_HOLD_MS = 10 * 60 * 1000;
+  const originalSubmittedAt = new Date(row.submitted_at);
   const availableAt = new Date(Math.max(
-    Date.now() + row.pending_delay_hours * 60 * 60 * 1000,
+    originalSubmittedAt.getTime() + row.pending_delay_hours * 60 * 60 * 1000,
     Date.now() + MIN_HOLD_MS
   ));
+
+  if (availableAt > now) {
+    const cas = await db.execute<{ id: number }>(
+      sql`UPDATE submissions SET
+              review_status = 'pending_hold',
+              reviewer_discord_id = ${AUTO_REVIEWER_SENTINEL},
+              review_reason = 'Auto-validated by 24h sweeper — returning to hold queue',
+              reviewed_at = NOW(),
+              available_at = ${availableAt},
+              live_status = 'live',
+              last_checked_at = NOW(),
+              live_status_changed_at = NOW()
+            WHERE id = ${parseInt(row.id)} AND review_status = 'pending'
+            RETURNING id`,
+    );
+    if (cas.rows.length === 0) {
+      logger.info({ subId: row.id }, "pending-sweeper: row already reviewed, skipping hold restore");
+      return false;
+    }
+
+    const unixAvail = Math.floor(availableAt.getTime() / 1000);
+    await editLogMessage(client, row.log_message_id, (e) =>
+      e.setColor(0x57f287).setFooter({
+        text: `Auto-validated by bot (24h re-check) — returned to hold queue. Available <t:${unixAvail}:R>.`,
+      }),
+    );
+    await dmUser(
+      client,
+      row.discord_id,
+      new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle("🛡️ Task Auto-Validated (Hold Resumed)")
+        .setDescription(
+          `Your submission for **${row.task_title}** was re-checked after 24h and is live on Reddit.\n\n` +
+          `Because it still has time remaining in its standard hold period, it has been moved back to the **Hold** queue. ` +
+          `It will clear automatically <t:${unixAvail}:R> as long as it remains live.`,
+        ),
+    );
+
+    try { logSubmissionEvent(parseInt(row.id), "pending_hold"); } catch { /* swallowed */ }
+    return true;
+  }
+
   // Atomic CAS — admin clicking Accept/Reject in Discord at the same instant
   // must win-or-lose cleanly without double-payout. WHERE review_status='pending'
   // gate ensures only one writer succeeds.
@@ -263,7 +310,8 @@ async function tick(client: Client, batchSize = BATCH_SIZE, delayMs = 500) {
                  t.created_at                        AS task_created_at,
                  t.type                              AS task_type,
                  u.workspace_channel_id              AS workspace_channel_id,
-                 u.reddit_username                   AS user_reddit_username
+                 u.reddit_username                   AS user_reddit_username,
+                 s.submitted_at                      AS submitted_at
             FROM submissions s
             JOIN tasks t ON t.id = s.task_id
             LEFT JOIN users u ON u.id = s.user_id
@@ -423,7 +471,8 @@ export async function runPendingSlowSweepNow(forceBacklog = false): Promise<{
                  t.created_at                        AS task_created_at,
                  t.type                              AS task_type,
                  u.workspace_channel_id              AS workspace_channel_id,
-                 u.reddit_username                   AS user_reddit_username
+                 u.reddit_username                   AS user_reddit_username,
+                 s.submitted_at                      AS submitted_at
             FROM submissions s
             JOIN tasks t ON t.id = s.task_id
             LEFT JOIN users u ON u.id = s.user_id

@@ -275,7 +275,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             LIMIT ${forceAggressive ? 50 : 20}`
       );
 
-      for (const row of holdRows.rows) {
+      await Promise.all(holdRows.rows.map(async (row) => {
         const subId = parseInt(row.id);
         const userId = parseInt(row.user_id);
 
@@ -289,7 +289,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
         );
         if (locked.rows.length === 0) {
           logger.debug({ subId }, "Hold processor: already processing, skipping");
-          continue;
+          return;
         }
 
         logger.info({ subId, proofLink: row.proof_link }, "Hold processor: re-checking Reddit liveness after hold period");
@@ -309,7 +309,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                  WHERE id = ${subId}`
           );
           void notifyManualReview(row, "Reddit API error during hold-end liveness check — could not determine comment status.");
-          continue;
+          return;
         }
 
         if (liveness.liveStatus === "live") {
@@ -318,7 +318,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             // Still in hold period. Aggressive check proved it's live, but not ready for payout.
             logger.info({ subId }, "Hold processor (aggressive): comment live but hold not yet expired — putting back to sleep");
             await db.execute(sql`UPDATE submissions SET review_status = 'pending_hold', last_checked_at = NOW() WHERE id = ${subId}`);
-            continue;
+            return;
           }
 
           // Comment is still live — pay out now.
@@ -335,7 +335,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                  WHERE id = ${subId} AND review_status = 'checking'
                  RETURNING id`
           );
-          if (accepted.rows.length === 0) continue;
+          if (accepted.rows.length === 0) return;
 
           await db.execute(
             sql`UPDATE users
@@ -398,7 +398,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                    WHERE id = ${subId} AND review_status = 'checking'`
             );
             void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check errored — cannot determine final status.`);
-            continue;
+            return;
           }
 
           if (confirmation.liveStatus === "live") {
@@ -406,7 +406,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             if (availableDate > now) {
               logger.info({ subId, firstDetected }, "Hold processor (aggressive): confirmation check says LIVE — false positive overridden, hold not yet expired — putting back to sleep");
               await db.execute(sql`UPDATE submissions SET review_status = 'pending_hold', last_checked_at = NOW() WHERE id = ${subId}`);
-              continue;
+              return;
             }
 
             // Confirmation says live — the first reading was a false positive
@@ -427,7 +427,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                    WHERE id = ${subId} AND review_status = 'checking'
                    RETURNING id`
             );
-            if (accepted.rows.length === 0) continue;
+            if (accepted.rows.length === 0) return;
 
             await db.execute(
               sql`UPDATE users
@@ -496,7 +496,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             holdProcessed++;
           }
         }
-      }
+      }));
 
       if (holdRows.rows.length > 0) {
         logger.info({ count: holdRows.rows.length }, "Hold processor: batch complete");

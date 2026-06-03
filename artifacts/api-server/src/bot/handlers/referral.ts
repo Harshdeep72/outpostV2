@@ -48,7 +48,7 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle("🔗 Your Referral Info")
     .setDescription(
-      `Share your referral code with friends!\n\nThey must:\n> 1. Join the server\n> 2. Run \`/referraluse ${code}\`\n> 3. Verify their Reddit account\n> 4. Complete at least **1 task**\n\nOnce all 4 steps are done, you earn **+$${REFERRAL_REWARD}** instantly to your available balance.`
+      `Share your referral code with friends!\n\nThey must:\n> 1. Join the server\n> 2. Verify their Reddit account\n> 3. Complete at least **1 task**\n\nOnce all 3 steps are done, you earn **+$${REFERRAL_REWARD}** instantly to your available balance.`
     )
     .addFields(
       { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
@@ -56,8 +56,7 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
       { name: "✅ Completed", value: String(stats.completed), inline: true },
       { name: "⏳ Pending", value: String(stats.pending), inline: true },
       { name: "💵 Referral Earnings", value: formatMoney(earnings), inline: true },
-    )
-    .setFooter({ text: "Friends use /referraluse <code> before verifying." });
+    );
 
   await interaction.editReply({ embeds: [embed] });
 }

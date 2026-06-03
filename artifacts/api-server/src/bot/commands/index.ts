@@ -386,6 +386,10 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setName("forcepayout")
     .setDescription("Manually trigger the weekly bulk payout process (admin only)");
 
+  const requeue = new SlashCommandBuilder()
+    .setName("requeue")
+    .setDescription("Bulk move inconclusive hold-end submissions back to pending_hold (admin only)");
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -393,7 +397,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, approvesubmission, reopenslot, mystatus, processholds, forcepayout,
+    checksubmission, approvesubmission, reopenslot, mystatus, processholds, forcepayout, requeue,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

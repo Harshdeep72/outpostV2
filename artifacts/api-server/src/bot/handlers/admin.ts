@@ -1028,3 +1028,42 @@ export async function handleForcePayout(interaction: ChatInputCommandInteraction
     ]
   });
 }
+
+export async function handleRequeueCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins can run this command.")] });
+  }
+
+  const res = await db.execute(sql`
+    UPDATE submissions
+    SET review_status = 'pending_hold',
+        last_checked_at = NOW(),
+        review_reason = NULL
+    WHERE review_status = 'pending'
+    AND review_reason ILIKE '%hold-end liveness check%'
+    RETURNING id
+  `);
+  
+  // Drizzle with postgres.js returns an array of returned rows directly
+  const count = Array.isArray(res) ? res.length : ((res as any).rowCount || 0);
+
+  if (count === 0) {
+    await interaction.editReply({
+      content: "✅ No inconclusive hold-end submissions found — queue is clean"
+    });
+  } else {
+    await interaction.editReply({
+      content: `✅ Requeued ${count} submissions back to pending_hold for automatic retry`
+    });
+
+    const { taskLogsChannel } = await setupGuild(guild);
+    if (taskLogsChannel) {
+      await taskLogsChannel.send({
+        content: `🔄 /requeue triggered by <@${interaction.user.id}> — ${count} submissions moved back to pending_hold`
+      });
+    }
+  }
+}

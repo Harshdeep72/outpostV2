@@ -41,16 +41,19 @@ async function exportToGoogleSheet(title: string, data: Record<string, any>[]) {
 
   try {
     toast({ title: "Creating Google Sheet..." });
+    console.log("[GoogleSheets Frontend] Requesting /admin/bulk-check-to-sheet...");
     const res = await post("/admin/bulk-check-to-sheet", { title, headers, rows }) as any;
+    console.log("[GoogleSheets Frontend] Response:", res);
     if (res.error) throw new Error(res.error);
+    if (!res.url) throw new Error("Server returned 200 but no URL was found.");
+    
     toast({
-      title: "Sheet Created",
-      description: (
-        <a href={res.url} target="_blank" rel="noreferrer" className="underline text-blue-500">
-          Open Google Sheet
-        </a>
-      )
+      title: "Sheet Created Successfully",
+      description: `URL: ${res.url}`
     });
+    
+    // Automatically open the sheet in a new tab
+    window.open(res.url, "_blank");
   } catch (err: any) {
     toast({ title: "Failed to create sheet", description: err.message, variant: "destructive" });
   }

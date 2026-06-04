@@ -3592,6 +3592,7 @@ router.post("/bulk-check-to-sheet", requireAuth, async (req, res) => {
     }
     const gs = await import("../lib/googleSheets.js");
     const result = await gs.createBulkCheckSheet(title, headers, rows);
+    console.log(`[GoogleSheets Debug] Created Sheet - URL: ${result.url}, Rows: ${rows.length}`);
     res.json({ url: result.url });
   } catch (err: any) {
     logger.error({ err }, "bulk-check-to-sheet failed");

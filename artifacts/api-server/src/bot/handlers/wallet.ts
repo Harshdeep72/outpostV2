@@ -190,6 +190,11 @@ export async function handleSetPaypal(interaction: ChatInputCommandInteraction) 
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
     });
   }
+  if (user.paypalEmail) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You have already set a PayPal email. To change it, please contact an admin.")],
+    });
+  }
 
   const duplicateFound = await checkDuplicateDestination(interaction, email, "PayPal email", interaction.user.id);
   if (duplicateFound) return;
@@ -223,6 +228,11 @@ export async function handleSetupI(interaction: ChatInputCommandInteraction) {
   if (user.flagged) {
     return interaction.editReply({
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
+    });
+  }
+  if (user.upiId) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You have already set a UPI ID. To change it, please contact an admin.")],
     });
   }
 
@@ -326,6 +336,13 @@ export async function handleSetWallet(interaction: ChatInputCommandInteraction) 
       embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
     });
   }
+  
+  const existing = (user.cryptoWallets as Record<string, unknown>) ?? {};
+  if (existing[coin]) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ You have already set a **${coin}** wallet. To change it, please contact an admin.`)],
+    });
+  }
 
   const duplicateFound = await checkDuplicateDestination(interaction, address, isBinance ? "Binance Pay ID" : coin + " wallet", interaction.user.id);
   if (duplicateFound) return;
@@ -334,7 +351,6 @@ export async function handleSetWallet(interaction: ChatInputCommandInteraction) 
   // older string entries (from before this option existed) is handled by
   // every reader — they accept either shape. Binance Pay has no network so
   // we still store a plain string to avoid spurious "network:null" noise.
-  const existing = (user.cryptoWallets as Record<string, unknown>) ?? {};
   const newEntry: unknown = isBinance ? address : { address, network };
   const updated = { ...existing, [coin]: newEntry };
 

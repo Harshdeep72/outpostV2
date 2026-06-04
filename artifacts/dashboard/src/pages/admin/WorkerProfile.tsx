@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
-import { get, post, del } from "@/lib/api";
+import { get, post, del, patch } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { formatCurrency, timeAgo, statusColor, cn } from "@/lib/utils";
 
@@ -19,6 +19,9 @@ interface ProfileUser {
   isMod: boolean;
   isAdmin: boolean;
   createdAt: string;
+  upiId: string | null;
+  paypalEmail: string | null;
+  cryptoWallets: Record<string, any> | null;
 }
 interface Stats {
   accepted: number; rejected: number; pending: number; total: number;
@@ -142,6 +145,8 @@ export default function WorkerProfile() {
   if (!profile.data) return null;
 
   const { user, stats, recentSubmissions, recentClaims, withdrawals, rejectionReasons, taskBlocks } = profile.data;
+
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
 
   return (
     <div className="p-5 sm:p-7 space-y-5 max-w-6xl">
@@ -324,6 +329,42 @@ export default function WorkerProfile() {
           )}
         </Card>
 
+        {/* ── Payment Methods ────────────────────────────────────────── */}
+        <Card title="Payment Methods">
+          <div className="p-4 space-y-3 text-[12.5px]">
+            <div className="flex justify-between items-start border-b border-zinc-800 pb-2">
+              <span className="text-zinc-500">PayPal</span>
+              <span className="text-zinc-200">{user.paypalEmail || "—"}</span>
+            </div>
+            <div className="flex justify-between items-start border-b border-zinc-800 pb-2">
+              <span className="text-zinc-500">UPI ID</span>
+              <span className="text-zinc-200">{user.upiId || "—"}</span>
+            </div>
+            <div className="flex justify-between items-start pb-1">
+              <span className="text-zinc-500">Crypto</span>
+              <div className="text-right">
+                {user.cryptoWallets && Object.keys(user.cryptoWallets).length > 0 ? (
+                  <pre className="text-[10px] text-zinc-300 bg-zinc-950 p-2 rounded border border-zinc-800">
+                    {JSON.stringify(user.cryptoWallets, null, 2)}
+                  </pre>
+                ) : (
+                  <span className="text-zinc-500">—</span>
+                )}
+              </div>
+            </div>
+            {isAdmin && (
+              <div className="pt-2">
+                <button
+                  onClick={() => setShowPaymentDialog(true)}
+                  className="w-full py-1.5 rounded text-[11px] font-medium border border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition"
+                >
+                  Edit Payments
+                </button>
+              </div>
+            )}
+          </div>
+        </Card>
+
         {taskBlocks.length > 0 && (
           <Card title="Re-claim blocks">
             <Table rows={taskBlocks.map((b) => ({
@@ -380,6 +421,118 @@ export default function WorkerProfile() {
             }
           </div>
         </Card>
+      </div>
+
+      <EditPaymentDialog
+        user={user}
+        open={showPaymentDialog}
+        onOpenChange={setShowPaymentDialog}
+        onSaved={() => qc.invalidateQueries({ queryKey: ["worker-profile", id] })}
+      />
+    </div>
+  );
+}
+
+function EditPaymentDialog({
+  user,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  user: ProfileUser;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [paypalEmail, setPaypalEmail] = useState(user.paypalEmail ?? "");
+  const [upiId, setUpiId] = useState(user.upiId ?? "");
+  const [cryptoJson, setCryptoJson] = useState(() => JSON.stringify(user.cryptoWallets ?? {}, null, 2));
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      let parsedCrypto: Record<string, any> | null = null;
+      if (cryptoJson.trim()) {
+        try {
+          parsedCrypto = JSON.parse(cryptoJson);
+        } catch (e: any) {
+          throw new Error("Invalid JSON in Crypto Wallets field.");
+        }
+      }
+      return patch(`/admin/users/${user.id}`, {
+        paypalEmail: paypalEmail.trim() || null,
+        upiId: upiId.trim() || null,
+        cryptoWallets: parsedCrypto,
+      });
+    },
+    onSuccess: () => {
+      onSaved();
+      onOpenChange(false);
+    },
+    onError: (err: Error) => {
+      setErrorMsg(err.message);
+    },
+  });
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
+          <h2 className="font-semibold text-zinc-100">Edit Payment Methods</h2>
+          <button onClick={() => onOpenChange(false)} className="text-zinc-500 hover:text-zinc-300">✕</button>
+        </div>
+        <div className="p-5 overflow-y-auto flex-1 space-y-4 text-sm">
+          {errorMsg && <div className="text-red-400 text-xs">{errorMsg}</div>}
+          
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-400 font-medium uppercase tracking-wide">PayPal Email</label>
+            <input
+              type="email"
+              value={paypalEmail}
+              onChange={(e) => setPaypalEmail(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:border-zinc-500"
+              placeholder="e.g. email@domain.com"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-400 font-medium uppercase tracking-wide">UPI ID</label>
+            <input
+              type="text"
+              value={upiId}
+              onChange={(e) => setUpiId(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:border-zinc-500"
+              placeholder="e.g. username@bank"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-zinc-400 font-medium uppercase tracking-wide">Crypto Wallets (JSON)</label>
+            <textarea
+              value={cryptoJson}
+              onChange={(e) => setCryptoJson(e.target.value)}
+              rows={6}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-zinc-500"
+            />
+          </div>
+        </div>
+        <div className="px-5 py-4 border-t border-zinc-800 bg-zinc-900/50 flex justify-end gap-2">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="px-4 py-2 rounded text-zinc-300 hover:bg-zinc-800 transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { setErrorMsg(null); save.mutate(); }}
+            disabled={save.isPending}
+            className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50"
+          >
+            {save.isPending ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
       </div>
     </div>
   );

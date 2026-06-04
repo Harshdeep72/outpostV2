@@ -915,16 +915,22 @@ router.post("/users/:id/adjust-balance", requireAdminRole, async (req, res) => {
 
 router.patch("/users/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { flagged, isMod, trustScore } = req.body as {
+  const { flagged, isMod, trustScore, paypalEmail, upiId, cryptoWallets } = req.body as {
     flagged?: boolean;
     isMod?: boolean;
     trustScore?: number;
+    paypalEmail?: string | null;
+    upiId?: string | null;
+    cryptoWallets?: Record<string, any>;
   };
   try {
     const updates: Partial<typeof users.$inferInsert> = {};
     if (flagged !== undefined) updates.flagged = flagged;
     if (isMod !== undefined) updates.isMod = isMod;
     if (trustScore !== undefined) updates.trustScore = trustScore;
+    if (paypalEmail !== undefined) updates.paypalEmail = paypalEmail;
+    if (upiId !== undefined) updates.upiId = upiId;
+    if (cryptoWallets !== undefined) updates.cryptoWallets = cryptoWallets;
 
     const [updated] = await db
       .update(users)
@@ -2138,7 +2144,7 @@ router.get("/campaigns/:id/export.csv", requireAuth, async (req, res) => {
 
     const csv = csvRows(
       ["Task ID", "Title", "Type", "Reward", "Reddit Link", "Status", "Slots Filled", "Max Slots", "Submissions Total", "Approved", "Rejected", "Pending", "Created At", "Closes At"],
-      taskRows.rows.map((r) => [
+      taskRows.rows.map((r: any) => [
         r.task_id, r.title, r.type, r.reward, r.reddit_link, r.status,
         r.slots_filled, r.max_slots,
         r.subs_total, r.subs_accepted, r.subs_rejected, r.subs_pending,
@@ -2204,7 +2210,7 @@ router.get("/tasks/:id/export.csv", requireAuth, async (req, res) => {
     );
     const submissionsCsv = csvRows(
       ["Submission ID", "Discord ID", "Discord Username", "Reddit Username", "Proof Link", "Reward", "Review Status", "Review Reason", "Submitted At", "Reviewed At", "Live Status", "Removal Reason"],
-      subRows.rows.map((r) => [
+      subRows.rows.map((r: any) => [
         r.submission_id, r.discord_id, r.discord_username ?? "", r.reddit_username ?? "",
         r.proof_link, r.reward, r.review_status, r.review_reason ?? "",
         r.submitted_at, r.reviewed_at ?? "", r.live_status ?? "", r.removal_reason ?? "",
@@ -2417,12 +2423,18 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     ok: boolean;
     liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
     author: string | null;
+    authorStatus: "active" | "suspended" | "deleted" | "shadowbanned" | "unknown" | null;
+    authorKarma: number | null;
+    authorAgeDays: number | null;
     subreddit: string | null;
     title: string | null;
     createdAt: string | null;
     removalReason: string | null;
     removalBy: string | null;
     error: string | null;
+    score: number | null;
+    depth: number | null;
+    bodyPreview: string | null;
   };
 
   const REMOVAL_BY_LABEL: Record<string, string> = {
@@ -2437,11 +2449,12 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
   async function checkOne(rawUrl: string): Promise<Row> {
     const base: Row = {
       url: rawUrl, ok: false, liveStatus: "error",
-      author: null, subreddit: null, title: null, createdAt: null,
+      author: null, authorStatus: null, authorKarma: null, authorAgeDays: null,
+      subreddit: null, title: null, createdAt: null,
       removalReason: null, removalBy: null, error: null,
+      score: null, depth: null, bodyPreview: null,
     };
     try {
-      // Resolve share links (reddit.com/r/sub/s/XXXX) before parsing.
       let url = rawUrl;
       const appKind = detectAppUrl(rawUrl);
       if (appKind === "share_link_resolvable") {
@@ -2449,45 +2462,64 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
         if (resolved) url = resolved;
       }
 
-      // ── Early exit: post URL with no comment ID ───────────────────────────
-      // If the URL points to a post but has no specific comment ID, we cannot
-      // verify any comment. Return "no_comment" immediately so it is clearly
-      // flagged rather than silently reported as "live" (the post being live
-      // tells us nothing about whether a comment exists or was removed).
       const parsed = parseRedditProofUrl(url);
       if (parsed && !parsed.commentId) {
         return {
-          ...base,
-          url,
-          liveStatus: "no_comment",
-          error: "Post URL — no comment ID. A valid comment proof URL should contain the comment ID, e.g. reddit.com/r/sub/comments/POST_ID/title/COMMENT_ID/",
+          ...base, url, liveStatus: "no_comment",
+          error: "Post URL — no comment ID. A valid comment proof URL should contain the comment ID.",
         };
       }
 
-      const result = await recheckRedditLiveness(url);
+      const osintUrl = process.env.REDDIT_OSINT_URL;
+      if (!osintUrl) throw new Error("REDDIT_OSINT_URL not configured");
 
-      if (result.liveStatus === "unknown") {
-        return { ...base, url, liveStatus: "error", error: result.reason ?? result.statusLabel ?? "Reddit unreachable — could not determine status" };
+      const { fetch: undiciFetch } = await import("undici");
+      const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
+        headers: { "Accept": "application/json" }
+      });
+      const json = await res.json().catch(() => null) as any;
+
+      if (!res.ok) {
+        if (res.status === 404 || (json && json.message?.includes("not found"))) {
+          return { ...base, liveStatus: "not_found", error: "Not found (404)" };
+        }
+        return { ...base, liveStatus: "error", error: json?.message ?? "API Error" };
       }
 
-      const liveStatus: Row["liveStatus"] = result.liveStatus as Row["liveStatus"];
-      const isRemoved = result.liveStatus === "removed" || result.liveStatus === "deleted";
-      const removalReason = isRemoved ? (result.reason ?? null) : null;
-      const removalBy = isRemoved && result.detailedStatus
-        ? (REMOVAL_BY_LABEL[result.detailedStatus] ?? result.statusLabel ?? null)
-        : null;
+      const data = json?.data;
+      if (!data) return { ...base, liveStatus: "error", error: "No data from API" };
+
+      const liveStatus = data.liveness === "live" ? "live"
+        : data.liveness === "removed" ? "removed"
+        : data.liveness === "deleted" ? "deleted"
+        : data.liveness === "not_found" ? "not_found" : "error";
+
+      const isRemoved = liveStatus === "removed" || liveStatus === "deleted";
+      const removalReason = isRemoved ? (data.removal_reason ?? null) : null;
+      const removalBy = isRemoved ? (data.removal_type ?? null) : null;
+
+      let createdAtStr = null;
+      if (data.createdAt) {
+        createdAtStr = new Date(data.createdAt * 1000).toISOString();
+      }
 
       return {
         url,
         ok: true,
         liveStatus,
-        author: null,
-        subreddit: null,
+        author: data.author || null,
+        authorStatus: null,
+        authorKarma: null,
+        authorAgeDays: null,
+        subreddit: data.subreddit || null,
         title: null,
-        createdAt: null,
+        createdAt: createdAtStr,
         removalReason,
         removalBy,
         error: null,
+        score: typeof data.score === 'number' ? data.score : null,
+        depth: typeof data.depth === 'number' ? data.depth : null,
+        bodyPreview: data.body_snippet || null,
       };
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);
@@ -2517,6 +2549,40 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     errored: results.filter((r) => r.liveStatus === "error" || r.liveStatus === "not_found").length,
   };
 
+  // Populate author account details
+  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
+  if (uniqueAuthors.length > 0) {
+    const osintUrl = process.env.REDDIT_OSINT_URL;
+    if (osintUrl) {
+      const { fetch: undiciFetch } = await import("undici");
+      const authorDataMap = new Map<string, any>();
+      await Promise.all(uniqueAuthors.map(async (author) => {
+        try {
+          const res = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}`);
+          if (res.ok) {
+            const json = await res.json() as any;
+            if (json?.data) authorDataMap.set(author.toLowerCase(), json.data);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }));
+
+      for (const row of results) {
+        if (row.author) {
+          const ad = authorDataMap.get(row.author.toLowerCase());
+          if (ad) {
+            row.authorStatus = ad.status || null;
+            row.authorKarma = typeof ad.karma === 'number' ? ad.karma : null;
+            if (ad.createdAt) {
+              row.authorAgeDays = Math.floor((Date.now() - ad.createdAt * 1000) / (1000 * 60 * 60 * 24));
+            }
+          }
+        }
+      }
+    }
+  }
+
   res.json({ results, summary });
 });
 
@@ -2542,12 +2608,22 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
   type PostRow = {
     url: string;
     ok: boolean;
-    liveStatus: "live" | "removed" | "deleted" | "not_found" | "error";
+    liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "spam";
+    author: string | null;
+    authorStatus: "active" | "suspended" | "deleted" | "shadowbanned" | "unknown" | null;
+    authorKarma: number | null;
+    authorAgeDays: number | null;
     subreddit: string | null;
     postId: string | null;
+    createdAt: string | null;
     removalReason: string | null;
     removalBy: string | null;
     error: string | null;
+    score: number | null;
+    upvoteRatio: number | null;
+    numComments: number | null;
+    isLocked: boolean | null;
+    isArchived: boolean | null;
   };
 
   const REMOVAL_BY_LABEL: Record<string, string> = {
@@ -2561,8 +2637,10 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
   async function checkPost(rawUrl: string): Promise<PostRow> {
     const base: PostRow = {
       url: rawUrl, ok: false, liveStatus: "error",
-      subreddit: null, postId: null,
+      author: null, authorStatus: null, authorKarma: null, authorAgeDays: null,
+      subreddit: null, postId: null, createdAt: null,
       removalReason: null, removalBy: null, error: null,
+      score: null, upvoteRatio: null, numComments: null, isLocked: null, isArchived: null
     };
     try {
       let url = rawUrl;
@@ -2579,43 +2657,62 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
         return { ...base, error: "Not a valid Reddit post URL." };
       }
 
-      // If this is actually a comment URL, strip the comment part and check
-      // the post itself.
+      // If this is actually a comment URL, strip the comment part and check the post itself.
       const postUrl = `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/`;
 
-      const result = await recheckRedditLiveness(postUrl);
+      const osintUrl = process.env.REDDIT_OSINT_URL;
+      if (!osintUrl) throw new Error("REDDIT_OSINT_URL not configured");
 
-      if (result.liveStatus === "unknown") {
-        return {
-          ...base, url,
-          liveStatus: "error",
-          subreddit: parsed.subreddit,
-          postId: parsed.postId,
-          error: result.reason ?? result.statusLabel ?? "Reddit unreachable — could not determine status",
-        };
+      const { fetch: undiciFetch } = await import("undici");
+      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(postUrl)}`, {
+        headers: { "Accept": "application/json" }
+      });
+      const json = await res.json().catch(() => null) as any;
+
+      if (!res.ok) {
+        if (res.status === 404 || (json && json.message?.includes("not found"))) {
+          return { ...base, liveStatus: "not_found", subreddit: parsed.subreddit, postId: parsed.postId, error: "Not found (404)" };
+        }
+        return { ...base, liveStatus: "error", subreddit: parsed.subreddit, postId: parsed.postId, error: json?.message ?? "API Error" };
       }
 
-      const liveStatus: PostRow["liveStatus"] =
-        result.liveStatus === "live" ? "live"
-        : result.liveStatus === "removed" ? "removed"
-        : result.liveStatus === "deleted" ? "deleted"
-        : result.liveStatus === "not_found" ? "not_found"
-        : "error";
+      const data = json?.data;
+      if (!data) return { ...base, liveStatus: "error", subreddit: parsed.subreddit, postId: parsed.postId, error: "No data from API" };
 
-      const isRemoved = liveStatus === "removed" || liveStatus === "deleted";
-      const removalBy = isRemoved && result.detailedStatus
-        ? (REMOVAL_BY_LABEL[result.detailedStatus] ?? result.statusLabel ?? null)
-        : null;
+      const liveStatus = data.liveness === "live" ? "live"
+        : data.liveness === "removed" ? "removed"
+        : data.liveness === "deleted" ? "deleted"
+        : data.liveness === "spam" ? "spam"
+        : data.liveness === "not_found" ? "not_found" : "error";
+
+      const isRemoved = liveStatus === "removed" || liveStatus === "deleted" || liveStatus === "spam";
+      const removalReason = isRemoved ? (data.removal_reason ?? null) : null;
+      const removalBy = isRemoved ? (data.removal_type ?? null) : null;
+
+      let createdAtStr = null;
+      if (data.createdAt) {
+        createdAtStr = new Date(data.createdAt * 1000).toISOString();
+      }
 
       return {
         url,
         ok: true,
         liveStatus,
-        subreddit: parsed.subreddit,
+        author: data.author || null,
+        authorStatus: null,
+        authorKarma: null,
+        authorAgeDays: null,
+        subreddit: data.subreddit || parsed.subreddit,
         postId: parsed.postId,
-        removalReason: isRemoved ? (result.reason ?? null) : null,
+        createdAt: createdAtStr,
+        removalReason,
         removalBy,
         error: null,
+        score: typeof data.score === 'number' ? data.score : null,
+        upvoteRatio: typeof data.upvote_ratio === 'number' ? data.upvote_ratio : null,
+        numComments: typeof data.num_comments === 'number' ? data.num_comments : null,
+        isLocked: typeof data.locked === 'boolean' ? data.locked : null,
+        isArchived: typeof data.archived === 'boolean' ? data.archived : null,
       };
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);
@@ -2639,9 +2736,145 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
   const summary = {
     total: results.length,
     live: results.filter((r) => r.liveStatus === "live").length,
-    removed: results.filter((r) => r.liveStatus === "removed" || r.liveStatus === "deleted").length,
+    removed: results.filter((r) => r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "spam").length,
     notFound: results.filter((r) => r.liveStatus === "not_found").length,
     errored: results.filter((r) => r.liveStatus === "error").length,
+  };
+
+  // Populate author account details
+  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
+  if (uniqueAuthors.length > 0) {
+    const osintUrl = process.env.REDDIT_OSINT_URL;
+    if (osintUrl) {
+      const { fetch: undiciFetch } = await import("undici");
+      const authorDataMap = new Map<string, any>();
+      await Promise.all(uniqueAuthors.map(async (author) => {
+        try {
+          const res = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}`);
+          if (res.ok) {
+            const json = await res.json() as any;
+            if (json?.data) authorDataMap.set(author.toLowerCase(), json.data);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }));
+
+      for (const row of results) {
+        if (row.author) {
+          const ad = authorDataMap.get(row.author.toLowerCase());
+          if (ad) {
+            row.authorStatus = ad.status || null;
+            row.authorKarma = typeof ad.karma === 'number' ? ad.karma : null;
+            if (ad.createdAt) {
+              row.authorAgeDays = Math.floor((Date.now() - ad.createdAt * 1000) / (1000 * 60 * 60 * 24));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  res.json({ results, summary });
+});
+
+// ---------------------------------------------------------------------------
+// POST /admin/reddit-author-bulk-check
+// Bulk-checks whether Reddit accounts are active, suspended, shadowbanned etc.
+// ---------------------------------------------------------------------------
+router.post("/reddit-author-bulk-check", requireAuth, async (req, res) => {
+  const body = req.body as { usernames?: unknown };
+  const rawUsernames = Array.isArray(body?.usernames) ? body!.usernames : [];
+  const usernames = rawUsernames
+    .filter((u): u is string => typeof u === "string")
+    .map((u) => u.replace(/^u\//, "").trim())
+    .filter((u) => u.length > 0)
+    .slice(0, 100);
+
+  if (usernames.length === 0) {
+    res.status(400).json({ error: "Provide at least one username in `usernames` (max 100)." });
+    return;
+  }
+
+  type AuthorRow = {
+    username: string;
+    ok: boolean;
+    status: "active" | "suspended" | "deleted" | "shadowbanned" | "unknown" | "error";
+    karma: number | null;
+    createdAt: string | null;
+    ageDays: number | null;
+    hasActivity: boolean | null;
+    error: string | null;
+  };
+
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (!osintUrl) {
+    res.status(500).json({ error: "REDDIT_OSINT_URL not configured" });
+    return;
+  }
+  const { fetch: undiciFetch } = await import("undici");
+
+  const results: AuthorRow[] = new Array(usernames.length);
+  const CONCURRENCY = 5;
+  let cursor = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, usernames.length) }, async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= usernames.length) return;
+        const username = usernames[idx]!;
+        
+        const base: AuthorRow = {
+          username, ok: false, status: "error",
+          karma: null, createdAt: null, ageDays: null, hasActivity: null, error: null
+        };
+        
+        try {
+          const apiRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(username)}`);
+          if (!apiRes.ok) {
+            results[idx] = { ...base, error: `HTTP ${apiRes.status}` };
+            continue;
+          }
+          
+          const json = await apiRes.json() as any;
+          const data = json?.data;
+          if (!data) {
+            results[idx] = { ...base, error: "No data returned" };
+            continue;
+          }
+          
+          let createdAtStr = null;
+          let ageDays = null;
+          if (data.createdAt) {
+            createdAtStr = new Date(data.createdAt * 1000).toISOString();
+            ageDays = Math.floor((Date.now() - data.createdAt * 1000) / (1000 * 60 * 60 * 24));
+          }
+          
+          results[idx] = {
+            username,
+            ok: true,
+            status: data.status || "unknown",
+            karma: typeof data.karma === 'number' ? data.karma : null,
+            createdAt: createdAtStr,
+            ageDays,
+            hasActivity: typeof data.has_activity === 'boolean' ? data.has_activity : null,
+            error: null
+          };
+        } catch (err) {
+          results[idx] = { ...base, error: (err as Error)?.message || "Unknown error" };
+        }
+      }
+    }),
+  );
+
+  const summary = {
+    total: results.length,
+    active: results.filter(r => r.status === "active").length,
+    suspended: results.filter(r => r.status === "suspended").length,
+    shadowbanned: results.filter(r => r.status === "shadowbanned").length,
+    deleted: results.filter(r => r.status === "deleted").length,
+    errored: results.filter(r => r.status === "error").length,
   };
 
   res.json({ results, summary });

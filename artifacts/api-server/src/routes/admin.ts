@@ -2480,10 +2480,12 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
       const json = await res.json().catch(() => null) as any;
 
       if (!res.ok) {
-        if (res.status === 404 || (json && json.message?.includes("not found"))) {
-          return { ...base, liveStatus: "not_found", error: "Not found (404)" };
+        if (res.status === 404 || (json && (json.message?.includes("not found") || json.status === "not_found"))) {
+          const apiErr = json?.error || json?.message || "Not found (404)";
+          const extraInfo = json?.post_status ? ` (Post: ${json.post_status})` : "";
+          return { ...base, liveStatus: "not_found", error: apiErr + extraInfo };
         }
-        return { ...base, liveStatus: "error", error: json?.message ?? "API Error" };
+        return { ...base, liveStatus: "error", error: json?.error ?? json?.message ?? "API Error" };
       }
 
       const data = json?.data;
@@ -2670,10 +2672,12 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
       const json = await res.json().catch(() => null) as any;
 
       if (!res.ok) {
-        if (res.status === 404 || (json && json.message?.includes("not found"))) {
-          return { ...base, liveStatus: "not_found", subreddit: parsed.subreddit, postId: parsed.postId, error: "Not found (404)" };
+        if (res.status === 404 || (json && (json.message?.includes("not found") || json.status === "not_found"))) {
+          const apiErr = json?.error || json?.message || "Not found (404)";
+          const extraInfo = json?.post_status ? ` (Post: ${json.post_status})` : "";
+          return { ...base, liveStatus: "not_found", subreddit: parsed.subreddit, postId: parsed.postId, error: apiErr + extraInfo };
         }
-        return { ...base, liveStatus: "error", subreddit: parsed.subreddit, postId: parsed.postId, error: json?.message ?? "API Error" };
+        return { ...base, liveStatus: "error", subreddit: parsed.subreddit, postId: parsed.postId, error: json?.error ?? json?.message ?? "API Error" };
       }
 
       const data = json?.data;

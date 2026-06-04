@@ -236,6 +236,7 @@ const REMOVAL_BY_PILL: Record<string, string> = {
 // ── Comment Checker Panel ─────────────────────────────────────────────────────
 function CommentCheckerPanel() {
   const [text, setText] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -336,14 +337,20 @@ function CommentCheckerPanel() {
                 Export XLSX
               </button>
               <button
-                onClick={() => {
-                  const outData = getCommentCheckData(data.results);
-                  const dateStr = new Date().toISOString().split('T')[0];
-                  exportToGoogleSheet(`Bulk Check - Comments - ${dateStr}`, outData);
+                disabled={isExporting}
+                onClick={async () => {
+                  setIsExporting(true);
+                  try {
+                    const outData = getCommentCheckData(data.results);
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    await exportToGoogleSheet(`Bulk Check - Comments - ${dateStr}`, outData);
+                  } finally {
+                    setIsExporting(false);
+                  }
                 }}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Export to Google Sheet
+                {isExporting ? "Exporting..." : "Export to Google Sheet"}
               </button>
             </div>
           </div>
@@ -444,6 +451,7 @@ function CommentCheckerPanel() {
 // ── Post Existence Checker Panel ──────────────────────────────────────────────
 function PostCheckerPanel() {
   const [text, setText] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -546,14 +554,20 @@ function PostCheckerPanel() {
                 Export XLSX
               </button>
               <button
-                onClick={() => {
-                  const outData = getPostCheckData(data.results);
-                  const dateStr = new Date().toISOString().split('T')[0];
-                  exportToGoogleSheet(`Bulk Check - Posts - ${dateStr}`, outData);
+                disabled={isExporting}
+                onClick={async () => {
+                  setIsExporting(true);
+                  try {
+                    const outData = getPostCheckData(data.results);
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    await exportToGoogleSheet(`Bulk Check - Posts - ${dateStr}`, outData);
+                  } finally {
+                    setIsExporting(false);
+                  }
                 }}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Export to Google Sheet
+                {isExporting ? "Exporting..." : "Export to Google Sheet"}
               </button>
             </div>
           </div>
@@ -653,6 +667,7 @@ function PostCheckerPanel() {
 // ── Author Checker Panel ────────────────────────────────────────────────────────
 function AuthorCheckerPanel() {
   const [text, setText] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -749,14 +764,20 @@ function AuthorCheckerPanel() {
                 Export XLSX
               </button>
               <button
-                onClick={() => {
-                  const outData = getAuthorCheckData(data.results);
-                  const dateStr = new Date().toISOString().split('T')[0];
-                  exportToGoogleSheet(`Bulk Check - Authors - ${dateStr}`, outData);
+                disabled={isExporting}
+                onClick={async () => {
+                  setIsExporting(true);
+                  try {
+                    const outData = getAuthorCheckData(data.results);
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    await exportToGoogleSheet(`Bulk Check - Authors - ${dateStr}`, outData);
+                  } finally {
+                    setIsExporting(false);
+                  }
                 }}
-                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Export to Google Sheet
+                {isExporting ? "Exporting..." : "Export to Google Sheet"}
               </button>
             </div>
           </div>
@@ -828,6 +849,7 @@ function AuthorCheckerPanel() {
 // ── Fraud Checker Panel ───────────────────────────────────────────────────────
 function FraudCheckerPanel() {
   const [text, setText] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -934,14 +956,20 @@ function FraudCheckerPanel() {
                   Export XLSX
                 </button>
                 <button
-                  onClick={() => {
-                    const outData = getFraudPatternsData(suspiciousRows);
-                    const dateStr = new Date().toISOString().split('T')[0];
-                    exportToGoogleSheet(`Bulk Check - Fraud - ${dateStr}`, outData);
+                  disabled={isExporting}
+                  onClick={async () => {
+                    setIsExporting(true);
+                    try {
+                      const outData = getFraudPatternsData(suspiciousRows);
+                      const dateStr = new Date().toISOString().split('T')[0];
+                      await exportToGoogleSheet(`Bulk Check - Fraud - ${dateStr}`, outData);
+                    } finally {
+                      setIsExporting(false);
+                    }
                   }}
-                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Export to Google Sheet
+                  {isExporting ? "Exporting..." : "Export to Google Sheet"}
                 </button>
               </div>
             )}

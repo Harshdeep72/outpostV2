@@ -2574,7 +2574,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
         if (row.author) {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
-            console.log('Account API response:', JSON.stringify(ad));
+            console.log('Merging karma for author:', row.author, 'karma:', ad.total_karma);
             row.authorStatus = ad.status || null;
             row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
             if (ad.created_utc) {
@@ -2770,7 +2770,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
         if (row.author) {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
-            console.log('Account API response:', JSON.stringify(ad));
+            console.log('Merging karma for author:', row.author, 'karma:', ad.total_karma);
             row.authorStatus = ad.status || null;
             row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
             if (ad.created_utc) {

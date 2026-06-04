@@ -608,6 +608,201 @@ export async function createCampaignSheet(title: string): Promise<{ spreadsheetI
 }
 
 /**
+ * Creates a generic sheet for Bulk Checks with conditional coloring based on standard status text.
+ */
+export async function createBulkCheckSheet(title: string, headers: string[], rows: (string|number|boolean|null)[][]): Promise<{ url: string }> {
+  const resolved = await resolveAuth();
+  if (!resolved) throw new Error(lastParseError ?? "Google Sheets not configured");
+
+  const usingOAuth = resolved.kind === "oauth";
+  const sheets = google.sheets({ version: "v4", auth: resolved.client as any });
+  const drive = google.drive({ version: "v3", auth: resolved.client as any });
+
+  const parentFolderId = usingOAuth ? null : (process.env.SHEETS_PARENT_FOLDER_ID?.trim() || null);
+  let id: string;
+  let tabId: number = 0;
+
+  if (parentFolderId) {
+    const file = await drive.files.create({
+      requestBody: {
+        name: title,
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        parents: [parentFolderId],
+      },
+      fields: "id",
+      supportsAllDrives: true,
+    });
+    if (!file.data.id) throw new Error("Drive file creation returned no id");
+    id = file.data.id;
+
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: id });
+    const firstSheet = meta.data.sheets?.[0]?.properties;
+    tabId = firstSheet?.sheetId ?? 0;
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: id,
+      requestBody: {
+        requests: [{
+          updateSheetProperties: {
+            properties: {
+              sheetId: tabId,
+              title: "Export",
+              gridProperties: { frozenRowCount: 1 },
+            },
+            fields: "title,gridProperties.frozenRowCount",
+          },
+        }],
+      },
+    });
+  } else {
+    const created = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: { title },
+        sheets: [{
+          properties: {
+            title: "Export",
+            gridProperties: { frozenRowCount: 1 },
+          },
+        }],
+      },
+    });
+    if (!created.data.spreadsheetId) throw new Error("Sheet creation returned no spreadsheetId");
+    id = created.data.spreadsheetId;
+    tabId = created.data.sheets?.[0]?.properties?.sheetId ?? 0;
+  }
+
+  // Write headers + data
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: id,
+    range: "Export!A1",
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [headers, ...rows] },
+  });
+
+  const numCols = headers.length;
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: id,
+      requestBody: {
+        requests: [
+          // Bold header row
+          {
+            repeatCell: {
+              range: { sheetId: tabId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols },
+              cell: {
+                userEnteredFormat: {
+                  backgroundColor: { red: 0.85, green: 0.85, blue: 0.86 },
+                  textFormat: { bold: true, fontSize: 11 },
+                  verticalAlignment: "MIDDLE",
+                  horizontalAlignment: "CENTER",
+                  wrapStrategy: "WRAP",
+                },
+              },
+              fields: "userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment,wrapStrategy)",
+            },
+          },
+          // Auto-resize all columns
+          {
+            autoResizeDimensions: {
+              dimensions: { sheetId: tabId, dimension: "COLUMNS", startIndex: 0, endIndex: numCols }
+            }
+          },
+          // Conditional Formatting for Status
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Live" }] },
+                format: { backgroundColor: { red: 0.84, green: 0.95, blue: 0.84 } }
+              }
+          }, index: 0 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Active" }] },
+                format: { backgroundColor: { red: 0.84, green: 0.95, blue: 0.84 } }
+              }
+          }, index: 1 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Removed" }] },
+                format: { backgroundColor: { red: 0.98, green: 0.80, blue: 0.80 } }
+              }
+          }, index: 2 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Deleted" }] },
+                format: { backgroundColor: { red: 0.98, green: 0.80, blue: 0.80 } }
+              }
+          }, index: 3 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Not Found" }] },
+                format: { backgroundColor: { red: 1.0, green: 0.88, blue: 0.65 } }
+              }
+          }, index: 4 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Suspended" }] },
+                format: { backgroundColor: { red: 1.0, green: 0.88, blue: 0.65 } }
+              }
+          }, index: 5 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Shadowbanned" }] },
+                format: { backgroundColor: { red: 1.0, green: 0.88, blue: 0.65 } }
+              }
+          }, index: 6 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "Medium" }] },
+                format: { backgroundColor: { red: 1.0, green: 0.88, blue: 0.65 } }
+              }
+          }, index: 7 } },
+          { addConditionalFormatRule: { rule: {
+              ranges: [{ sheetId: tabId, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: numCols }],
+              booleanRule: {
+                condition: { type: "TEXT_CONTAINS", values: [{ userEnteredValue: "High" }] },
+                format: { backgroundColor: { red: 0.98, green: 0.80, blue: 0.80 } }
+              }
+          }, index: 8 } }
+        ]
+      }
+    });
+  } catch (err) {
+    logger.warn({ err }, "createBulkCheckSheet: formatting failed");
+  }
+
+  const ownerEmail = process.env.SHEETS_OWNER_EMAIL?.trim();
+  const publicEnabled = (process.env.SHEETS_PUBLIC_BY_DEFAULT ?? "true").toLowerCase() !== "false";
+  const publicRole = (process.env.SHEETS_PUBLIC_ROLE ?? "reader").toLowerCase() === "writer" ? "writer" : "reader";
+
+  if (ownerEmail) {
+    try {
+      await drive.permissions.create({
+        fileId: id,
+        sendNotificationEmail: false,
+        requestBody: { role: "writer", type: "user", emailAddress: ownerEmail },
+      });
+    } catch (err) {}
+  }
+  if (publicEnabled) {
+    try {
+      await drive.permissions.create({
+        fileId: id,
+        requestBody: { role: publicRole, type: "anyone" },
+      });
+    } catch (err) {}
+  }
+
+  return { url: `https://docs.google.com/spreadsheets/d/${id}/edit` };
+}
+
+/**
  * Append a single row to a sheet's "Submissions" tab. Returns true on
  * HTTP-OK, false on any failure. Never throws.
  *

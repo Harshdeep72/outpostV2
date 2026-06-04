@@ -3582,4 +3582,21 @@ router.delete("/claim-blocks/:taskId/:discordId", requireAdminRole, async (req, 
   }
 });
 
+// POST /admin/bulk-check-to-sheet
+router.post("/bulk-check-to-sheet", requireAuth, async (req, res) => {
+  try {
+    const { title, headers, rows } = req.body as any;
+    if (!title || !headers || !rows) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+    const gs = await import("../lib/googleSheets.js");
+    const result = await gs.createBulkCheckSheet(title, headers, rows);
+    res.json({ url: result.url });
+  } catch (err: any) {
+    logger.error({ err }, "bulk-check-to-sheet failed");
+    res.status(500).json({ error: err.message || "Failed to create Google Sheet" });
+  }
+});
+
 export default router;

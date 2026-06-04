@@ -1,23 +1,136 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { post } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
+
+import * as XLSX from "xlsx";
 
 // ── Shared Utilities ────────────────────────────────────────────────────────
-function exportToCsv(filename: string, rows: Record<string, any>[]) {
-  if (!rows || rows.length === 0) return;
-  const headers = Object.keys(rows[0]!);
-  const csvContent = [
-    headers.join(","),
-    ...rows.map(row => headers.map(h => `"${String(row[h] ?? "").replace(/"/g, '""')}"`).join(","))
-  ].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+function formatNumber(num: number | null | undefined): string {
+  if (num === null || num === undefined) return "";
+  return num.toLocaleString();
+}
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  return new Date(dateStr).toISOString().split('T')[0]!;
+}
+
+function formatStatus(status: string | null | undefined): string {
+  if (!status) return "";
+  const map: Record<string, string> = {
+    live: "Live", removed: "Removed", deleted: "Deleted", 
+    not_found: "Not Found", error: "Error", no_comment: "No comment URL", 
+    spam: "Spam", active: "Active", suspended: "Suspended", shadowbanned: "Shadowbanned"
+  };
+  return map[status] || status;
+}
+
+function exportToExcel(filename: string, sheetName: string, data: Record<string, any>[]) {
+  if (!data || data.length === 0) return;
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  XLSX.writeFile(workbook, filename);
+}
+
+async function exportToGoogleSheet(title: string, data: Record<string, any>[]) {
+  if (!data || data.length === 0) return;
+  const headers = Object.keys(data[0]!);
+  const rows = data.map(r => headers.map(h => r[h]));
+
+  try {
+    toast({ title: "Creating Google Sheet..." });
+    const res = await post("/admin/bulk-check-to-sheet", { title, headers, rows });
+    if (res.error) throw new Error(res.error);
+    toast({
+      title: "Sheet Created",
+      description: (
+        <a href={res.url} target="_blank" rel="noreferrer" className="underline text-blue-500">
+          Open Google Sheet
+        </a>
+      )
+    });
+  } catch (err: any) {
+    toast({ title: "Failed to create sheet", description: err.message, variant: "destructive" });
+  }
+}
+
+function getCommentCheckData(results: BulkCheckRow[]) {
+  return results.map(r => ({
+    "Status": formatStatus(r.liveStatus),
+    "URL": r.url || "",
+    "Author": r.author || "",
+    "Account Status": formatStatus(r.authorStatus),
+    "Total Karma": formatNumber(r.authorKarma),
+    "Account Age (Days)": formatNumber(r.authorAgeDays),
+    "Comment Score": formatNumber(r.score),
+    "Depth": formatNumber(r.depth),
+    "Time Posted": formatDate(r.createdAt),
+    "Removed By": r.removalBy || "",
+    "Body Preview": r.bodyPreview || "",
+    "Notes": [r.removalReason, r.error].filter(Boolean).join(" | ") || ""
+  }));
+}
+
+function getPostCheckData(results: PostCheckRow[]) {
+  return results.map(r => ({
+    "Status": formatStatus(r.liveStatus),
+    "Post URL": r.url || "",
+    "Author": r.author || "",
+    "Account Status": formatStatus(r.authorStatus),
+    "Total Karma": formatNumber(r.authorKarma),
+    "Account Age (Days)": formatNumber(r.authorAgeDays),
+    "Score": formatNumber(r.score),
+    "Upvote Ratio": formatNumber(r.upvoteRatio !== null ? r.upvoteRatio * 100 : null) + (r.upvoteRatio !== null ? "%" : ""),
+    "Comments Count": formatNumber(r.numComments),
+    "Removed By": r.removalBy || "",
+    "Subreddit": r.subreddit || "",
+    "Notes": [r.removalReason, r.error, r.isLocked ? "Locked" : "", r.isArchived ? "Archived" : ""].filter(Boolean).join(" | ") || ""
+  }));
+}
+
+function getAuthorCheckData(results: AuthorRow[]) {
+  return results.map(r => ({
+    "Username": r.username || "",
+    "Account Status": formatStatus(r.status),
+    "Total Karma": formatNumber(r.karma),
+    "Comment Karma": "",
+    "Link Karma": "",
+    "Account Age (Days)": formatNumber(r.ageDays),
+    "Created Date": formatDate(r.createdAt),
+    "Avatar URL": ""
+  }));
+}
+
+function getFraudPatternsData(results: (BulkCheckRow & { fraudFlags: string[] })[]) {
+  const authorGroups = new Map<string, typeof results>();
+  for (const r of results) {
+    if (r.author) {
+      if (!authorGroups.has(r.author)) authorGroups.set(r.author, []);
+      authorGroups.get(r.author)!.push(r);
+    }
+  }
+
+  return Array.from(authorGroups.values()).map(group => {
+    const first = group[0]!;
+    const allFlags = Array.from(new Set(group.flatMap(r => r.fraudFlags)));
+    
+    let riskLevel = "Low";
+    if (allFlags.length >= 3 || first.authorStatus === "suspended" || first.authorStatus === "shadowbanned") riskLevel = "High";
+    else if (allFlags.length >= 2 || group.length >= 3) riskLevel = "Medium";
+
+    return {
+      "Author": first.author || "",
+      "Risk Level": riskLevel,
+      "Account Status": formatStatus(first.authorStatus),
+      "Total Karma": formatNumber(first.authorKarma),
+      "Account Age (Days)": formatNumber(first.authorAgeDays),
+      "Duplicate Count": formatNumber(group.length),
+      "Flags": allFlags.join(", "),
+      "URLs involved": group.map(r => r.url).join(", ")
+    };
+  });
 }
 
 // ── Comment checker types ────────────────────────────────────────────────────
@@ -208,12 +321,28 @@ function CommentCheckerPanel() {
                 Errors: <strong>{data.summary.errored}</strong>
               </span>
             </div>
-            <button
-              onClick={() => exportToCsv("comment_check.csv", data.results)}
-              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
-            >
-              Export CSV
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const outData = getCommentCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToExcel(`outpost-comments-${dateStr}.xlsx`, "Comments", outData);
+                }}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+              >
+                Export XLSX
+              </button>
+              <button
+                onClick={() => {
+                  const outData = getCommentCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToGoogleSheet(`Bulk Check - Comments - ${dateStr}`, outData);
+                }}
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+              >
+                Export to Google Sheet
+              </button>
+            </div>
           </div>
 
           <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -402,12 +531,28 @@ function PostCheckerPanel() {
                 Errors: <strong>{data.summary.errored}</strong>
               </span>
             </div>
-            <button
-              onClick={() => exportToCsv("post_check.csv", data.results)}
-              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
-            >
-              Export CSV
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const outData = getPostCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToExcel(`outpost-posts-${dateStr}.xlsx`, "Posts", outData);
+                }}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+              >
+                Export XLSX
+              </button>
+              <button
+                onClick={() => {
+                  const outData = getPostCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToGoogleSheet(`Bulk Check - Posts - ${dateStr}`, outData);
+                }}
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+              >
+                Export to Google Sheet
+              </button>
+            </div>
           </div>
 
           <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -589,12 +734,28 @@ function AuthorCheckerPanel() {
                 </span>
               )}
             </div>
-            <button
-              onClick={() => exportToCsv("author_check.csv", data.results)}
-              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
-            >
-              Export CSV
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const outData = getAuthorCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToExcel(`outpost-authors-${dateStr}.xlsx`, "Authors", outData);
+                }}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+              >
+                Export XLSX
+              </button>
+              <button
+                onClick={() => {
+                  const outData = getAuthorCheckData(data.results);
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  exportToGoogleSheet(`Bulk Check - Authors - ${dateStr}`, outData);
+                }}
+                className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+              >
+                Export to Google Sheet
+              </button>
+            </div>
           </div>
 
           <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -757,6 +918,30 @@ function FraudCheckerPanel() {
                 Suspicious: <strong>{suspiciousRows.length}</strong>
               </span>
             </div>
+            {suspiciousRows.length > 0 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    const outData = getFraudPatternsData(suspiciousRows);
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    exportToExcel(`outpost-fraud-${dateStr}.xlsx`, "Fraud Patterns", outData);
+                  }}
+                  className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-muted/50"
+                >
+                  Export XLSX
+                </button>
+                <button
+                  onClick={() => {
+                    const outData = getFraudPatternsData(suspiciousRows);
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    exportToGoogleSheet(`Bulk Check - Fraud - ${dateStr}`, outData);
+                  }}
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500/20"
+                >
+                  Export to Google Sheet
+                </button>
+              </div>
+            )}
           </div>
 
           {suspiciousRows.length === 0 ? (

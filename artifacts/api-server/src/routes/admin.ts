@@ -2573,9 +2573,9 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
             row.authorStatus = ad.status || null;
-            row.authorKarma = typeof ad.karma === 'number' ? ad.karma : null;
-            if (ad.createdAt) {
-              row.authorAgeDays = Math.floor((Date.now() - ad.createdAt * 1000) / (1000 * 60 * 60 * 24));
+            row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
+            if (ad.created_utc) {
+              row.authorAgeDays = Math.floor((Date.now() - ad.created_utc * 1000) / (1000 * 60 * 60 * 24));
             }
           }
         }
@@ -2765,9 +2765,9 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
             row.authorStatus = ad.status || null;
-            row.authorKarma = typeof ad.karma === 'number' ? ad.karma : null;
-            if (ad.createdAt) {
-              row.authorAgeDays = Math.floor((Date.now() - ad.createdAt * 1000) / (1000 * 60 * 60 * 24));
+            row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
+            if (ad.created_utc) {
+              row.authorAgeDays = Math.floor((Date.now() - ad.created_utc * 1000) / (1000 * 60 * 60 * 24));
             }
           }
         }
@@ -2846,16 +2846,16 @@ router.post("/reddit-author-bulk-check", requireAuth, async (req, res) => {
           
           let createdAtStr = null;
           let ageDays = null;
-          if (data.createdAt) {
-            createdAtStr = new Date(data.createdAt * 1000).toISOString();
-            ageDays = Math.floor((Date.now() - data.createdAt * 1000) / (1000 * 60 * 60 * 24));
+          if (data.created_utc) {
+            createdAtStr = new Date(data.created_utc * 1000).toISOString();
+            ageDays = Math.floor((Date.now() - data.created_utc * 1000) / (1000 * 60 * 60 * 24));
           }
           
           results[idx] = {
             username,
             ok: true,
             status: data.status || "unknown",
-            karma: typeof data.karma === 'number' ? data.karma : null,
+            karma: typeof data.total_karma === 'number' ? data.total_karma : null,
             createdAt: createdAtStr,
             ageDays,
             hasActivity: typeof data.has_activity === 'boolean' ? data.has_activity : null,

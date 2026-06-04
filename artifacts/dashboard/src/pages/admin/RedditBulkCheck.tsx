@@ -256,11 +256,27 @@ function CommentCheckerPanel() {
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             {r.author ? <span className="font-mono text-xs">{r.author}</span> : <span className="text-muted-foreground text-xs">—</span>}
-                            {isSuspicious && <span className="w-2 h-2 rounded-full bg-yellow-500" title={r.authorStatus!} />}
+                            {isSuspicious && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 uppercase tracking-wider" title={r.authorStatus!}>
+                                ⚠️ {r.authorStatus}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {r.authorKarma !== null ? `${r.authorKarma}k / ${r.authorAgeDays}d` : "—"}
+                        <td className="px-3 py-2 text-xs">
+                          {r.authorKarma !== null && r.authorAgeDays !== null ? (
+                            <div className="flex items-center gap-1">
+                              <span className={r.authorKarma < 100 ? "text-yellow-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorKarma.toLocaleString()} karma
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className={r.authorAgeDays < 30 ? "text-red-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorAgeDays.toLocaleString()} days
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">
                           {r.score !== null ? `${r.score} pts / d${r.depth}` : "—"}
@@ -433,11 +449,27 @@ function PostCheckerPanel() {
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1.5">
                             {r.author ? <span className="font-mono text-xs">{r.author}</span> : <span className="text-muted-foreground text-xs">—</span>}
-                            {isSuspicious && <span className="w-2 h-2 rounded-full bg-yellow-500" title={r.authorStatus!} />}
+                            {isSuspicious && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 uppercase tracking-wider" title={r.authorStatus!}>
+                                ⚠️ {r.authorStatus}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {r.authorKarma !== null ? `${r.authorKarma}k / ${r.authorAgeDays}d` : "—"}
+                        <td className="px-3 py-2 text-xs">
+                          {r.authorKarma !== null && r.authorAgeDays !== null ? (
+                            <div className="flex items-center gap-1">
+                              <span className={r.authorKarma < 100 ? "text-yellow-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorKarma.toLocaleString()} karma
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className={r.authorAgeDays < 30 ? "text-red-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorAgeDays.toLocaleString()} days
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">
                           {r.score !== null ? `${r.score} (${Math.round((r.upvoteRatio || 0)*100)}%)` : "—"}
@@ -747,15 +779,34 @@ function FraudCheckerPanel() {
                     {suspiciousRows.map((r, i) => (
                       <tr key={i} className="border-t border-border/60 hover:bg-muted/20">
                         <td className="px-3 py-2">
-                          {r.author ? <span className="font-mono text-xs">{r.author}</span> : <span className="text-muted-foreground text-xs">—</span>}
+                          <div className="flex items-center gap-1.5">
+                            {r.author ? <span className="font-mono text-xs">{r.author}</span> : <span className="text-muted-foreground text-xs">—</span>}
+                            {(r.authorStatus === "suspended" || r.authorStatus === "shadowbanned") && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-500 uppercase tracking-wider" title={r.authorStatus!}>
+                                ⚠️ {r.authorStatus}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-2 max-w-[20ch] truncate">
                           <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-mono text-xs" title={r.url}>
                             {r.url.split("/").slice(-3).join("/")}
                           </a>
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">
-                          {r.authorKarma !== null ? `${r.authorKarma}k / ${r.authorAgeDays}d` : "—"}
+                        <td className="px-3 py-2 text-xs">
+                          {r.authorKarma !== null && r.authorAgeDays !== null ? (
+                            <div className="flex items-center gap-1">
+                              <span className={r.authorKarma < 100 ? "text-yellow-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorKarma.toLocaleString()} karma
+                              </span>
+                              <span className="text-muted-foreground">/</span>
+                              <span className={r.authorAgeDays < 30 ? "text-red-500 font-medium" : "text-muted-foreground"}>
+                                {r.authorAgeDays.toLocaleString()} days
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-xs font-medium text-amber-500 flex gap-2 flex-wrap">
                           {r.fraudFlags.map(f => (

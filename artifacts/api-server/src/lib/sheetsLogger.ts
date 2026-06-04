@@ -76,7 +76,8 @@ export type SubmissionEvent =
   | "flagged"
   | "paid"
   | "removed"
-  | "deleted_from_db";
+  | "deleted_from_db"
+  | "pending_hold";
 
 // ---------------------------------------------------------------------------
 // Config cache — "is ANY destination configured ANYWHERE?" in O(1).

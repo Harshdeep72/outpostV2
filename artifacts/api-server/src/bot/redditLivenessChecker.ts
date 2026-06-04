@@ -818,7 +818,7 @@ export function isBulkScanRunning(): boolean {
 // awaited (before backfill) at the call site for the admin create-sheet route.
 // ---------------------------------------------------------------------------
 
-interface SheetCheckRow {
+interface SheetCheckRow extends Record<string, unknown> {
   id: string;
   proof_link: string;
   task_link: string | null;

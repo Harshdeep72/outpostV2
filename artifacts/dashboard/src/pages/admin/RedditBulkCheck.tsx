@@ -41,7 +41,7 @@ async function exportToGoogleSheet(title: string, data: Record<string, any>[]) {
 
   try {
     toast({ title: "Creating Google Sheet..." });
-    const res = await post("/admin/bulk-check-to-sheet", { title, headers, rows });
+    const res = await post("/admin/bulk-check-to-sheet", { title, headers, rows }) as any;
     if (res.error) throw new Error(res.error);
     toast({
       title: "Sheet Created",

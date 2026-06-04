@@ -163,6 +163,5 @@ export function getAllCacheStats(): Record<string, ReturnType<TTLCache<any, any>
     referralStats: referralStatsCache.stats(),
     leaderboardSnapshot: leaderboardSnapshotCache.stats(),
     userExists: userExistsCache.stats(),
-    commentValidation: commentValidationCache.stats(),
   };
 }

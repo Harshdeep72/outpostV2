@@ -4,7 +4,7 @@ import { db } from "@workspace/db";
 import { makeEmbed, formatMoney } from "../util.js";
 import { COLORS } from "../constants.js";
 
-interface ActiveSubmissionRow {
+interface ActiveSubmissionRow extends Record<string, unknown> {
   id: string;
   task_id: string;
   task_title: string;

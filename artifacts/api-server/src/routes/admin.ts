@@ -2563,7 +2563,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
           const res = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}`);
           if (res.ok) {
             const json = await res.json() as any;
-            if (json?.data) authorDataMap.set(author.toLowerCase(), json.data);
+            if (json?.status) authorDataMap.set(author.toLowerCase(), json);
           }
         } catch (e) {
           // ignore
@@ -2574,6 +2574,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
         if (row.author) {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
+            console.log('Account API response:', JSON.stringify(ad));
             row.authorStatus = ad.status || null;
             row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
             if (ad.created_utc) {
@@ -2585,6 +2586,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     }
   }
 
+  console.log('Final merged result:', JSON.stringify(results[0] || {}));
   res.json({ results, summary });
 });
 
@@ -2757,7 +2759,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
           const res = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}`);
           if (res.ok) {
             const json = await res.json() as any;
-            if (json?.data) authorDataMap.set(author.toLowerCase(), json.data);
+            if (json?.status) authorDataMap.set(author.toLowerCase(), json);
           }
         } catch (e) {
           // ignore
@@ -2768,6 +2770,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
         if (row.author) {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
+            console.log('Account API response:', JSON.stringify(ad));
             row.authorStatus = ad.status || null;
             row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
             if (ad.created_utc) {
@@ -2779,6 +2782,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
     }
   }
 
+  console.log('Final merged result:', JSON.stringify(results[0] || {}));
   res.json({ results, summary });
 });
 
@@ -2842,8 +2846,8 @@ router.post("/reddit-author-bulk-check", requireAuth, async (req, res) => {
           }
           
           const json = await apiRes.json() as any;
-          const data = json?.data;
-          if (!data) {
+          const data = json;
+          if (!data || !data.status) {
             results[idx] = { ...base, error: "No data returned" };
             continue;
           }

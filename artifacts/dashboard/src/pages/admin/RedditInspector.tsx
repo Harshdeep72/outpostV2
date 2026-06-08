@@ -118,14 +118,16 @@ export default function RedditInspector() {
                   <div>
                     <div className="text-muted-foreground text-xs mb-1">Status</div>
                     <div className="flex items-center gap-1.5 font-medium">
-                      {data.target?.status === "live" ? (
-                        <span className="text-emerald-500 flex items-center gap-1"><CheckCircle2 className="h-4 w-4" /> Live</span>
+                      {data.target?.status === "live" || data.target?.status === "active" ? (
+                        <span className="text-emerald-500 flex items-center gap-1 capitalize"><CheckCircle2 className="h-4 w-4" /> {data.target?.status}</span>
                       ) : data.target?.status === "removed" ? (
                         <span className="text-red-400 flex items-center gap-1"><ShieldAlert className="h-4 w-4" /> Removed</span>
                       ) : data.target?.status === "deleted" ? (
                         <span className="text-zinc-400 flex items-center gap-1"><ShieldBan className="h-4 w-4" /> Deleted</span>
+                      ) : data.target?.status === "not_found" ? (
+                        <span className="text-amber-400 flex items-center gap-1"><ShieldBan className="h-4 w-4" /> Not Found / Deleted</span>
                       ) : (
-                        <span className="text-amber-400 flex items-center gap-1"><AlertCircle className="h-4 w-4" /> {data.target?.status || "Unknown"}</span>
+                        <span className="text-amber-400 flex items-center gap-1 capitalize"><AlertCircle className="h-4 w-4" /> {data.target?.status || "Unknown"}</span>
                       )}
                     </div>
                   </div>

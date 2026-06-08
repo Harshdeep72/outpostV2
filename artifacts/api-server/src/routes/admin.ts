@@ -2787,6 +2787,57 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /admin/reddit-inspector
+// Checks a single post or comment URL and fetches full author details
+// including last active timestamp.
+// ---------------------------------------------------------------------------
+router.post("/reddit-inspector", requireAuth, async (req, res) => {
+  const { url } = req.body as { url?: string };
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "Missing or invalid url" });
+  }
+
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (!osintUrl) {
+    return res.status(500).json({ error: "REDDIT_OSINT_URL not configured" });
+  }
+  const { fetch: undiciFetch } = await import("undici");
+
+  try {
+    const isComment = url.includes("/comment/") || url.includes("/comments/") && url.split("/comments/")[1].split("/").length >= 3;
+    const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
+    
+    const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(url)}`);
+    const targetJson = await targetRes.json() as any;
+    
+    let targetData = targetJson;
+    if (targetJson?.success && targetJson?.data) {
+       targetData = targetJson.data;
+    } else if (!targetRes.ok) {
+       if (!targetData) {
+         return res.status(targetRes.status).json({ error: `HTTP ${targetRes.status}` });
+       }
+    }
+    
+    let authorData = null;
+    const author = targetData?.author;
+    if (author && typeof author === "string" && author !== "[deleted]") {
+       const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
+       if (accRes.ok) {
+         authorData = await accRes.json();
+       } else if (accRes.status === 404) {
+         authorData = await accRes.json();
+       }
+    }
+    
+    return res.json({ target: targetData, author: authorData });
+  } catch (err: any) {
+    logger.error({ err }, "POST /admin/reddit-inspector failed");
+    return res.status(500).json({ error: err.message || "Failed to inspect url" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /admin/reddit-author-bulk-check
 // Bulk-checks whether Reddit accounts are active, suspended, shadowbanned etc.
 // ---------------------------------------------------------------------------

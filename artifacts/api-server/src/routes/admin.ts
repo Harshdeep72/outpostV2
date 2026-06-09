@@ -2792,9 +2792,16 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
 // including last active timestamp.
 // ---------------------------------------------------------------------------
 router.post("/reddit-inspector", requireAuth, async (req, res) => {
-  const { url } = req.body as { url?: string };
-  if (!url || typeof url !== "string") {
-    return res.status(400).json({ error: "Missing or invalid url" });
+  const body = req.body as { urls?: unknown };
+  const rawUrls = Array.isArray(body?.urls) ? body!.urls : [];
+  const urls = rawUrls
+    .filter((u): u is string => typeof u === "string")
+    .map((u) => u.trim())
+    .filter((u) => u.length > 0)
+    .slice(0, 100);
+
+  if (urls.length === 0) {
+    return res.status(400).json({ error: "Provide at least one URL in `urls` (max 100)." });
   }
 
   const osintUrl = process.env.REDDIT_OSINT_URL;
@@ -2803,38 +2810,66 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   }
   const { fetch: undiciFetch } = await import("undici");
 
-  try {
-    const isComment = url.includes("/comment/") || url.includes("/comments/") && url.split("/comments/")[1].split("/").length >= 3;
-    const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
-    
-    const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(url)}`);
-    const targetJson = await targetRes.json() as any;
-    
-    let targetData = targetJson;
-    if (targetJson?.success && targetJson?.data) {
-       targetData = targetJson.data;
-    } else if (!targetRes.ok) {
-       if (!targetData) {
-         return res.status(targetRes.status).json({ error: `HTTP ${targetRes.status}` });
-       }
-    }
-    
-    let authorData = null;
-    const author = targetData?.author;
-    if (author && typeof author === "string" && author !== "[deleted]") {
-       const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
-       if (accRes.ok) {
-         authorData = await accRes.json();
-       } else if (accRes.status === 404) {
-         authorData = await accRes.json();
-       }
-    }
-    
-    return res.json({ target: targetData, author: authorData });
-  } catch (err: any) {
-    logger.error({ err }, "POST /admin/reddit-inspector failed");
-    return res.status(500).json({ error: err.message || "Failed to inspect url" });
-  }
+  type InspectorRow = {
+    url: string;
+    type: "post" | "comment" | "unknown";
+    target: any | null;
+    author: any | null;
+    error: string | null;
+  };
+
+  const results: InspectorRow[] = new Array(urls.length);
+  const CONCURRENCY = 5;
+  let cursor = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, urls.length) }, async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= urls.length) return;
+        const url = urls[idx]!;
+
+        const base: InspectorRow = { url, type: "unknown", target: null, author: null, error: null };
+        
+        try {
+          const isComment = url.includes("/comment/") || url.includes("/comments/") && url.split("/comments/")[1].split("/").length >= 3;
+          base.type = isComment ? "comment" : "post";
+          const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
+          
+          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(url)}`);
+          const targetJson = await targetRes.json() as any;
+          
+          let targetData = targetJson;
+          if (targetJson?.success && targetJson?.data) {
+             targetData = targetJson.data;
+          } else if (!targetRes.ok) {
+             if (!targetData) {
+               results[idx] = { ...base, error: `HTTP ${targetRes.status}` };
+               continue;
+             }
+          }
+          base.target = targetData;
+          
+          let authorData = null;
+          const author = targetData?.author;
+          if (author && typeof author === "string" && author !== "[deleted]") {
+             const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
+             if (accRes.ok) {
+               authorData = await accRes.json();
+             } else if (accRes.status === 404) {
+               authorData = await accRes.json();
+             }
+          }
+          base.author = authorData;
+          results[idx] = base;
+        } catch (err: any) {
+          results[idx] = { ...base, error: err.message || "Failed to inspect url" };
+        }
+      }
+    })
+  );
+
+  return res.json({ results });
 });
 
 // ---------------------------------------------------------------------------

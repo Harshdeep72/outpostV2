@@ -2832,7 +2832,9 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
         const base: InspectorRow = { url, type: "unknown", target: null, author: null, error: null };
         
         try {
-          const isComment = url.includes("/comment/") || url.includes("/comments/") && url.split("/comments/")[1].split("/").length >= 3;
+          const cleanUrl = url.split("?")[0].replace(/\/$/, "");
+          const isComment = cleanUrl.includes("/comment/") || 
+                           (cleanUrl.includes("/comments/") && cleanUrl.split("/comments/")[1].split("/").length >= 3);
           base.type = isComment ? "comment" : "post";
           const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
           

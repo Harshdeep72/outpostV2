@@ -88,25 +88,33 @@ export default function RedditInspector() {
   });
 
   const exportSheetMutation = useMutation({
-    mutationFn: (results: InspectorRow[]) => post<{ sheetId: string; sheetUrl: string }>("/admin/bulk-check-to-sheet", {
-      type: "Inspector",
-      results: results.map(r => ({
-        URL: r.url,
-        Type: r.type,
-        "Target Status": r.target?.status || r.error || "error",
-        Score: r.target?.score || "",
-        Subreddit: r.target?.subreddit || "",
-        "Posted Date": r.target?.createdAt ? formatDate(r.target.createdAt) : "",
-        Author: r.target?.author || "",
-        "Author Status": r.author?.status || "",
-        Karma: r.author?.total_karma || "",
-        "Account Age": r.author?.created_utc ? formatAgeDays(r.author.created_utc) : "",
-        "Last Active": r.author?.last_active_utc ? formatAgeDays(r.author.last_active_utc) : "",
-        "Removed By": r.target?.removed_by_category || ""
-      }))
-    }),
+    mutationFn: (results: InspectorRow[]) => {
+      const headers = [
+        "URL", "Type", "Target Status", "Score", "Subreddit", "Posted Date",
+        "Author", "Author Status", "Karma", "Account Age", "Last Active", "Removed By"
+      ];
+      const rows = results.map(r => [
+        r.url,
+        r.type,
+        r.target?.status || r.error || "error",
+        r.target?.score?.toString() || "",
+        r.target?.subreddit || "",
+        r.target?.createdAt ? formatDate(r.target.createdAt) : "",
+        r.target?.author || "",
+        r.author?.status || "",
+        r.author?.total_karma?.toString() || "",
+        r.author?.created_utc ? formatAgeDays(r.author.created_utc) : "",
+        r.author?.last_active_utc ? formatAgeDays(r.author.last_active_utc) : "",
+        r.target?.removed_by_category || ""
+      ]);
+      return post<{ url: string }>("/admin/bulk-check-to-sheet", {
+        title: `Inspector Export ${new Date().toLocaleString()}`,
+        headers,
+        rows
+      });
+    },
     onSuccess: (data) => {
-      window.open(data.sheetUrl, "_blank");
+      window.open(data.url, "_blank");
     }
   });
 

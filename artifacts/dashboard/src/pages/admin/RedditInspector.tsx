@@ -36,6 +36,10 @@ interface InspectorRow {
 
 interface InspectorResponse {
   results: InspectorRow[];
+  summary: {
+    total: number;
+    uniqueAuthors: number;
+  };
 }
 
 function formatNumber(num: number | null | undefined): string {
@@ -334,8 +338,17 @@ export default function RedditInspector() {
       {/* MULTIPLE RESULTS RENDER - Table UI */}
       {data?.results && data.results.length > 1 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Results ({data.results.length})</h2>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-foreground">Results ({data.results.length})</h2>
+              {data.summary && (
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-sm text-blue-400">
+                    Unique Authors: <strong>{data.summary.uniqueAuthors}</strong>
+                  </span>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={exportCSV}

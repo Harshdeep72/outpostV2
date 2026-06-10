@@ -158,7 +158,7 @@ interface BulkCheckRow {
 
 interface BulkCheckResponse {
   results: BulkCheckRow[];
-  summary: { total: number; live: number; removed: number; noComment: number; errored: number };
+  summary: { total: number; live: number; removed: number; noComment: number; errored: number; uniqueAuthors: number };
 }
 
 // ── Post existence checker types ─────────────────────────────────────────────
@@ -185,7 +185,7 @@ interface PostCheckRow {
 
 interface PostCheckResponse {
   results: PostCheckRow[];
-  summary: { total: number; live: number; removed: number; notFound: number; errored: number };
+  summary: { total: number; live: number; removed: number; notFound: number; errored: number; uniqueAuthors: number };
 }
 
 // ── Author Bulk Checker Types ────────────────────────────────────────────────

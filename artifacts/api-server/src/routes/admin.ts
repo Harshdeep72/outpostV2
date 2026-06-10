@@ -2543,16 +2543,17 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     }),
   );
 
+  // Populate author account details
+  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
+
   const summary = {
     total: results.length,
     live: results.filter((r) => r.liveStatus === "live").length,
     removed: results.filter((r) => r.liveStatus === "removed" || r.liveStatus === "deleted").length,
     noComment: results.filter((r) => r.liveStatus === "no_comment").length,
     errored: results.filter((r) => r.liveStatus === "error" || r.liveStatus === "not_found").length,
+    uniqueAuthors: uniqueAuthors.length,
   };
-
-  // Populate author account details
-  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
   if (uniqueAuthors.length > 0) {
     const osintUrl = process.env.REDDIT_OSINT_URL;
     if (osintUrl) {
@@ -2739,16 +2740,17 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
     }),
   );
 
+  // Populate author account details
+  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
+
   const summary = {
     total: results.length,
     live: results.filter((r) => r.liveStatus === "live").length,
     removed: results.filter((r) => r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "spam").length,
     notFound: results.filter((r) => r.liveStatus === "not_found").length,
     errored: results.filter((r) => r.liveStatus === "error").length,
+    uniqueAuthors: uniqueAuthors.length,
   };
-
-  // Populate author account details
-  const uniqueAuthors = Array.from(new Set(results.map(r => r.author).filter(Boolean))) as string[];
   if (uniqueAuthors.length > 0) {
     const osintUrl = process.env.REDDIT_OSINT_URL;
     if (osintUrl) {
@@ -2871,7 +2873,14 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
     })
   );
 
-  return res.json({ results });
+  const uniqueAuthors = Array.from(new Set(results.map(r => r.author?.name || r.author?.username || r.target?.author).filter(Boolean))) as string[];
+
+  const summary = {
+    total: results.length,
+    uniqueAuthors: uniqueAuthors.length,
+  };
+
+  return res.json({ results, summary });
 });
 
 // ---------------------------------------------------------------------------

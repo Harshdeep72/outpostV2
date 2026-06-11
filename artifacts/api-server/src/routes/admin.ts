@@ -2834,13 +2834,20 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
         const base: InspectorRow = { url, type: "unknown", target: null, author: null, error: null };
         
         try {
-          const cleanUrl = url.split("?")[0].replace(/\/$/, "");
+          let checkUrl = url;
+          const appKind = detectAppUrl(url);
+          if (appKind === "share_link_resolvable") {
+            const resolved = await resolveShareLink(url);
+            if (resolved) checkUrl = resolved;
+          }
+
+          const cleanUrl = checkUrl.split("?")[0].replace(/\/$/, "");
           const isComment = cleanUrl.includes("/comment/") || 
                            (cleanUrl.includes("/comments/") && cleanUrl.split("/comments/")[1].split("/").length >= 3);
           base.type = isComment ? "comment" : "post";
           const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
           
-          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(url)}`);
+          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(checkUrl)}`);
           const targetJson = await targetRes.json() as any;
           
           let targetData = targetJson;

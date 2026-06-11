@@ -2870,6 +2870,15 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
              } else if (accRes.status === 404) {
                authorData = await accRes.json();
              }
+          } else if (author === "[deleted]") {
+             authorData = {
+               username: "[deleted]",
+               status: "deleted",
+               total_karma: 0,
+               created_utc: null,
+               last_active_utc: null,
+               has_activity: false
+             };
           }
           base.author = authorData;
           results[idx] = base;

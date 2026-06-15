@@ -770,7 +770,7 @@ export async function handleTaskClaim(
 
   const wsButtons: ButtonBuilder[] = [
     new ButtonBuilder().setCustomId(`claim:submit:${claim.id}`).setLabel("Submit Proof").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setURL(task.redditLink).setLabel(openLabel).setStyle(ButtonStyle.Link),
+    new ButtonBuilder().setURL(task.redditLink.replace(/\s+/g, "")).setLabel(openLabel).setStyle(ButtonStyle.Link),
   ];
 
   if (isPostTask) {

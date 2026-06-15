@@ -704,9 +704,9 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
       headers: { "Accept": "application/json" }
     });
 
-    if (!res.ok) return null;
-
-    const json = await res.json() as any;
+    const json = await res.json().catch(() => null) as any;
+    if (!json) return null;
+    
     if (json.success === false) return null;
 
     const data = json.data;
@@ -1071,11 +1071,11 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
   if (osintUrl) {
     try {
       logger.info({ postId: parsed.postId }, "recheckRedditLiveness: checking via redditOSINT remote API");
-      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(proofUrl)}`, {
+      const res = await undiciFetch(`${osintUrl}/api/external/check/post?url=${encodeURIComponent(resolvedUrl)}`, {
         headers: { "Accept": "application/json" }
       });
-      if (res.ok) {
-        const data = await res.json() as any;
+      const data = await res.json().catch(() => null) as any;
+      if (data) {
         if (data.success === false && data.message?.includes("not found")) {
           return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404)." };
         }
@@ -1085,8 +1085,13 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
             return { liveStatus: "live", detailedStatus: "live", statusLabel: "Live" };
           } else if (liveness === "removed" || liveness === "deleted") {
             return { liveStatus: "removed", detailedStatus: "removed_by_reddit", statusLabel: "Post removed", reason: "Post removed or deleted." };
+          } else if (liveness === "not_found") {
+            return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404)." };
           }
         }
+      }
+      if (!res.ok && res.status === 404 && (!data || !data.success)) {
+        return { liveStatus: "deleted", detailedStatus: "not_found", statusLabel: "Not found", reason: "Post not found (404)." };
       }
     } catch (err) {
       logger.warn({ err, postId: parsed.postId }, "recheckRedditLiveness: redditOSINT check failed, falling back to local python");

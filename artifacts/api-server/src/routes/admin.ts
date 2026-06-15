@@ -2800,10 +2800,10 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
     .filter((u): u is string => typeof u === "string")
     .map((u) => u.trim())
     .filter((u) => u.length > 0)
-    .slice(0, 100);
+    .slice(0, 500);
 
   if (urls.length === 0) {
-    return res.status(400).json({ error: "Provide at least one URL in `urls` (max 100)." });
+    return res.status(400).json({ error: "Provide at least one URL in `urls` (max 500)." });
   }
 
   const osintUrl = process.env.REDDIT_OSINT_URL;

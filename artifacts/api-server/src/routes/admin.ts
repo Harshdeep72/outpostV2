@@ -2823,6 +2823,7 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   const results: InspectorRow[] = new Array(urls.length);
   const CONCURRENCY = 5;
   let cursor = 0;
+  const authorCache = new Map<string, any>();
 
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, urls.length) }, async () => {
@@ -2864,11 +2865,17 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
           let authorData = null;
           const author = targetData?.author;
           if (author && typeof author === "string" && author !== "[deleted]") {
-             const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
-             if (accRes.ok) {
-               authorData = await accRes.json();
-             } else if (accRes.status === 404) {
-               authorData = await accRes.json();
+             if (authorCache.has(author)) {
+               authorData = authorCache.get(author);
+             } else {
+               const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
+               if (accRes.ok) {
+                 authorData = await accRes.json();
+                 authorCache.set(author, authorData);
+               } else if (accRes.status === 404) {
+                 authorData = await accRes.json();
+                 authorCache.set(author, authorData);
+               }
              }
           } else if (author === "[deleted]") {
              authorData = {

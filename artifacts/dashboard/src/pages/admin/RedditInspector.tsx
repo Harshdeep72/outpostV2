@@ -1,4 +1,5 @@
 import { useState } from "react";
+import * as XLSX from "xlsx";
 import { useMutation } from "@tanstack/react-query";
 import { post } from "@/lib/api";
 import { AlertCircle, CheckCircle2, Clock, Search, ShieldAlert, ShieldBan, User, Hash, MessageSquare, AlertTriangle, ExternalLink, Download, FileSpreadsheet } from "lucide-react";
@@ -83,6 +84,64 @@ function AuthorStatusPill({ status }: { status?: string | null }) {
 
 export default function RedditInspector() {
   const [text, setText] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls") || file.name.endsWith(".csv")) {
+        try {
+          const buffer = await file.arrayBuffer();
+          const workbook = XLSX.read(buffer, { type: "array" });
+          
+          let extractedUrls: string[] = [];
+          const regex = /https?:\/\/(?:www\.)?reddit\.com\/[^\s]+/gi;
+          
+          workbook.SheetNames.forEach(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+            
+            jsonData.forEach(row => {
+              if (Array.isArray(row)) {
+                row.forEach(cell => {
+                  if (typeof cell === "string") {
+                    const matches = cell.match(regex);
+                    if (matches) {
+                      extractedUrls.push(...matches);
+                    }
+                  }
+                });
+              }
+            });
+          });
+          
+          if (extractedUrls.length > 0) {
+            setText(prev => {
+              const prevTrimmed = prev.trim();
+              return prevTrimmed 
+                ? prevTrimmed + "\n" + extractedUrls.join("\n") 
+                : extractedUrls.join("\n");
+            });
+          }
+        } catch (error) {
+          console.error("Failed to parse file:", error);
+        }
+      }
+    }
+  };
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -180,8 +239,13 @@ export default function RedditInspector() {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Paste one or more Reddit URLs (one per line)..."
-          className="w-full rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-muted-foreground/50 min-h-[100px] resize-y"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          placeholder="Paste one or more Reddit URLs (one per line) or drop an .xlsx/.csv file here..."
+          className={`w-full rounded-xl border bg-card px-4 py-3 text-sm outline-none transition-all placeholder:text-muted-foreground/50 min-h-[100px] resize-y ${
+            isDragging ? "border-primary ring-2 ring-primary bg-primary/5" : "border-border focus:ring-2 focus:ring-primary/20"
+          }`}
           required
         />
         <div className="flex justify-end">

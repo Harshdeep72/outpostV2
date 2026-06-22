@@ -2804,9 +2804,9 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "Provide at least one URL in `urls` (max 500)." });
   }
 
-  const osintUrl = process.env.REDDIT_OSINT_URL;
-  if (!osintUrl) {
-    return res.status(500).json({ error: "REDDIT_OSINT_URL not configured" });
+  const targetUrl = process.env.REDDIT_INSPECTOR_URL || process.env.REDDIT_OSINT_URL;
+  if (!targetUrl) {
+    return res.status(500).json({ error: "REDDIT_INSPECTOR_URL or REDDIT_OSINT_URL not configured" });
   }
   const { fetch: undiciFetch } = await import("undici");
 
@@ -2849,7 +2849,7 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
           const timer = setTimeout(() => ac.abort(), 60_000);
           let batchRes: Response;
           try {
-            batchRes = await undiciFetch(`${osintUrl}/api/external/bulk/check`, {
+            batchRes = await undiciFetch(`${targetUrl}/api/external/bulk/check`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ urls: batchUrls, include_author: true }),

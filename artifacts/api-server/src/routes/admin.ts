@@ -2821,7 +2821,7 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   };
 
   const results: InspectorRow[] = new Array(urls.length);
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 2;
   let cursor = 0;
   const authorCache = new Map<string, any>();
 

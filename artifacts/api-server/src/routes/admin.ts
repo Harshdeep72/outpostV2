@@ -2772,7 +2772,6 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
         if (row.author) {
           const ad = authorDataMap.get(row.author.toLowerCase());
           if (ad) {
-            console.log('Merging karma for author:', row.author, 'karma:', ad.total_karma);
             row.authorStatus = ad.status || null;
             row.authorKarma = typeof ad.total_karma === 'number' ? ad.total_karma : null;
             if (ad.created_utc) {
@@ -2784,14 +2783,13 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
     }
   }
 
-  console.log('Final merged result:', JSON.stringify(results[0] || {}));
   res.json({ results, summary });
 });
 
 // ---------------------------------------------------------------------------
 // POST /admin/reddit-inspector
-// Checks a single post or comment URL and fetches full author details
-// including last active timestamp.
+// Checks post/comment URLs in batches via /api/external/bulk/check for speed.
+// Up to 500 URLs, 20 per batch, 5 concurrent batch workers.
 // ---------------------------------------------------------------------------
 router.post("/reddit-inspector", requireAuth, async (req, res) => {
   const body = req.body as { urls?: unknown };
@@ -2821,112 +2819,106 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   };
 
   const results: InspectorRow[] = new Array(urls.length);
-  const CONCURRENCY = 5;  // raised — 2 was too slow for bulk runs causing timeouts
-  let cursor = 0;
-  const authorCache = new Map<string, any>();
+
+  // -------------------------------------------------------------------------
+  // Batch strategy: 500 URLs → 25 batches of 20, 5 concurrent batch workers.
+  // HF Space processes each batch concurrently via asyncio.gather internally.
+  // The priority semaphore (_PRIORITY_SEMAPHORE) stays untouched — liveness
+  // checks are never starved.
+  // -------------------------------------------------------------------------
+  const BATCH_SIZE = 20;
+  const BATCH_CONCURRENCY = 5;
+
+  const batches: Array<{ startIdx: number; batchUrls: string[] }> = [];
+  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+    batches.push({ startIdx: i, batchUrls: urls.slice(i, i + BATCH_SIZE) });
+  }
+
+  let batchCursor = 0;
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, urls.length) }, async () => {
+    Array.from({ length: Math.min(BATCH_CONCURRENCY, batches.length) }, async () => {
       while (true) {
-        const idx = cursor++;
-        if (idx >= urls.length) return;
-        const url = urls[idx]!;
+        const batchIdx = batchCursor++;
+        if (batchIdx >= batches.length) return;
 
-        const base: InspectorRow = { url, type: "unknown", target: null, author: null, error: null };
-        
+        const { startIdx, batchUrls } = batches[batchIdx]!;
+
         try {
-          let checkUrl = url;
-          const appKind = detectAppUrl(url);
-          if (appKind === "share_link_resolvable") {
-            const resolved = await resolveShareLink(url);
-            if (resolved) checkUrl = resolved;
+          const ac = new AbortController();
+          const timer = setTimeout(() => ac.abort(), 60_000);
+          let batchRes: Response;
+          try {
+            batchRes = await undiciFetch(`${osintUrl}/api/external/bulk/check`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ urls: batchUrls, include_author: true }),
+              signal: ac.signal,
+            }) as Response;
+          } finally {
+            clearTimeout(timer);
           }
 
-          const cleanUrl = checkUrl.split("?")[0].replace(/\/$/, "");
-          // A URL is a comment only when there is a non-empty 4th path segment after /comments/
-          // e.g. /r/sub/comments/<postid>/<title>/<commentid>  — commentid is segment index 3 (0-based)
-          // Posts like /r/sub/comments/<postid>/<title>/  only have 3 segments (index 0-2) and must NOT be treated as comments.
-          const isComment = (() => {
-            if (cleanUrl.includes("/comment/")) return true; // old.reddit.com/comment/<id> style
-            if (!cleanUrl.includes("/comments/")) return false;
-            const afterComments = cleanUrl.split("/comments/")[1] ?? "";
-            const segments = afterComments.split("/").filter(s => s.length > 0);
-            // segments: [postId, title?, commentId?]
-            // comment IDs are short alphanumeric strings (reddit base36), at least 4 chars
-            return segments.length >= 3 && /^[a-z0-9]{4,}$/i.test(segments[2] ?? "");
-          })();
-          base.type = isComment ? "comment" : "post";
-          const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
+          if (!batchRes.ok) {
+            for (let i = 0; i < batchUrls.length; i++) {
+              results[startIdx + i] = {
+                url: batchUrls[i]!,
+                type: "unknown",
+                target: null,
+                author: null,
+                error: `Batch HTTP ${batchRes.status}`,
+              };
+            }
+            continue;
+          }
 
-          // Use a per-request AbortController so a slow HF Space response doesn't block the worker forever
-          const targetAc = new AbortController();
-          const targetTimer = setTimeout(() => targetAc.abort(), 30_000);
-          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(checkUrl)}`, { signal: targetAc.signal });
-          clearTimeout(targetTimer);
-          const targetJson = await targetRes.json() as any;
-          
-          let targetData = targetJson;
-          if (targetJson?.success && targetJson?.data) {
-             targetData = targetJson.data;
-          } else if (!targetRes.ok) {
-             if (!targetData) {
-               results[idx] = { ...base, error: `HTTP ${targetRes.status}` };
-               continue;
-             }
+          const batchJson = await batchRes.json() as any;
+          const batchResults: any[] = batchJson?.results ?? [];
+
+          for (let i = 0; i < batchUrls.length; i++) {
+            const r = batchResults[i];
+            if (!r) {
+              results[startIdx + i] = {
+                url: batchUrls[i]!,
+                type: "unknown",
+                target: null,
+                author: null,
+                error: "Missing result in batch response",
+              };
+              continue;
+            }
+
+            let targetData = r.data ?? null;
+            if (targetData?.success && targetData?.data) targetData = targetData.data;
+
+            results[startIdx + i] = {
+              url: r.url ?? batchUrls[i]!,
+              type: r.type ?? "unknown",
+              target: targetData,
+              author: r.author ?? null,
+              error: r.error ?? null,
+            };
           }
-          base.target = targetData;
-          
-          let authorData = null;
-          const author = targetData?.author;
-          if (author && typeof author === "string" && author !== "[deleted]") {
-             if (authorCache.has(author)) {
-               authorData = authorCache.get(author);
-             } else {
-               const accAc = new AbortController();
-               const accTimer = setTimeout(() => accAc.abort(), 20_000);
-               const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`, { signal: accAc.signal });
-               clearTimeout(accTimer);
-               if (accRes.ok || accRes.status === 404) {
-                 authorData = await accRes.json();
-               } else {
-                 authorData = {
-                   username: author,
-                   status: "error",
-                   total_karma: 0,
-                   created_utc: null,
-                   last_active_utc: null,
-                   has_activity: false
-                 };
-               }
-               authorCache.set(author, authorData);
-             }
-          } else if (author === "[deleted]") {
-             authorData = {
-               username: "[deleted]",
-               status: "deleted",
-               total_karma: 0,
-               created_utc: null,
-               last_active_utc: null,
-               has_activity: false
-             };
-          }
-          base.author = authorData;
-          results[idx] = base;
         } catch (err: any) {
-          results[idx] = { ...base, error: err.message || "Failed to inspect url" };
+          for (let i = 0; i < batchUrls.length; i++) {
+            results[startIdx + i] = {
+              url: batchUrls[i]!,
+              type: "unknown",
+              target: null,
+              author: null,
+              error: err.message || "Batch request failed",
+            };
+          }
         }
       }
     })
   );
 
-  const uniqueAuthors = Array.from(new Set(results.map(r => r.author?.name || r.author?.username || r.target?.author).filter(Boolean))) as string[];
+  const uniqueAuthors = Array.from(
+    new Set(results.map(r => r.author?.name || r.author?.username || r.target?.author).filter(Boolean))
+  ) as string[];
 
-  const summary = {
-    total: results.length,
-    uniqueAuthors: uniqueAuthors.length,
-  };
-
-  return res.json({ results, summary });
+  return res.json({ results, summary: { total: results.length, uniqueAuthors: uniqueAuthors.length } });
 });
 
 // ---------------------------------------------------------------------------

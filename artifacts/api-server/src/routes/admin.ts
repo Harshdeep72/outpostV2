@@ -2869,13 +2869,19 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
                authorData = authorCache.get(author);
              } else {
                const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
-               if (accRes.ok) {
+               if (accRes.ok || accRes.status === 404) {
                  authorData = await accRes.json();
-                 authorCache.set(author, authorData);
-               } else if (accRes.status === 404) {
-                 authorData = await accRes.json();
-                 authorCache.set(author, authorData);
+               } else {
+                 authorData = {
+                   username: author,
+                   status: "error",
+                   total_karma: 0,
+                   created_utc: null,
+                   last_active_utc: null,
+                   has_activity: false
+                 };
                }
+               authorCache.set(author, authorData);
              }
           } else if (author === "[deleted]") {
              authorData = {

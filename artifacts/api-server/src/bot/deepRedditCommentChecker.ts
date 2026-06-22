@@ -122,6 +122,39 @@ async function fetchCommentThreadViaOAuth(
 }
 
 /**
+ * Fetch a comment thread via Hugging Face Python proxy.
+ *
+ * Uses the Python curl_cffi endpoint to bypass Cloudflare and rate limits
+ * using the residential proxy pool.
+ */
+async function fetchCommentThreadViaPython(
+  sub: string,
+  postId: string,
+  commentId: string
+): Promise<{ ok: boolean; body: any } | null> {
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (!osintUrl) return null;
+
+  try {
+    const { fetch: undiciFetch } = await import("undici");
+    // Ensure we fetch the old.reddit.com JSON format, which requires ?raw_json=1 to avoid HTML encoding.
+    const targetUrl = `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`;
+    const proxyEndpoint = `${osintUrl}/api/external/proxy/json?url=${encodeURIComponent(targetUrl)}`;
+    
+    const res = await undiciFetch(proxyEndpoint);
+    if (!res.ok) return null;
+
+    const body = await res.json() as any;
+    if (!Array.isArray(body)) return null;
+
+    return { ok: true, body };
+  } catch (err) {
+    logger.error({ err, commentId }, "Python proxy fetch errored");
+    return null;
+  }
+}
+
+/**
  * Primary method: fetch a comment thread directly via undici using the
  * in-memory Reddit session cookie. No subprocess spawn — fast, predictable,
  * and always uses the freshest cookie from getRedditSessionCookie().
@@ -583,6 +616,13 @@ async function runDeepCheck(
 
   // ── 1. Direct JSON with session cookie (primary) ──────────────────────────
   let apiRes = await fetchCommentThreadViaDirectJson(sub, parsed.postId, parsed.commentId).catch(() => null);
+
+  // ── 2. Python curl_cffi fallback (Hugging Face API) ───────────────────────
+  if (!apiRes?.ok) {
+    logger.info({ commentId: parsed.commentId }, "Deep check: Direct JSON failed — trying Python fallback");
+    const pythonRes = await fetchCommentThreadViaPython(sub, parsed.postId, parsed.commentId);
+    if (pythonRes?.ok) apiRes = pythonRes;
+  }
 
   // ── 3. OAuth API last resort ───────────────────────────────────────────────
   if (!apiRes?.ok) {

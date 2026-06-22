@@ -2825,8 +2825,10 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   // HF Space processes each batch concurrently via asyncio.gather internally.
   // The priority semaphore (_PRIORITY_SEMAPHORE) stays untouched — liveness
   // checks are never starved.
+  // Batch strategy: 500 URLs → 10 batches of 50, 5 concurrent batch workers.
+  // The API processes each batch concurrently with a Semaphore of 20 slots.
   // -------------------------------------------------------------------------
-  const BATCH_SIZE = 20;
+  const BATCH_SIZE = 50;
   const BATCH_CONCURRENCY = 5;
 
   const batches: Array<{ startIdx: number; batchUrls: string[] }> = [];
@@ -2846,7 +2848,7 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
 
         try {
           const ac = new AbortController();
-          const timer = setTimeout(() => ac.abort(), 60_000);
+          const timer = setTimeout(() => ac.abort(), 120_000); // 2 minute timeout
           let batchRes: Response;
           try {
             batchRes = await undiciFetch(`${targetUrl}/api/external/bulk/check`, {

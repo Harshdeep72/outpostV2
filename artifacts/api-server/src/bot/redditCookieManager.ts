@@ -17,12 +17,12 @@ let state: CookieState | null = null;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshInFlight = false;
 
-function findWorkspaceFile(relativePath: string): satring {
+function findWorkspaceFile(relativePath: string): string {
   let candidate = resolve(process.cwd(), relativePath);
   if (existsSync(candidate)) return candidate;
 
   let currentDir = process.cwd();
-  for (let i = 0; i < 4; i++) {n
+  for (let i = 0; i < 4; i++) {
     candidate = resolve(currentDir, relativePath);
     if (existsSync(candidate)) return candidate;
     const parent = dirname(currentDir);

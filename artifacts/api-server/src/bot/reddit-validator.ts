@@ -597,11 +597,7 @@ export async function validateRedditProof(
 
   // ── Comment-task guard ─────────────────────────────────────────────────────
   // comment / thread_reply / op_reply tasks all require a proof URL that
-  // contains a specific comment ID (i.e. the URL must look like
-  // /r/sub/comments/POST_ID/title/COMMENT_ID/).
-  // Without this check, a post-only URL slips through to the RSS post-check
-  // path below, which validates the post author — not the comment author —
-  // and auto-approves even when the worker never actually commented.
+  // contains a specific comment ID.
   const requiresCommentUrl = ["comment", "thread_reply", "op_reply"].includes(options?.taskType ?? "");
   if (requiresCommentUrl && !parsed.commentId) {
     return {
@@ -612,6 +608,23 @@ export async function validateRedditProof(
         "Open your comment on Reddit, tap the three-dot menu → **Share** → **Copy link**, " +
         "then paste that URL here. It should look like: " +
         "`https://www.reddit.com/r/SubName/comments/POSTID/posttitle/COMMENTID/`."
+      ],
+      ...meta("url_invalid"),
+    };
+  }
+
+  // ── Post-task guard ────────────────────────────────────────────────────────
+  // post tasks require a proof URL that is a top-level post (no commentId).
+  // Without this, a worker can submit any comment URL and pass validation.
+  if (options?.taskType === "post" && parsed.commentId) {
+    return {
+      passed: false, autoApproved: false, status: "url_invalid",
+      failures: [
+        "Your proof link points to a Reddit **comment**, not a new post. " +
+        "For this task you must submit the URL of the **new Reddit post** you created. " +
+        "Open your post on Reddit, copy the URL from the address bar, " +
+        "and paste that URL here. It should look like: " +
+        "`https://www.reddit.com/r/SubName/comments/POSTID/your_post_title/`."
       ],
       ...meta("url_invalid"),
     };

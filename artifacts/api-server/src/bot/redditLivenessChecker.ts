@@ -458,9 +458,8 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
     };
   }
 
-  // Detect the "post URL submitted for a comment task" case.  The liveness
-  // checker would otherwise see no commentId and treat it as a live post check.
-  if (row.task_type === "comment") {
+  // Detect the "post URL submitted for a comment task" case.
+  if (["comment", "thread_reply", "op_reply"].includes(row.task_type)) {
     const parsedProof = parseRedditProofUrl(row.proof_link);
     if (!parsedProof?.commentId) {
       return {
@@ -470,6 +469,21 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
           "This submission contains a Reddit **post** URL, not a comment link. " +
           "The worker submitted post-level proof for a comment task. " +
           "Manually reverse this submission — it should never have been approved.",
+      };
+    }
+  }
+
+  // Detect the "comment URL submitted for a post task" case.
+  if (row.task_type === "post") {
+    const parsedProof = parseRedditProofUrl(row.proof_link);
+    if (parsedProof?.commentId) {
+      return {
+        ...base, found: true, proofLink: row.proof_link,
+        previousStatus: row.live_status as LiveStatus,
+        errorMessage:
+          "This submission contains a Reddit **comment** URL, not a post link. " +
+          "The worker submitted a comment as proof for a post task. " +
+          "Manually reverse this submission — the worker must submit the URL of the new post they created.",
       };
     }
   }

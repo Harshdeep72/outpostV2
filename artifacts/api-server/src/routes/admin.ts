@@ -2821,7 +2821,7 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
   };
 
   const results: InspectorRow[] = new Array(urls.length);
-  const CONCURRENCY = 2;
+  const CONCURRENCY = 5;  // raised — 2 was too slow for bulk runs causing timeouts
   let cursor = 0;
   const authorCache = new Map<string, any>();
 
@@ -2843,12 +2843,26 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
           }
 
           const cleanUrl = checkUrl.split("?")[0].replace(/\/$/, "");
-          const isComment = cleanUrl.includes("/comment/") || 
-                           (cleanUrl.includes("/comments/") && cleanUrl.split("/comments/")[1].split("/").length >= 3);
+          // A URL is a comment only when there is a non-empty 4th path segment after /comments/
+          // e.g. /r/sub/comments/<postid>/<title>/<commentid>  — commentid is segment index 3 (0-based)
+          // Posts like /r/sub/comments/<postid>/<title>/  only have 3 segments (index 0-2) and must NOT be treated as comments.
+          const isComment = (() => {
+            if (cleanUrl.includes("/comment/")) return true; // old.reddit.com/comment/<id> style
+            if (!cleanUrl.includes("/comments/")) return false;
+            const afterComments = cleanUrl.split("/comments/")[1] ?? "";
+            const segments = afterComments.split("/").filter(s => s.length > 0);
+            // segments: [postId, title?, commentId?]
+            // comment IDs are short alphanumeric strings (reddit base36), at least 4 chars
+            return segments.length >= 3 && /^[a-z0-9]{4,}$/i.test(segments[2] ?? "");
+          })();
           base.type = isComment ? "comment" : "post";
           const endpoint = isComment ? "/api/external/check/comment" : "/api/external/check/post";
-          
-          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(checkUrl)}`);
+
+          // Use a per-request AbortController so a slow HF Space response doesn't block the worker forever
+          const targetAc = new AbortController();
+          const targetTimer = setTimeout(() => targetAc.abort(), 30_000);
+          const targetRes = await undiciFetch(`${osintUrl}${endpoint}?url=${encodeURIComponent(checkUrl)}`, { signal: targetAc.signal });
+          clearTimeout(targetTimer);
           const targetJson = await targetRes.json() as any;
           
           let targetData = targetJson;
@@ -2868,7 +2882,10 @@ router.post("/reddit-inspector", requireAuth, async (req, res) => {
              if (authorCache.has(author)) {
                authorData = authorCache.get(author);
              } else {
-               const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`);
+               const accAc = new AbortController();
+               const accTimer = setTimeout(() => accAc.abort(), 20_000);
+               const accRes = await undiciFetch(`${osintUrl}/api/external/check/account?username=${encodeURIComponent(author)}&include_activity=true`, { signal: accAc.signal });
+               clearTimeout(accTimer);
                if (accRes.ok || accRes.status === 404) {
                  authorData = await accRes.json();
                } else {

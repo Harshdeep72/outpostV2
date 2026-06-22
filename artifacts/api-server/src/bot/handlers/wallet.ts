@@ -364,3 +364,58 @@ export async function handleSetWallet(interaction: ChatInputCommandInteraction) 
     embeds: [makeEmbed(COLORS.SUCCESS).setDescription(successMsg)],
   });
 }
+
+// ---------------------------------------------------------------------------
+// Admin: set / overwrite any user's UPI ID
+// ---------------------------------------------------------------------------
+export async function handleAdminSetUpi(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const targetUser = interaction.options.getUser("user", true);
+  const newUpiId   = interaction.options.getString("upi_id", true).trim();
+
+  // Basic format validation
+  if (!/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(newUpiId)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid UPI ID format. Expected `username@bank` (e.g. `john@upi`).")],
+    });
+  }
+
+  const target = await getUserByDiscordId(targetUser.id);
+  if (!target) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ User <@${targetUser.id}> is not registered in the system.`)],
+    });
+  }
+
+  const oldUpiId = target.upiId ?? "(none)";
+
+  // Check the new UPI isn't already in use by someone else
+  const duplicate = await db.query.users.findFirst({
+    columns: { discordId: true },
+    where: (u, { and, ne, sql: s }) =>
+      and(s`LOWER(${u.upiId}) = ${newUpiId.toLowerCase()}`, ne(u.discordId, targetUser.id)),
+  });
+  if (duplicate) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ UPI ID \`${newUpiId}\` is already linked to another account.`)],
+    });
+  }
+
+  await db.update(users).set({ upiId: newUpiId }).where(eq(users.discordId, targetUser.id));
+  invalidateUser(targetUser.id);
+
+  logger.info({ admin: interaction.user.id, target: targetUser.id, oldUpiId, newUpiId }, "Admin updated UPI ID");
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ UPI ID Updated")
+        .addFields(
+          { name: "User",    value: `<@${targetUser.id}>`, inline: true },
+          { name: "Old UPI", value: `\`${oldUpiId}\``,     inline: true },
+          { name: "New UPI", value: `\`${newUpiId}\``,     inline: true },
+        ),
+    ],
+  });
+}

@@ -390,6 +390,18 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setName("requeue")
     .setDescription("Bulk move inconclusive hold-end submissions back to pending_hold (admin only)");
 
+  const adminsetupi = new SlashCommandBuilder()
+    .setName("adminsetupi")
+    .setDescription("[Admin] Set or overwrite a user's UPI ID")
+    .setDefaultMemberPermissions(0x20) // MANAGE_GUILD
+    .setDMPermission(false)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("The user whose UPI ID to update").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("upi_id").setDescription("New UPI ID (e.g. name@bank)").setRequired(true)
+    );
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
@@ -398,6 +410,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, approvesubmission, reopenslot, mystatus, processholds, forcepayout, requeue,
+    adminsetupi,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

@@ -140,8 +140,14 @@ async function fetchCommentThreadViaPython(
     // Ensure we fetch the old.reddit.com JSON format, which requires ?raw_json=1 to avoid HTML encoding.
     const targetUrl = `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`;
     const proxyEndpoint = `${osintUrl}/api/external/proxy/json?url=${encodeURIComponent(targetUrl)}`;
-    
-    const res = await undiciFetch(proxyEndpoint);
+
+    // 20-second hard timeout — if HF Space is saturated (e.g. Inspector bulk run)
+    // we must not block the liveness checker indefinitely.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 20_000);
+    const res = await undiciFetch(proxyEndpoint, { signal: ac.signal });
+    clearTimeout(timer);
+
     if (!res.ok) return null;
 
     const body = await res.json() as any;
@@ -437,9 +443,21 @@ async function fetchCommentViaRedditOsint(url: string): Promise<any> {
     if (!osintUrl) return null;
 
     const { fetch: undiciFetch } = await import("undici");
-    const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
-      headers: { "Accept": "application/json" }
-    });
+
+    // 15-second hard timeout — liveness checks must never queue behind a slow
+    // or saturated HF Space (e.g. when Reddit Inspector is doing a bulk run).
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15_000);
+    let res: Response;
+    try {
+      res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
+        headers: { "Accept": "application/json" },
+        signal: ac.signal,
+      }) as Response;
+    } finally {
+      clearTimeout(timer);
+    }
+
     const json = await res.json().catch(() => null) as any;
     
     if (!res.ok) {

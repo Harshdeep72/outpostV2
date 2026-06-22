@@ -1046,6 +1046,7 @@ export async function handleRequeueCommand(interaction: ChatInputCommandInteract
     WHERE review_status = 'pending'
     AND (
       review_reason ILIKE '%hold-end liveness check%'
+      OR review_reason ILIKE '%hold-end check inconclusive%'
       OR review_reason ILIKE '%Post is in r/%'
       OR review_reason ILIKE '%Reddit API unreachable%'
     )

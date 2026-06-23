@@ -460,6 +460,10 @@ async function fetchCommentViaRedditOsint(url: string): Promise<any> {
 
     const json = await res.json().catch(() => null) as any;
     
+    if (json && json.success === true && json.data) {
+      return json.data;
+    }
+
     if (!res.ok) {
       if (res.status === 404 || (json && json.message?.includes("not found"))) {
         return { liveness: "not_found", author: "", subreddit: "", body_snippet: "" };
@@ -467,8 +471,7 @@ async function fetchCommentViaRedditOsint(url: string): Promise<any> {
       return null;
     }
     
-    if (!json || json.success === false || !json.data) return null;
-    return json.data;
+    return null;
   } catch (err: any) {
     logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");
     return null;

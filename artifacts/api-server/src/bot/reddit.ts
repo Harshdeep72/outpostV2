@@ -855,31 +855,80 @@ async function fetchViaRedditOsint(name: string): Promise<RedditFetchResult | nu
       headers: { "Accept": "application/json" }
     });
 
-    if (!res.ok) return null;
+    const data = await res.json().catch(() => null) as any;
+    if (!data) {
+      if (!res.ok) return null;
+      return null;
+    }
 
-    const data = await res.json() as any;
+    // Check if the response is in the wrapped format: { success: boolean, data: { ... } }
+    if (typeof data.success === "boolean") {
+      if (!data.success || res.status === 404) {
+        const innerStatus = data.data?.status;
+        if (innerStatus === "deleted" || innerStatus === "shadowbanned" || data.message?.includes("not found")) {
+          return { ok: false, notFound: true };
+        }
+        if (innerStatus === "suspended") {
+          return { ok: false, notFound: true, suspended: true };
+        }
+        return null;
+      }
 
+      const innerData = data.data;
+      if (innerData) {
+        const innerStatus = innerData.status;
+        if (innerStatus === "active" || innerStatus === "valid") {
+          logger.info({ name, karma: innerData.total_karma }, "Reddit profile via redditOSITN (wrapped active)");
+          const ageDays = innerData.account_age_days || 0;
+          const createdUtc = Math.floor(Date.now() / 1000) - (ageDays * 86400);
+          
+          return {
+            ok: true,
+            profile: {
+              name: innerData.username || name,
+              createdUtc,
+              linkKarma: innerData.link_karma || 0,
+              commentKarma: innerData.comment_karma || 0,
+              totalKarma: innerData.total_karma || 0,
+              iconImg: innerData.icon_img || innerData.avatar_url,
+              accountAgeDays: ageDays,
+              karmaVerified: true,
+            },
+          };
+        } else if (innerStatus === "suspended") {
+          return { ok: false, notFound: true, suspended: true };
+        } else if (innerStatus === "deleted" || innerStatus === "shadowbanned") {
+          return { ok: false, notFound: true };
+        }
+      }
+      return null;
+    }
+
+    // Legacy/original flat format: { status: string, ... }
     if (data.status === "not_found") {
       return { ok: false, notFound: true };
+    }
+    if (data.status === "suspended") {
+      return { ok: false, notFound: true, suspended: true };
     }
     if (data.status === "error") {
       return null; // fallback to other methods
     }
 
-    if (data.status === "valid") {
-      logger.info({ name, karma: data.karma }, "Reddit profile via redditOSITN");
+    if (data.status === "valid" || data.status === "active") {
+      logger.info({ name, karma: data.karma }, "Reddit profile via redditOSITN (legacy active)");
       const createdUtc = data.created_utc || 0;
-      const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+      const ageDays = data.account_age_days || (createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0);
       
       return {
         ok: true,
         profile: {
           name: data.username || name,
           createdUtc,
-          linkKarma: data.karma?.link || 0,
-          commentKarma: data.karma?.comment || 0,
-          totalKarma: data.karma?.total || 0,
-          iconImg: data.icon_img,
+          linkKarma: data.karma?.link || data.link_karma || 0,
+          commentKarma: data.karma?.comment || data.comment_karma || 0,
+          totalKarma: typeof data.karma === "number" ? data.karma : (data.karma?.total || data.total_karma || 0),
+          iconImg: data.icon_img || data.avatar_url,
           accountAgeDays: ageDays,
           karmaVerified: true,
         },

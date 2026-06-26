@@ -33,6 +33,31 @@ async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | 
  * Returns the resolved URL string, or null on failure.
  */
 export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Promise<string | null> {
+  // ── Strategy 0: Resolve via remote Hugging Face API ─────────────────────
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (osintUrl) {
+    try {
+      const { fetch: undiciFetch } = await import("undici");
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await undiciFetch(`${osintUrl}/api/external/resolve?url=${encodeURIComponent(shareUrl)}`, {
+          headers: { "Accept": "application/json" },
+          signal: ctrl.signal,
+        });
+        const json = await res.json().catch(() => null) as any;
+        if (json && json.success && json.url) {
+          logger.info({ shareUrl, resolved: json.url, via: "redditOSINT/resolve" }, "Share link resolved via remote API");
+          return json.url;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err) {
+      logger.debug({ shareUrl, err }, "resolveShareLink: remote attempt failed");
+    }
+  }
+
   const cookieHeaders: Record<string, string> = {};
   const sessionCookie = getRedditSessionCookie();
   if (sessionCookie) {
@@ -112,6 +137,27 @@ export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Prom
     }
   } catch (err) {
     logger.debug({ shareUrl, err }, "resolveShareLink: GET/follow attempt failed");
+  }
+
+  // ── Strategy 3: HTML fetch via proxy pool ────────────────────────────────
+  try {
+    const { proxyFetchText } = await import("./proxy.js");
+    const html = await proxyFetchText([shareUrl], { timeoutMs });
+    if (html) {
+      const canonicalMatch =
+        /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i.exec(html) ??
+        /<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/i.exec(html);
+      if (canonicalMatch) {
+        const candidate = canonicalMatch[1]!;
+        if (candidate.includes("/comments/")) {
+          const clean = candidate.split("?")[0]!.replace(/\/$/, "");
+          logger.info({ shareUrl, resolved: clean, via: "proxy/canonical" }, "Share link resolved via proxy canonical tag");
+          return clean;
+        }
+      }
+    }
+  } catch (err) {
+    logger.debug({ shareUrl, err }, "resolveShareLink: proxy/canonical attempt failed");
   }
 
   logger.warn({ shareUrl }, "resolveShareLink: all strategies failed");

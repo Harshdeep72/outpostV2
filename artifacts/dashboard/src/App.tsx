@@ -15,7 +15,6 @@ import TasksByCreator from "@/pages/admin/TasksByCreator";
 import Campaigns from "@/pages/admin/Campaigns";
 import RedditTest from "@/pages/admin/RedditTest";
 import RedditBulkCheck from "@/pages/admin/RedditBulkCheck";
-import RedditInspector from "@/pages/admin/RedditInspector";
 import Console from "@/pages/admin/Console";
 import Applications from "@/pages/admin/Applications";
 import AdminUsers from "@/pages/admin/AdminUsers";
@@ -84,7 +83,6 @@ function ProtectedApp() {
         <Route path="/admin/campaigns" component={Campaigns} />
         <Route path="/admin/reddit-test" component={RedditTest} />
         <Route path="/admin/reddit-bulk-check" component={RedditBulkCheck} />
-        <Route path="/admin/reddit-inspector" component={RedditInspector} />
         <Route path="/admin/console" component={Console} />
         {isAdmin && <Route path="/admin/settings" component={Settings} />}
         <Route path="/admin/cooldowns" component={Cooldowns} />

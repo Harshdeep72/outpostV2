@@ -7,7 +7,7 @@ import { upsertUserSmart } from "./db.js";
 import { logger } from "../lib/logger.js";
 
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
-import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext } from "./handlers/tasks.js";
+import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetWallet, handleSetPaypal, handleAdminSetUpi } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
@@ -145,6 +145,7 @@ export function registerInteractionHandler(client: Client) {
           if (action === "accept") return timed(tag, () => handleSubAccept(interaction, parseInt(p1)));
           if (action === "reject") return timed(tag, () => handleSubReject(interaction, parseInt(p1)));
           if (action === "flag") return timed(tag, () => handleSubFlag(interaction, parseInt(p1)));
+          if (action === "edit") return timed(tag, () => handleSubEdit(interaction, parseInt(p1)));
         }
 
         if (scope === "stats") {
@@ -225,6 +226,10 @@ export function registerInteractionHandler(client: Client) {
         if (scope === "sub" && action === "reason") {
           const subAction = parts[2] as "reject" | "flag";
           return await timed(tag, () => handleSubReviewReason(interaction, subAction, parseInt(parts[3]!)));
+        }
+
+        if (scope === "sub" && action === "editmodal") {
+          return await timed(tag, () => handleSubEditModal(interaction, parseInt(parts[2]!)));
         }
 
         if (scope === "wd" && action === "reason") {

@@ -1518,7 +1518,8 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
   const reviewRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`sub:accept:${sub.id}`).setLabel("Accept").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`sub:reject:${sub.id}`).setLabel("Reject").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`sub:flag:${sub.id}`).setLabel("Flag").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`sub:flag:${sub.id}`).setLabel("Flag").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`sub:edit:${sub.id}`).setLabel("Edit Link").setStyle(ButtonStyle.Primary)
   );
 
   const logMsg = await taskLogsChannel.send({ embeds: [reviewEmbed], components: [reviewRow] });
@@ -1835,4 +1836,160 @@ export async function handleSubReviewReason(
   logSubmissionEvent(subId, action === "flag" ? "flagged" : "rejected");
 
   logger.info({ subId, action, reviewer: interaction.user.id }, `Submission ${action}ed`);
+}
+
+export async function handleSubEdit(interaction: ButtonInteraction, subId: number) {
+  const subRows = await db.select().from(submissions).where(eq(submissions.id, subId)).limit(1);
+  const sub = subRows[0];
+  if (!sub) return interaction.reply({ content: "❌ Submission not found.", flags: 64 });
+  if (sub.reviewStatus !== "pending") return interaction.reply({ content: "❌ Already reviewed.", flags: 64 });
+
+  const modal = new ModalBuilder()
+    .setCustomId(`sub:editmodal:${subId}`)
+    .setTitle(`Edit Proof — Sub #${subId}`);
+
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("proof_link")
+        .setLabel("Correct Proof Link (Reddit URL)")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setValue(sub.proofLink)
+        .setMaxLength(500)
+    )
+  );
+
+  await interaction.showModal(modal);
+}
+
+export async function handleSubEditModal(interaction: ModalSubmitInteraction, subId: number) {
+  try {
+    await interaction.deferReply({ flags: 64 });
+  } catch (err) {
+    logger.error({ err, subId }, "handleSubEditModal: deferReply failed");
+    return;
+  }
+
+  const safeField = (id: string): string => {
+    try { return interaction.fields.getTextInputValue(id) ?? ""; }
+    catch { return ""; }
+  };
+  const newProofLink = safeField("proof_link").trim();
+
+  if (!newProofLink) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Proof link is required.")] });
+  }
+  try { new URL(newProofLink); } catch {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Proof link must be a valid URL.")] });
+  }
+
+  // 1. Fetch submission, task, user
+  const subRows = await db.select().from(submissions).where(eq(submissions.id, subId)).limit(1);
+  const sub = subRows[0];
+  if (!sub) return interaction.editReply({ content: "❌ Submission not found." });
+  if (sub.reviewStatus !== "pending") return interaction.editReply({ content: "❌ Already reviewed." });
+
+  const taskRows = await db.select().from(tasks).where(eq(tasks.id, sub.taskId)).limit(1);
+  const task = taskRows[0];
+  if (!task) return interaction.editReply({ content: "❌ Task not found." });
+
+  const user = await getUserByDiscordId(sub.discordId);
+  if (!user) return interaction.editReply({ content: "❌ User not found." });
+
+  // 2. Validate the new proof link
+  const expectedAuthorsRes = await db.execute<{ reddit_username: string }>(
+    sql`SELECT DISTINCT LOWER(reddit_username) AS reddit_username FROM reddit_accounts WHERE discord_id = ${sub.discordId}`
+  );
+  const expectedUsernames = expectedAuthorsRes.rows.map(r => r.reddit_username.replace(/^u\//i, "").trim());
+  const primaryUsername = (user.redditUsername ?? "").replace(/^u\//i, "").trim().toLowerCase();
+  if (primaryUsername && !expectedUsernames.includes(primaryUsername)) {
+    expectedUsernames.push(primaryUsername);
+  }
+
+  let validation: Awaited<ReturnType<typeof validateRedditProof>> | null = null;
+  try {
+    validation = await validateRedditProof(newProofLink, expectedUsernames, task.redditLink);
+  } catch (err) {
+    logger.error({ err, subId }, "handleSubEditModal: validateRedditProof failed");
+  }
+
+  let descriptionText = `Proof URL updated to: ${newProofLink}\n\n`;
+
+  if (validation && validation.autoApproved) {
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    const availableAt = new Date(Date.now() + SEVEN_DAYS_MS);
+
+    await db.update(submissions).set({
+      proofLink: newProofLink,
+      reviewStatus: "pending_hold",
+      reviewedAt: new Date(),
+      availableAt,
+      reviewReason: `Edited by admin & Auto-validated via ${validation.verifiedVia ?? "reddit"} — awaiting hold`,
+      reviewerDiscordId: interaction.user.id,
+      liveStatus: "live",
+      lastCheckedAt: new Date(),
+      liveStatusChangedAt: new Date(),
+      proofVerifiedVia: validation.verifiedVia ?? null,
+      redditUsernameUsed: (validation.authorFound ?? "").toString().replace(/^u\//i, "").trim()
+    }).where(eq(submissions.id, subId));
+
+    descriptionText += `✅ **New link is VALID!** Submission has been auto-approved and placed on hold.`;
+  } else {
+    await db.update(submissions).set({
+      proofLink: newProofLink,
+      reviewReason: `Proof Link edited by admin <@${interaction.user.id}>`
+    }).where(eq(submissions.id, subId));
+
+    const failures = validation ? validation.failures.join("\n") : "Validation inconclusive.";
+    descriptionText += `⚠️ **New link still requires review!**\n**Validation Result:**\n${failures}\n\nYou can click Accept or Reject again to process this submission.`;
+  }
+
+  // 3. Update the review log message in the channel
+  try {
+    const guild = interaction.guild!;
+    const { taskLogsChannel } = await setupGuild(guild);
+    const logMsg = await taskLogsChannel.messages.fetch(sub.logMessageId).catch(() => null);
+    if (logMsg) {
+      const originalEmbed = logMsg.embeds[0];
+      if (originalEmbed) {
+        const updatedFields = originalEmbed.fields.map(f => {
+          if (f.name === "Proof Link" || f.name.includes("Proof")) {
+            return { name: f.name, value: newProofLink, inline: f.inline };
+          }
+          if (f.name.includes("Result") || f.name.includes("Needed")) {
+            const failures = validation ? validation.failures.join("\n") : "Validation inconclusive.";
+            return {
+              name: f.name,
+              value: validation && validation.autoApproved ? `✅ **Auto-validated**` : `⚠️ **Requires Manual Review**\n${failures}`,
+              inline: f.inline
+            };
+          }
+          return f;
+        });
+
+        const newEmbed = EmbedBuilder.from(originalEmbed)
+          .setFields(updatedFields);
+
+        if (validation && validation.autoApproved) {
+          newEmbed.setColor(COLORS.SUCCESS as any)
+            .setTitle(`✅ Submission Approved (Hold Started)`)
+            .setDescription(`Approved by <@${interaction.user.id}> after edit`);
+          await logMsg.edit({ embeds: [newEmbed], components: [] });
+        } else {
+          await logMsg.edit({ embeds: [newEmbed] });
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, subId }, "handleSubEditModal: Failed to update log message");
+  }
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(validation && validation.autoApproved ? COLORS.SUCCESS : COLORS.WARNING)
+        .setTitle("✏️ Submission Proof Link Edited")
+        .setDescription(descriptionText)
+    ]
+  });
 }

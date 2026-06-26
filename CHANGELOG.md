@@ -15,6 +15,17 @@ Format rules (please keep them so the parser stays happy):
 
 ---
 
+## v1.4.0 — 2026-06-26 — Mobile Reddit links & review improvements
+
+### Fixed
+- Mobile Reddit Share Links (/s/): Fixed an issue where submitting Reddit mobile share links (URLs containing `/s/`) would occasionally fail automated validation. The bot now correctly resolves these links to verify your comments instantly!
+
+### Added
+- Clearer Proof Validation: The bot now provides clearer error feedback when a submitted link does not match a valid Reddit post/comment, helping you catch mistakes early.
+- Admin Proof Correction: Admins can now correct minor link typos directly within the manual review interface, ensuring your submissions are processed faster without needing to reject the claim and free the slot.
+
+---
+
 ## v1.3.0 — 2026-05-20 — Maintenance
 
 ### Fixed

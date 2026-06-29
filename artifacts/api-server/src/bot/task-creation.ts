@@ -316,11 +316,11 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
     return { ok: false, error: "Slots must be an integer between 1 and 1000." };
   }
 
-  // Cap claim hold at 15 minutes — if the user doesn't submit proof in time,
+  // Cap claim hold at 20 minutes — if the user doesn't submit proof in time,
   // the slot is released back to the #tasks channel automatically.
-  // The persisted timeLimitMinutes is informational; CLAIM_TIMEOUT_MINUTES (15)
+  // The persisted timeLimitMinutes is informational; CLAIM_TIMEOUT_MINUTES (20)
   // is the actual hold enforced at claim time in handleTaskClaim.
-  const timeLimitMinutes = 15;
+  const timeLimitMinutes = 20;
 
   // Default verify/hold window changed from 24h → 7 days (168h) per product
   // request. Per-task override is honored when caller passes input.holdHours.

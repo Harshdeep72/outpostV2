@@ -102,9 +102,9 @@ export const TASK_PING_DELAY_MS = 5 * 60 * 1000;
 // per-task / per-reddit-account; this constant remains the fallback default.
 export const TASK_COOLDOWN_MINUTES = 240; // 4 hours
 // Hard cap on how long a claim is held before auto-expiring back to the channel.
-// Set to 15 minutes (was effectively 1h via timeLimitMinutes default) so unclaimed
+// Set to 20 minutes (was effectively 1h via timeLimitMinutes default) so unclaimed
 // slots return to the public #tasks channel quickly.
-export const CLAIM_TIMEOUT_MINUTES = 15;
+export const CLAIM_TIMEOUT_MINUTES = 20;
 // One active claim at a time per user. Once they submit (proof entered), the
 // claim moves to "submitted" status and stops counting toward this cap, AND
 // the 30-min cooldown begins — so they can claim a new task only after the

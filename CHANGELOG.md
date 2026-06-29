@@ -15,6 +15,13 @@ Format rules (please keep them so the parser stays happy):
 
 ---
 
+## v1.4.1 — 2026-06-29 — Task Claim Window Extension
+
+### Changed
+- Task Claim Window: Increased the task claim window from 15 minutes to 20 minutes to give workers more time to complete tasks (such as warming up accounts/tools).
+
+---
+
 ## v1.4.0 — 2026-06-26 — Mobile Reddit links & review improvements
 
 ### Fixed

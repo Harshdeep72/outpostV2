@@ -124,7 +124,7 @@ export function startClaimExpirer(client: Client) {
               makeEmbed(COLORS.WARNING)
                 .setTitle("⏱️ Claim Expired")
                 .setDescription(
-                  `Your 15-minute claim on **Task #${taskId}** expired and the slot is back in #tasks.\n\n` +
+                  `Your 20-minute claim on **Task #${taskId}** expired and the slot is back in #tasks.\n\n` +
                   `**You can't reclaim this specific task** — pick a different one.\n` +
                   `If this was a mistake, ping an admin to unblock you.`
                 )

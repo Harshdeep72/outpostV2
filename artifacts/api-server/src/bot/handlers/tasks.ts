@@ -578,7 +578,7 @@ export async function handleTaskClaim(
   }
 
   // Permanent re-claim block. If this user previously claimed this task and
-  // let the 15-min window expire, claimExpirer wrote a row to task_claim_blocks
+  // let the 20-min window expire, claimExpirer wrote a row to task_claim_blocks
   // and this user can NEVER reclaim this specific task again (admin override
   // via DELETE /admin/claim-blocks/:taskId/:discordId). Bypass for tasks that
   // explicitly allow multi-claim — that's an intentional power-user mode.
@@ -589,13 +589,13 @@ export async function handleTaskClaim(
     if (blockRes.rows.length > 0) {
       return interaction.editReply({
         embeds: [makeEmbed(COLORS.DANGER).setDescription(
-          "🚫 You let the 15-minute claim window expire on this task earlier, so you can't claim it again. Other tasks are unaffected — pick a different one."
+          "🚫 You let the 20-minute claim window expire on this task earlier, so you can't claim it again. Other tasks are unaffected — pick a different one."
         )],
       });
     }
   }
 
-  // Hard cap claim hold at 15 minutes regardless of task.timeLimitMinutes —
+  // Hard cap claim hold at 20 minutes regardless of task.timeLimitMinutes —
   // if the user hasn't submitted by then, the slot returns to #tasks.
   const expiresAt = new Date(Date.now() + CLAIM_TIMEOUT_MINUTES * 60 * 1000);
 

@@ -15,6 +15,13 @@ Format rules (please keep them so the parser stays happy):
 
 ---
 
+## v1.4.2 — 2026-07-01 — Wallet Pending Balance Sync Fix
+
+### Fixed
+- Wallet Pending Balance: Fixed a bug where a user's pending balance in the `/wallet` command could become out-of-sync or show positive values (e.g. $0.50) even after their submissions were rejected or cleared. All user pending balances have been recalculated and fully synchronized.
+
+---
+
 ## v1.4.1 — 2026-06-29 — Task Claim Window Extension
 
 ### Changed

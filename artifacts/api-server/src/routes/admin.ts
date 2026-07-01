@@ -1943,6 +1943,34 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
       return;
     }
 
+    const prevCredited =
+      prevSub &&
+      (prevSub.reviewStatus === "pending_hold" ||
+       prevSub.reviewStatus === "accepted" ||
+       (prevSub.reviewStatus === "pending" && prevSub.availableAt !== null)) &&
+      prevSub.movedToAvailable === 0;
+
+    const newCredited =
+      (reviewStatus === "pending_hold" ||
+       reviewStatus === "accepted" ||
+       (reviewStatus === "pending" && prevSub?.availableAt !== null)) &&
+      prevSub?.movedToAvailable !== 1;
+
+    // Adjust balance_pending based on transition
+    if (!prevCredited && newCredited) {
+      await pool.query(
+        `UPDATE users SET balance_pending = balance_pending + $1 WHERE id = $2`,
+        [updated.reward, updated.userId]
+      );
+      req.log.info({ submissionId: updated.id, userId: updated.userId, reward: updated.reward }, "Dashboard: credited pending balance");
+    } else if (prevCredited && !newCredited) {
+      await pool.query(
+        `UPDATE users SET balance_pending = GREATEST(0, balance_pending - $1) WHERE id = $2`,
+        [updated.reward, updated.userId]
+      );
+      req.log.info({ submissionId: updated.id, userId: updated.userId, reward: updated.reward }, "Dashboard: debited pending balance");
+    }
+
     // If submission was just accepted and wasn't accepted before, credit the user's balance.
     const justAccepted = reviewStatus === "accepted" && prevSub?.reviewStatus !== "accepted";
     if (justAccepted) {
@@ -1955,7 +1983,7 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
       if (prevSub?.movedToAvailable === 1) {
         req.log.warn(
           { submissionId: updated.id, userId: updated.userId },
-          "Dashboard: re-accept on already-cleared submission — skipping balance credit and queue reset to prevent double-payout"
+          "Dashboard: re-accept on already-cleared submission — skipping queue reset to prevent double-payout"
         );
       } else {
         // Enforce a 10-minute minimum hold on all first-time accepts so the
@@ -1974,10 +2002,6 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
         // credit on a first-time accept. The pendingProcessor will release funds
         // once safeAvailableAt arrives and the early liveness check has had a
         // chance to catch deletions.
-        await pool.query(
-          `UPDATE users SET balance_pending = balance_pending + $1 WHERE id = $2`,
-          [updated.reward, updated.userId]
-        );
         await pool.query(
           `UPDATE submissions SET available_at = $1, moved_to_available = 0 WHERE id = $2`,
           [safeAvailableAt, updated.id]

@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetWallet, handleSetPaypal, handleAdminSetUpi } from "./handlers/wallet.js";
-import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
+import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
 import { handleWdApprove, handleWdCreatorPay, handleWdReject, handleWdRejectReason } from "./handlers/withdrawals.js";
@@ -87,6 +87,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "addbalance") return await timed(name, () => handleAddBalance(interaction));
         if (name === "removebalance") return await timed(name, () => handleRemoveBalance(interaction));
         if (name === "checksubmission") return await timed(name, () => handleCheckSubmission(interaction));
+        if (name === "submission") return await timed(name, () => handleSubmissionCommand(interaction));
         if (name === "approvesubmission") return await timed(name, () => handleApproveSubmission(interaction));
         if (name === "reopenslot") return await timed(name, () => handleReopenSlot(interaction));
         if (name === "mystatus") return await timed(name, () => handleMyStatusCommand(interaction));

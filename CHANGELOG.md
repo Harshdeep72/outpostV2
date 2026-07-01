@@ -15,6 +15,13 @@ Format rules (please keep them so the parser stays happy):
 
 ---
 
+## v1.5.0 — 2026-07-01 — Submission Inspector Command
+
+### Added
+- Submission Inspector Command (`/submission`): Added a new command for mods and admins to view detailed database records of any submission. You can specify a submission ID to view that exact submission, or specify a Discord user to view their latest submission. It reports all details including review status (accepted, rejected, etc.), live status on Reddit, reward, proof links, reviewer info, and payout status.
+
+---
+
 ## v1.4.2 — 2026-07-01 — Wallet Pending Balance Sync Fix
 
 ### Fixed

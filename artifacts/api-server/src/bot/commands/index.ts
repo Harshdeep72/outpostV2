@@ -347,6 +347,21 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setMinValue(1)
     );
 
+  const submission = new SlashCommandBuilder()
+    .setName("submission")
+    .setDescription("View details of a submission (review status, reward, proof, etc.) (mod/admin only)")
+    .addIntegerOption((o) =>
+      o.setName("id")
+        .setDescription("Submission ID to view (e.g. 1902)")
+        .setRequired(false)
+        .setMinValue(1)
+    )
+    .addUserOption((o) =>
+      o.setName("user")
+        .setDescription("User whose latest submission to view")
+        .setRequired(false)
+    );
+
   const approvesubmission = new SlashCommandBuilder()
     .setName("approvesubmission")
     .setDescription("Manually approve a wrongly-rejected submission and credit the reward (mod/admin only)")
@@ -409,7 +424,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, approvesubmission, reopenslot, mystatus, processholds, forcepayout, requeue,
+    checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, forcepayout, requeue,
     adminsetupi,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];

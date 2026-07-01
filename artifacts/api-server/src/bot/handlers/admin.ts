@@ -1070,6 +1070,17 @@ export async function handleRequeueCommand(interaction: ChatInputCommandInteract
 
     const { taskLogsChannel } = await setupGuild(guild);
     if (taskLogsChannel) {
+      const getStatusLabel = (status: string, movedToAvailable: number) => {
+        if (status === "accepted") {
+          return movedToAvailable === 1 ? "✅ Accepted" : "⏱️ Accepted (Hold)";
+        }
+        if (status === "pending_hold") return "⏱️ Pending Hold";
+        if (status === "pending") return "⏳ Pending";
+        if (status === "rejected") return "❌ Rejected";
+        if (status === "flagged") return "🚩 Flagged";
+        return status;
+      };
+
       await taskLogsChannel.send({
         content: `🔄 /requeue triggered by <@${interaction.user.id}> — ${count} submissions moved back to pending_hold`
       });
@@ -1097,13 +1108,17 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     return `<t:${unix}:${format}>`;
   };
 
-  const statusEmoji: Record<string, string> = {
-    pending: "⏳ Pending",
-    pending_hold: "⏱️ Pending Hold",
-    accepted: "✅ Accepted",
-    rejected: "❌ Rejected",
-    flagged: "🚩 Flagged",
+  const getStatusLabel = (status: string, movedToAvailable: number) => {
+    if (status === "accepted") {
+      return movedToAvailable === 1 ? "✅ Accepted" : "⏱️ Accepted (Hold)";
+    }
+    if (status === "pending_hold") return "⏱️ Pending Hold";
+    if (status === "pending") return "⏳ Pending";
+    if (status === "rejected") return "❌ Rejected";
+    if (status === "flagged") return "🚩 Flagged";
+    return status;
   };
+
   const liveEmoji: Record<string, string> = {
     live: "✅ Live",
     removed: "🛡️ Removed",
@@ -1171,7 +1186,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
         { name: "Reddit User", value: sub.reddit_username ? `[u/${sub.reddit_username}](https://reddit.com/u/${sub.reddit_username})` : "—", inline: true },
         { name: "Task", value: `#${sub.task_id} — ${sub.task_title}`, inline: false },
         { name: "Reward", value: formatMoney(sub.reward), inline: true },
-        { name: "Review Status", value: statusEmoji[sub.review_status] ?? sub.review_status, inline: true },
+        { name: "Review Status", value: getStatusLabel(sub.review_status, sub.moved_to_available), inline: true },
         { name: "Live Status", value: liveEmoji[sub.live_status] ?? sub.live_status, inline: true },
         { name: "Proof Link", value: `[Open Proof Link](${sub.proof_link})`, inline: false },
         { name: "Submitted At", value: `<t:${unixSubmitted}:F> (<t:${unixSubmitted}:R>)`, inline: false }
@@ -1214,6 +1229,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     task_id: number;
     reward: string;
     review_status: string;
+    moved_to_available: number;
     submitted_at: string;
     discord_username?: string;
     discord_id?: string;
@@ -1223,7 +1239,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
   let rows;
   if (targetUser) {
     rows = await db.execute<SubmissionSummary>(
-      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.submitted_at, u.discord_username, t.title as task_title
+      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.moved_to_available, s.submitted_at, u.discord_username, t.title as task_title
           FROM submissions s
           LEFT JOIN users u ON u.id = s.user_id
           LEFT JOIN tasks t ON t.id = s.task_id
@@ -1232,7 +1248,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     );
   } else {
     rows = await db.execute<SubmissionSummary>(
-      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.submitted_at, u.discord_username, t.title as task_title
+      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.moved_to_available, s.submitted_at, u.discord_username, t.title as task_title
           FROM submissions s
           LEFT JOIN users u ON u.id = s.user_id
           LEFT JOIN tasks t ON t.id = s.task_id
@@ -1276,7 +1292,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
         { name: "Reddit User", value: sub.reddit_username ? `[u/${sub.reddit_username}](https://reddit.com/u/${sub.reddit_username})` : "—", inline: true },
         { name: "Task", value: `#${sub.task_id} — ${sub.task_title}`, inline: false },
         { name: "Reward", value: formatMoney(sub.reward), inline: true },
-        { name: "Review Status", value: statusEmoji[sub.review_status] ?? sub.review_status, inline: true },
+        { name: "Review Status", value: getStatusLabel(sub.review_status, sub.moved_to_available), inline: true },
         { name: "Live Status", value: liveEmoji[sub.live_status] ?? sub.live_status, inline: true },
         { name: "Proof Link", value: `[Open Proof Link](${sub.proof_link})`, inline: false },
         { name: "Submitted At", value: `<t:${unixSubmitted}:F> (<t:${unixSubmitted}:R>)`, inline: false }
@@ -1316,7 +1332,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
   // Otherwise, render a list with a select menu.
   const listLines = rows.rows.map((r) => {
     const timeAgo = formatDiscordTime(r.submitted_at, "R");
-    const status = statusEmoji[r.review_status] ?? r.review_status;
+    const status = getStatusLabel(r.review_status, r.moved_to_available);
     const workerText = r.discord_username ? ` by **@${r.discord_username}**` : "";
     return `**#${r.id}** | **${formatMoney(r.reward)}** | ${status} | *${r.task_title}*${workerText} (${timeAgo})`;
   });
@@ -1330,7 +1346,7 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     .setFooter({ text: `Requested by ${interaction.user.tag} • ${new Date().toUTCString()}` });
 
   const selectOptions = rows.rows.map((r) => {
-    const status = statusEmoji[r.review_status] ?? r.review_status;
+    const status = getStatusLabel(r.review_status, r.moved_to_available);
     return {
       label: `Inspect #${r.id} (${formatMoney(r.reward)})`,
       value: String(r.id),
@@ -1414,13 +1430,17 @@ export async function handleSubmissionSelect(interaction: StringSelectMenuIntera
     return `<t:${unix}:${format}>`;
   };
 
-  const statusEmoji: Record<string, string> = {
-    pending: "⏳ Pending",
-    pending_hold: "⏱️ Pending Hold",
-    accepted: "✅ Accepted",
-    rejected: "❌ Rejected",
-    flagged: "🚩 Flagged",
+  const getStatusLabel = (status: string, movedToAvailable: number) => {
+    if (status === "accepted") {
+      return movedToAvailable === 1 ? "✅ Accepted" : "⏱️ Accepted (Hold)";
+    }
+    if (status === "pending_hold") return "⏱️ Pending Hold";
+    if (status === "pending") return "⏳ Pending";
+    if (status === "rejected") return "❌ Rejected";
+    if (status === "flagged") return "🚩 Flagged";
+    return status;
   };
+
   const liveEmoji: Record<string, string> = {
     live: "✅ Live",
     removed: "🛡️ Removed",
@@ -1441,7 +1461,7 @@ export async function handleSubmissionSelect(interaction: StringSelectMenuIntera
       { name: "Reddit User", value: sub.reddit_username ? `[u/${sub.reddit_username}](https://reddit.com/u/${sub.reddit_username})` : "—", inline: true },
       { name: "Task", value: `#${sub.task_id} — ${sub.task_title}`, inline: false },
       { name: "Reward", value: formatMoney(sub.reward), inline: true },
-      { name: "Review Status", value: statusEmoji[sub.review_status] ?? sub.review_status, inline: true },
+      { name: "Review Status", value: getStatusLabel(sub.review_status, sub.moved_to_available), inline: true },
       { name: "Live Status", value: liveEmoji[sub.live_status] ?? sub.live_status, inline: true },
       { name: "Proof Link", value: `[Open Proof Link](${sub.proof_link})`, inline: false },
       { name: "Submitted At", value: `<t:${unixSubmitted}:F> (<t:${unixSubmitted}:R>)`, inline: false }

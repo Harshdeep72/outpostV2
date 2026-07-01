@@ -2,6 +2,9 @@ import {
   type ChatInputCommandInteraction,
   type TextChannel,
   ChannelType,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  type StringSelectMenuInteraction,
 } from "discord.js";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
@@ -1088,11 +1091,25 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
   const submissionId = interaction.options.getInteger("id");
   const targetUser = interaction.options.getUser("user");
 
-  if (!submissionId && !targetUser) {
-    return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Please specify either a submission `id` or a `user`.")],
-    });
-  }
+  const formatDiscordTime = (dateStr: string | null, format: "R" | "F" = "F") => {
+    if (!dateStr) return "—";
+    const unix = Math.floor(new Date(dateStr).getTime() / 1000);
+    return `<t:${unix}:${format}>`;
+  };
+
+  const statusEmoji: Record<string, string> = {
+    pending: "⏳ Pending",
+    pending_hold: "⏱️ Pending Hold",
+    accepted: "✅ Accepted",
+    rejected: "❌ Rejected",
+    flagged: "🚩 Flagged",
+  };
+  const liveEmoji: Record<string, string> = {
+    live: "✅ Live",
+    removed: "🛡️ Removed",
+    deleted: "🗑️ Deleted",
+    unknown: "❔ Unknown",
+  };
 
   type SubmissionDetail = {
     id: number;
@@ -1122,32 +1139,269 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     task_title: string;
   };
 
-  let rows;
   if (submissionId) {
-    rows = await db.execute<SubmissionDetail>(
+    // ── CASE 1: Single Submission View ──
+    const rows = await db.execute<SubmissionDetail>(
       sql`SELECT s.*, u.discord_username, u.reddit_username, t.title as task_title
           FROM submissions s
           LEFT JOIN users u ON u.id = s.user_id
           LEFT JOIN tasks t ON t.id = s.task_id
           WHERE s.id = ${submissionId} LIMIT 1`
     );
-  } else {
-    rows = await db.execute<SubmissionDetail>(
-      sql`SELECT s.*, u.discord_username, u.reddit_username, t.title as task_title
+
+    if (rows.rows.length === 0) {
+      return interaction.editReply({
+        embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Submission **#${submissionId}** not found.`)],
+      });
+    }
+
+    const sub = rows.rows[0]!;
+    const unixSubmitted = Math.floor(new Date(sub.submitted_at).getTime() / 1000);
+
+    const payoutStatus = sub.moved_to_available === 1
+      ? `Paid ✅ (on ${formatDiscordTime(sub.paid_at)})`
+      : sub.available_at
+        ? `Unpaid ⏳ (Releases ${formatDiscordTime(sub.available_at, "R")})`
+        : "Unpaid ⏳";
+
+    const embed = makeEmbed(COLORS.PRIMARY)
+      .setTitle(`🔍 Submission #${sub.id} Details`)
+      .addFields(
+        { name: "Worker", value: `<@${sub.discord_id}> (${sub.discord_username})`, inline: true },
+        { name: "Reddit User", value: sub.reddit_username ? `[u/${sub.reddit_username}](https://reddit.com/u/${sub.reddit_username})` : "—", inline: true },
+        { name: "Task", value: `#${sub.task_id} — ${sub.task_title}`, inline: false },
+        { name: "Reward", value: formatMoney(sub.reward), inline: true },
+        { name: "Review Status", value: statusEmoji[sub.review_status] ?? sub.review_status, inline: true },
+        { name: "Live Status", value: liveEmoji[sub.live_status] ?? sub.live_status, inline: true },
+        { name: "Proof Link", value: `[Open Proof Link](${sub.proof_link})`, inline: false },
+        { name: "Submitted At", value: `<t:${unixSubmitted}:F> (<t:${unixSubmitted}:R>)`, inline: false }
+      );
+
+    if (sub.reviewer_discord_id) {
+      const reviewerValue = sub.reviewer_discord_id === "system"
+        ? "🤖 System (Auto-validated)"
+        : sub.reviewer_discord_id.startsWith("dashboard:")
+          ? `Dashboard User: **${sub.reviewer_discord_id.replace("dashboard:", "")}**`
+          : `<@${sub.reviewer_discord_id}>`;
+      embed.addFields(
+        { name: "Reviewed By", value: reviewerValue, inline: true },
+        { name: "Reviewed At", value: formatDiscordTime(sub.reviewed_at), inline: true }
+      );
+    }
+
+    if (sub.review_reason) {
+      embed.addFields({ name: "Review/Verdict Reason", value: sub.review_reason, inline: false });
+    }
+
+    if (sub.removal_reason) {
+      embed.addFields({ name: "Reddit Removal Reason", value: sub.removal_reason, inline: false });
+    }
+
+    embed.addFields({ name: "Payout Status", value: payoutStatus, inline: false });
+
+    if (sub.screenshot_url) {
+      embed.setImage(sub.screenshot_url);
+    }
+
+    embed.setFooter({ text: `Requested by ${interaction.user.tag} • ${new Date().toUTCString()}` });
+
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  // ── CASE 2: List Submissions View ──
+  type SubmissionSummary = {
+    id: number;
+    task_id: number;
+    reward: string;
+    review_status: string;
+    submitted_at: string;
+    discord_username?: string;
+    discord_id?: string;
+    task_title: string;
+  };
+
+  let rows;
+  if (targetUser) {
+    rows = await db.execute<SubmissionSummary>(
+      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.submitted_at, u.discord_username, t.title as task_title
           FROM submissions s
           LEFT JOIN users u ON u.id = s.user_id
           LEFT JOIN tasks t ON t.id = s.task_id
-          WHERE s.discord_id = ${targetUser!.id}
-          ORDER BY s.id DESC LIMIT 1`
+          WHERE s.discord_id = ${targetUser.id}
+          ORDER BY s.id DESC LIMIT 10`
+    );
+  } else {
+    rows = await db.execute<SubmissionSummary>(
+      sql`SELECT s.id, s.task_id, s.reward, s.review_status, s.submitted_at, u.discord_username, t.title as task_title
+          FROM submissions s
+          LEFT JOIN users u ON u.id = s.user_id
+          LEFT JOIN tasks t ON t.id = s.task_id
+          WHERE s.review_status = 'pending'
+          ORDER BY s.id DESC LIMIT 10`
     );
   }
 
   if (rows.rows.length === 0) {
-    const errorMsg = submissionId
-      ? `❌ Submission **#${submissionId}** not found.`
-      : `❌ No submissions found for <@${targetUser!.id}>.`;
+    const errorMsg = targetUser
+      ? `❌ No submissions found for <@${targetUser.id}>.`
+      : `✅ No pending submissions requiring review.`;
     return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription(errorMsg)],
+      embeds: [makeEmbed(COLORS.PRIMARY).setDescription(errorMsg)],
+    });
+  }
+
+  // If there's exactly 1 submission, just render it directly instead of a list.
+  if (rows.rows.length === 1) {
+    const singleId = rows.rows[0].id;
+    const subRows = await db.execute<SubmissionDetail>(
+      sql`SELECT s.*, u.discord_username, u.reddit_username, t.title as task_title
+          FROM submissions s
+          LEFT JOIN users u ON u.id = s.user_id
+          LEFT JOIN tasks t ON t.id = s.task_id
+          WHERE s.id = ${singleId} LIMIT 1`
+    );
+    const sub = subRows.rows[0]!;
+    const unixSubmitted = Math.floor(new Date(sub.submitted_at).getTime() / 1000);
+
+    const payoutStatus = sub.moved_to_available === 1
+      ? `Paid ✅ (on ${formatDiscordTime(sub.paid_at)})`
+      : sub.available_at
+        ? `Unpaid ⏳ (Releases ${formatDiscordTime(sub.available_at, "R")})`
+        : "Unpaid ⏳";
+
+    const embed = makeEmbed(COLORS.PRIMARY)
+      .setTitle(`🔍 Submission #${sub.id} Details`)
+      .addFields(
+        { name: "Worker", value: `<@${sub.discord_id}> (${sub.discord_username})`, inline: true },
+        { name: "Reddit User", value: sub.reddit_username ? `[u/${sub.reddit_username}](https://reddit.com/u/${sub.reddit_username})` : "—", inline: true },
+        { name: "Task", value: `#${sub.task_id} — ${sub.task_title}`, inline: false },
+        { name: "Reward", value: formatMoney(sub.reward), inline: true },
+        { name: "Review Status", value: statusEmoji[sub.review_status] ?? sub.review_status, inline: true },
+        { name: "Live Status", value: liveEmoji[sub.live_status] ?? sub.live_status, inline: true },
+        { name: "Proof Link", value: `[Open Proof Link](${sub.proof_link})`, inline: false },
+        { name: "Submitted At", value: `<t:${unixSubmitted}:F> (<t:${unixSubmitted}:R>)`, inline: false }
+      );
+
+    if (sub.reviewer_discord_id) {
+      const reviewerValue = sub.reviewer_discord_id === "system"
+        ? "🤖 System (Auto-validated)"
+        : sub.reviewer_discord_id.startsWith("dashboard:")
+          ? `Dashboard User: **${sub.reviewer_discord_id.replace("dashboard:", "")}**`
+          : `<@${sub.reviewer_discord_id}>`;
+      embed.addFields(
+        { name: "Reviewed By", value: reviewerValue, inline: true },
+        { name: "Reviewed At", value: formatDiscordTime(sub.reviewed_at), inline: true }
+      );
+    }
+
+    if (sub.review_reason) {
+      embed.addFields({ name: "Review/Verdict Reason", value: sub.review_reason, inline: false });
+    }
+
+    if (sub.removal_reason) {
+      embed.addFields({ name: "Reddit Removal Reason", value: sub.removal_reason, inline: false });
+    }
+
+    embed.addFields({ name: "Payout Status", value: payoutStatus, inline: false });
+
+    if (sub.screenshot_url) {
+      embed.setImage(sub.screenshot_url);
+    }
+
+    embed.setFooter({ text: `Requested by ${interaction.user.tag} • ${new Date().toUTCString()}` });
+
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  // Otherwise, render a list with a select menu.
+  const listLines = rows.rows.map((r) => {
+    const timeAgo = formatDiscordTime(r.submitted_at, "R");
+    const status = statusEmoji[r.review_status] ?? r.review_status;
+    const workerText = r.discord_username ? ` by **@${r.discord_username}**` : "";
+    return `**#${r.id}** | **${formatMoney(r.reward)}** | ${status} | *${r.task_title}*${workerText} (${timeAgo})`;
+  });
+
+  const embed = makeEmbed(COLORS.PRIMARY)
+    .setTitle(targetUser ? `📋 Submissions — ${targetUser.username}` : "📋 Latest Pending Submissions")
+    .setDescription(
+      (targetUser ? `Showing up to 10 recent submissions for <@${targetUser.id}>.\n\n` : "Showing up to 10 latest pending submissions requiring review.\n\n") +
+      listLines.join("\n")
+    )
+    .setFooter({ text: `Requested by ${interaction.user.tag} • ${new Date().toUTCString()}` });
+
+  const selectOptions = rows.rows.map((r) => {
+    const status = statusEmoji[r.review_status] ?? r.review_status;
+    return {
+      label: `Inspect #${r.id} (${formatMoney(r.reward)})`,
+      value: String(r.id),
+      description: `Status: ${status} | Task: ${r.task_title.substring(0, 50)}`,
+    };
+  });
+
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId("sub:select")
+    .setPlaceholder("Select a submission to inspect...")
+    .addOptions(selectOptions);
+
+  const rowComponent = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+  return interaction.editReply({ embeds: [embed], components: [rowComponent] });
+}
+
+export async function handleSubmissionSelect(interaction: StringSelectMenuInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.followUp({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can view submission details.")],
+      flags: 64,
+    });
+  }
+
+  const submissionId = parseInt(interaction.values[0]);
+
+  type SubmissionDetail = {
+    id: number;
+    claim_id: number;
+    task_id: number;
+    user_id: number;
+    discord_id: string;
+    proof_link: string;
+    screenshot_url: string | null;
+    reward: string;
+    review_status: string;
+    reviewer_discord_id: string | null;
+    review_reason: string | null;
+    log_message_id: string | null;
+    available_at: string | null;
+    moved_to_available: number;
+    submitted_at: string;
+    reviewed_at: string | null;
+    live_status: string;
+    last_checked_at: string | null;
+    removal_reason: string | null;
+    live_status_changed_at: string | null;
+    paid_at: string | null;
+    proof_verified_via: string | null;
+    discord_username: string;
+    reddit_username: string | null;
+    task_title: string;
+  };
+
+  const rows = await db.execute<SubmissionDetail>(
+    sql`SELECT s.*, u.discord_username, u.reddit_username, t.title as task_title
+        FROM submissions s
+        LEFT JOIN users u ON u.id = s.user_id
+        LEFT JOIN tasks t ON t.id = s.task_id
+        WHERE s.id = ${submissionId} LIMIT 1`
+  );
+
+  if (rows.rows.length === 0) {
+    return interaction.followUp({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Submission **#${submissionId}** not found.`)],
+      flags: 64,
     });
   }
 
@@ -1194,9 +1448,11 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
     );
 
   if (sub.reviewer_discord_id) {
-    const reviewerValue = sub.reviewer_discord_id.startsWith("dashboard:")
-      ? `Dashboard User: **${sub.reviewer_discord_id.replace("dashboard:", "")}**`
-      : `<@${sub.reviewer_discord_id}>`;
+    const reviewerValue = sub.reviewer_discord_id === "system"
+      ? "🤖 System (Auto-validated)"
+      : sub.reviewer_discord_id.startsWith("dashboard:")
+        ? `Dashboard User: **${sub.reviewer_discord_id.replace("dashboard:", "")}**`
+        : `<@${sub.reviewer_discord_id}>`;
     embed.addFields(
       { name: "Reviewed By", value: reviewerValue, inline: true },
       { name: "Reviewed At", value: formatDiscordTime(sub.reviewed_at), inline: true }
@@ -1219,5 +1475,5 @@ export async function handleSubmissionCommand(interaction: ChatInputCommandInter
 
   embed.setFooter({ text: `Requested by ${interaction.user.tag} • ${new Date().toUTCString()}` });
 
-  return interaction.editReply({ embeds: [embed] });
+  return interaction.followUp({ embeds: [embed], flags: 64 });
 }

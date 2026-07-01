@@ -18,7 +18,10 @@ Format rules (please keep them so the parser stays happy):
 ## v1.5.0 — 2026-07-01 — Submission Inspector Command
 
 ### Added
-- Submission Inspector Command (`/submission`): Added a new command for mods and admins to view detailed database records of any submission. You can specify a submission ID to view that exact submission, or specify a Discord user to view their latest submission. It reports all details including review status (accepted, rejected, etc.), live status on Reddit, reward, proof links, reviewer info, and payout status.
+- Submission Inspector Command (`/submission`): Added a new command for mods and admins to view detailed database records of any submission. You can specify a submission ID to view that exact submission, or specify a Discord user to view their recent submissions. If multiple submissions are found (or if neither option is provided, showing the latest pending queue), it displays a summary list with a dropdown select menu to easily inspect any submission.
+
+### Fixed
+- System Mentions: Fixed display issue where automated system reviews showed as literal `<@system>` mentions in Discord.
 
 ---
 

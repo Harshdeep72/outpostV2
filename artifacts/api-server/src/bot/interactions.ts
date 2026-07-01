@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetWallet, handleSetPaypal, handleAdminSetUpi } from "./handlers/wallet.js";
-import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
+import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
 import { handleWdApprove, handleWdCreatorPay, handleWdReject, handleWdRejectReason } from "./handlers/withdrawals.js";
@@ -96,6 +96,14 @@ export function registerInteractionHandler(client: Client) {
         if (name === "requeue") return await timed(name, () => handleRequeueCommand(interaction));
         logger.warn({ name }, "Unknown command");
         return;
+      }
+
+      if (interaction.isStringSelectMenu()) {
+        const [scope, action] = interaction.customId.split(":");
+        const tag = `select:${scope}:${action}`;
+        if (scope === "sub" && action === "select") {
+          return await timed(tag, () => handleSubmissionSelect(interaction));
+        }
       }
 
       if (interaction.isButton()) {

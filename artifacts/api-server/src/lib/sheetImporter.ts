@@ -106,8 +106,45 @@ export function autoFixCsv(rawCsv: string): { csv: string; notes: string[] } {
   headers.forEach((h, i) => { idx[h.toLowerCase()] = i; });
 
   const titleIdx = idx["title"];
-  const instructionsIdx = idx["instructions"];
-  const prewrittenIdx = idx["prewritten_comment"] ?? idx["comment"];
+  let instructionsIdx = idx["instructions"];
+  let prewrittenIdx = idx["prewritten_comment"] ?? idx["comment"];
+  const taskLinkIdx = idx["task_link"];
+
+  // Step 1.5: Detect swapped "task_link" and "instructions" columns.
+  // If task_link contains comment text (non-URL) and instructions contains a URL, they are swapped.
+  let swappedCount = 0;
+  if (taskLinkIdx != null && instructionsIdx != null) {
+    const firstRow = rows[1];
+    if (firstRow) {
+      const taskLinkVal = (firstRow[taskLinkIdx] ?? "").trim();
+      const instructionsVal = (firstRow[instructionsIdx] ?? "").trim();
+
+      const isTaskLinkUrl = /^https?:\/\//i.test(taskLinkVal);
+      const isInstructionsUrl = /^https?:\/\//i.test(instructionsVal);
+
+      if (!isTaskLinkUrl && isInstructionsUrl) {
+        if (prewrittenIdx == null) {
+          headers.push("prewritten_comment");
+          prewrittenIdx = headers.length - 1;
+        }
+
+        for (let r = 1; r < rows.length; r++) {
+          while (rows[r].length < headers.length) rows[r].push("");
+          const tLink = (rows[r][taskLinkIdx] ?? "").trim();
+          const inst = (rows[r][instructionsIdx] ?? "").trim();
+
+          rows[r][taskLinkIdx] = inst;
+          rows[r][prewrittenIdx] = tLink;
+          rows[r][instructionsIdx] = "";
+          swappedCount++;
+        }
+        notes.push(
+          `Detected swapped "task_link" and "instructions" columns (task_link had comment text, instructions had URL). ` +
+          `Automatically moved the URLs to "task_link", comment text to "prewritten_comment", and filled "instructions" with defaults.`
+        );
+      }
+    }
+  }
 
   // Step 2: detect "long titles" pattern → move to prewritten_comment.
   let addedPrewritten = false;
@@ -172,7 +209,7 @@ export function autoFixCsv(rawCsv: string): { csv: string; notes: string[] } {
       `(needed for parser compatibility — Reddit comments still post fine)`
     );
   }
-  if (!addedPrewritten && movedCount === 0 && filledInstructions === 0 && trimmedCount === 0 && counter.collapsed === 0) {
+  if (!addedPrewritten && movedCount === 0 && swappedCount === 0 && filledInstructions === 0 && trimmedCount === 0 && counter.collapsed === 0) {
     notes.push("No fixes needed — CSV was already clean");
   }
   return { csv: out.join("\n"), notes };

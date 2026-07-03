@@ -777,10 +777,12 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   await db.execute(
     sql`UPDATE submissions
-        SET live_status    = 'live',
-            review_status  = 'accepted',
-            removal_reason = NULL,
-            review_reason  = ${reviewReason}
+        SET live_status         = 'live',
+            review_status       = 'accepted',
+            removal_reason      = NULL,
+            review_reason       = ${reviewReason},
+            moved_to_available  = 1,
+            paid_at             = NOW()
         WHERE id = ${submissionId}`
   );
 

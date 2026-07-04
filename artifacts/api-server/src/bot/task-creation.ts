@@ -284,7 +284,7 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
     if (type === "post") return { ok: false, error: "Title is required for Reddit post tasks (it's used as the post title)." };
     title = autoTitle(type, (input.link ?? "").trim());
   }
-  if (title.length > 500) return { ok: false, error: "Title must be 500 characters or fewer." };
+  if (title.length > 1000) return { ok: false, error: "Title must be 1000 characters or fewer." };
 
   const imageUrlRaw = (input.imageUrl ?? "").trim();
   let imageUrl: string | null = null;

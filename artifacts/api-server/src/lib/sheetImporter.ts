@@ -153,7 +153,7 @@ export function autoFixCsv(rawCsv: string): { csv: string; notes: string[] } {
     let longTitleRows = 0;
     for (let r = 1; r < rows.length; r++) {
       const t = (rows[r][titleIdx] ?? "").trim();
-      if (t.length > 100) longTitleRows++;
+      if (t.length > 300) longTitleRows++;
     }
     if (longTitleRows > 0) {
       headers.push("prewritten_comment");
@@ -163,7 +163,7 @@ export function autoFixCsv(rawCsv: string): { csv: string; notes: string[] } {
         // Make sure each row has the same number of columns.
         while (rows[r].length < headers.length) rows[r].push("");
         const t = (rows[r][titleIdx] ?? "").trim();
-        if (t.length > 100) {
+        if (t.length > 300) {
           rows[r][newPrewrittenIdx] = t;
           rows[r][titleIdx] = "";
           movedCount++;
@@ -171,7 +171,7 @@ export function autoFixCsv(rawCsv: string): { csv: string; notes: string[] } {
       }
       notes.push(
         `Moved ${movedCount} long title cell(s) into a new "prewritten_comment" column ` +
-        `(title was >100 chars, looked like comment text, not a title)`
+        `(title was >300 chars, looked like comment text, not a title)`
       );
     }
   }

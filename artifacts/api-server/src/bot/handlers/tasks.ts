@@ -131,7 +131,7 @@ export async function handleCreateTaskCommand(interaction: ChatInputCommandInter
     // Reddit POST: title is REQUIRED (used as the actual Reddit post title).
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("title").setLabel("Title (used as the Reddit post title)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(500)
+        new TextInputBuilder().setCustomId("title").setLabel("Title (used as the Reddit post title)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(1000)
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("link").setLabel("Subreddit (e.g. r/somesub or full URL)").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(300)
@@ -162,7 +162,7 @@ export async function handleCreateTaskCommand(interaction: ChatInputCommandInter
     // one from the type + link (e.g. "Comment on r/AskReddit") if blank.
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("title").setLabel("Title (optional — auto-generated if blank)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(500)
+        new TextInputBuilder().setCustomId("title").setLabel("Title (optional — auto-generated if blank)").setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(1000)
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId("link").setLabel(linkLabel).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(300)

@@ -1071,6 +1071,16 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     }
     resolvedUrl = resolved;
     logger.info({ proofUrl, resolvedUrl }, "recheckRedditLiveness: share link resolved");
+    if (resolvedUrl !== proofUrl) {
+      try {
+        const { db } = await import("@workspace/db");
+        const { sql } = await import("drizzle-orm");
+        await db.execute(sql`UPDATE submissions SET proof_link = ${resolvedUrl} WHERE proof_link = ${proofUrl}`);
+        logger.info({ proofUrl, resolvedUrl }, "Upgraded share link to canonical URL in database");
+      } catch (err) {
+        logger.debug({ err }, "Failed to update proof_link to canonical URL in database");
+      }
+    }
   }
 
   const parsed = parseRedditProofUrl(resolvedUrl);

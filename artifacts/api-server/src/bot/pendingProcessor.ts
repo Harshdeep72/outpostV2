@@ -22,6 +22,19 @@ async function notifyManualReview(
   reason: string
 ): Promise<void> {
   try {
+    const existingSub = await db.execute<{ review_reason: string | null }>(
+      sql`SELECT review_reason FROM submissions WHERE id = ${row.id} LIMIT 1`
+    );
+    const reasonStr = existingSub.rows[0]?.review_reason ?? "";
+    if (reasonStr.includes("[alert_sent]")) {
+      logger.debug({ submissionId: row.id }, "notifyManualReview: alert already sent for this submission, skipping duplicate ping");
+      return;
+    }
+
+    await db.execute(
+      sql`UPDATE submissions SET review_reason = COALESCE(review_reason, '') || ' [alert_sent]' WHERE id = ${row.id}`
+    );
+
     const guild = getPrimaryGuild();
     if (!guild) return;
     const { taskLogsChannel, adminRole } = await setupGuild(guild);
@@ -356,18 +369,40 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
 
         } else if (liveness.liveStatus === "unknown") {
           // Transient / inconclusive first reading — Reddit API blip, proxy
-          // block, or AutoMod temporary filter window. Do NOT reject on a
-          // single inconclusive result. Send to manual review so no valid
-          // work is silently discarded.
-          logger.warn({ subId, proofLink: row.proof_link }, "Hold processor: first check returned unknown — sending to manual review");
-          await db.execute(
-            sql`UPDATE submissions
-                   SET review_status  = 'pending',
-                       last_checked_at = NOW(),
-                       review_reason  = 'Hold-end liveness check inconclusive (unknown) — needs manual review'
-                 WHERE id = ${subId} AND review_status = 'checking'`
-          );
-          void notifyManualReview(row, "Hold-end liveness check returned an inconclusive result (Reddit API blip or proxy issue). Comment status could not be determined.");
+          // block, or short-link resolution delay.
+          // Keep in pending_hold and retry automatically on subsequent passes for up to 24 hours.
+          const availableDate = new Date(row.available_at);
+          const hoursOverdue = (now.getTime() - availableDate.getTime()) / (1000 * 60 * 60);
+
+          if (hoursOverdue < 24) {
+            logger.info(
+              { subId, proofLink: row.proof_link, hoursOverdue: hoursOverdue.toFixed(1) },
+              "Hold processor: liveness check unknown — within 24h grace period, retrying later"
+            );
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status   = 'pending_hold',
+                         last_checked_at = NOW(),
+                         review_reason   = 'Hold-end check inconclusive (unknown) — retrying'
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+          } else {
+            logger.warn(
+              { subId, proofLink: row.proof_link, hoursOverdue: hoursOverdue.toFixed(1) },
+              "Hold processor: liveness check unknown for >24h — sending to manual review"
+            );
+            await db.execute(
+              sql`UPDATE submissions
+                     SET review_status   = 'pending',
+                         last_checked_at = NOW(),
+                         review_reason   = 'Hold-end liveness check inconclusive for >24h — needs manual review'
+                   WHERE id = ${subId} AND review_status = 'checking'`
+            );
+            void notifyManualReview(
+              row,
+              "Hold-end liveness check returned an inconclusive result for over 24 hours. Comment status could not be determined."
+            );
+          }
 
         } else {
           // First check says removed or deleted. Run a 45-second confirmation

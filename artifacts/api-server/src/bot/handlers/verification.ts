@@ -74,11 +74,12 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
         inline: false
       },
       {
-        name: "5️⃣ Save Your Payout Methods 💰",
-        value: "Use these commands to save where to receive your payments:\n" +
+        name: "5️⃣ Save Your Payout Methods & Check Status 💰",
+        value: "Use these commands to manage your earnings and profile:\n" +
                "• `/setupi upi_id:yourname@bank` for UPI\n" +
                "• `/setwallet coin:USDT address:<your-wallet> network:TRC20` for USDT\n" +
                "• `/setwallet coin:Binance Pay ID address:<your-id>` for Binance Pay\n" +
+               "• `/mystatus` to view your active/completed claims, trust score, and streak\n" +
                "• `/wallet` to check your available and pending balances.",
         inline: false
       }

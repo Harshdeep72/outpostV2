@@ -29,6 +29,57 @@ import { getMaxRedditAccounts } from "../../lib/settings.js";
 
 const MIN_KARMA = 100;
 
+async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guildName: string): Promise<void> {
+  const welcomeEmbed = makeEmbed(COLORS.SUCCESS)
+    .setTitle("👋 Welcome to your workspace!")
+    .setDescription(
+      `Hey <@${discordId}>! You're verified and ready to earn on **${guildName}**.\n\n` +
+      `Below is a quick guide on how to complete tasks safely. Please read it to ensure your tasks get approved and your Reddit accounts stay safe.`
+    );
+
+  const guideEmbed = makeEmbed(COLORS.PRIMARY)
+    .setTitle("📖 Outpost Quick Start & Safety Guide")
+    .addFields(
+      {
+        name: "1️⃣ Claiming a Task",
+        value: "Head over to the active task channels (e.g. `#tasks`) and click the **Claim** button. Once claimed, the task details and buttons will appear right here in this channel.",
+        inline: false
+      },
+      {
+        name: "2️⃣ The Search Method (Crucial to Avoid Bans) 🔍",
+        value: "Do **NOT** click the direct Reddit link in Discord. Reddit tracks this and flags coordinated spam.\n" +
+               "1. Copy the **Title** of the target Reddit post.\n" +
+               "2. Open Reddit in your browser or app, paste the title into the search bar, and find the post.\n" +
+               "3. Open the post from the search results.",
+        inline: false
+      },
+      {
+        name: "3️⃣ Simulate Human Timing (60s Rule) ⏳",
+        value: "Do not post your comment immediately. Scroll down slowly as if reading the comments and spend at least **60 to 90 seconds** on the thread before posting your comment.",
+        inline: false
+      },
+      {
+        name: "4️⃣ Submit Proof & Earn ✅",
+        value: "After commenting, copy your comment's direct share link. Click the **Submit Proof** button here in your workspace, paste the link, and submit.",
+        inline: false
+      },
+      {
+        name: "5️⃣ Save Your Payout Methods 💰",
+        value: "Use these commands to save where to receive your payments:\n" +
+               "• `/setupi upi_id:yourname@bank` for UPI\n" +
+               "• `/setwallet coin:USDT address:<your-wallet> network:TRC20` for USDT\n" +
+               "• `/setwallet coin:Binance Pay ID address:<your-id>` for Binance Pay\n" +
+               "• `/wallet` to check your available and pending balances.",
+        inline: false
+      }
+    )
+    .setFooter({ text: "Outpost Platform · Earn safely" });
+
+  await workspaceCh.send({ embeds: [welcomeEmbed, guideEmbed] }).catch((err: any) => {
+    logger.warn({ err, channelId: workspaceCh.id }, "Failed to send workspace welcome embeds");
+  });
+}
+
 /**
  * Wraps member.roles.add() with a clear diagnostic for DiscordAPIError[50013].
  * [50013] "Missing Permissions" on role assignment almost always means the
@@ -687,15 +738,7 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
       commentKarma: p.commentKarma,
     }).onConflictDoNothing({ target: redditAccounts.redditUsername });
 
-    await workspaceCh.send({
-      embeds: [
-        makeEmbed(COLORS.SUCCESS)
-          .setTitle("👋 Welcome to your workspace!")
-          .setDescription(
-            `Hey <@${discordId}>! You're verified and ready to earn.\n\nWhen you claim tasks, they'll appear here with all the details you need. Good luck!`
-          ),
-      ],
-    });
+    await sendWorkspaceWelcome(workspaceCh, discordId, guild.name);
 
     try {
       await member.send({
@@ -1000,15 +1043,7 @@ export async function handleVerifyAccept(
     }).onConflictDoNothing({ target: redditAccounts.redditUsername });
   }
 
-  await workspaceCh.send({
-    embeds: [
-      makeEmbed(COLORS.SUCCESS)
-        .setTitle("👋 Welcome to your workspace!")
-        .setDescription(
-          `Hey <@${discordId}>! You're verified and ready to earn.\n\nWhen you claim tasks, they'll appear here with all the details you need. Good luck!`
-        ),
-    ],
-  });
+  await sendWorkspaceWelcome(workspaceCh, discordId, guild.name);
 
   const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
     .setColor(COLORS.SUCCESS)

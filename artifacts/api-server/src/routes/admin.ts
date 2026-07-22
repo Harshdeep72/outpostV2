@@ -1917,13 +1917,25 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
     // tab) — two reviewers approving the same submission would each fall
     // into the justAccepted branch below and credit balance_pending twice.
     // Pin the previous review_status into the WHERE so only one of the
-    // racing updates wins; the other gets rowCount=0 and we bail out.
+    // Safeguard: if rejecting or flagging, do not allow auto-validation status
+    // messages to be accidentally saved as the review reason.
+    let finalReason = reviewReason ?? null;
+    if ((reviewStatus === "rejected" || reviewStatus === "flagged") && finalReason) {
+      if (
+        finalReason.startsWith("Auto-validated") ||
+        finalReason.includes("awaiting hold") ||
+        finalReason.includes("cleared live")
+      ) {
+        finalReason = "Rejected by admin";
+      }
+    }
+
     const prevStatus = prevSub?.reviewStatus ?? null;
     const [updated] = await db
       .update(submissions)
       .set({
         reviewStatus,
-        reviewReason: reviewReason ?? null,
+        reviewReason: finalReason,
         reviewedAt: new Date(),
         reviewerDiscordId,
       })

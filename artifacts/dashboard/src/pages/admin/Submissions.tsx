@@ -277,7 +277,11 @@ export default function Submissions() {
                     <tr
                       key={s.id}
                       className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer"
-                      onClick={() => { setSelected(s); setReason(s.reviewReason ?? ""); }}
+                      onClick={() => {
+                        setSelected(s);
+                        const isAutoReason = s.reviewReason?.startsWith("Auto-validated") || s.reviewReason?.includes("hold");
+                        setReason(isAutoReason ? "" : (s.reviewReason ?? ""));
+                      }}
                     >
                       <td className="px-4 py-3 font-medium text-foreground">
                         {s.discordUsername ?? s.discordId}

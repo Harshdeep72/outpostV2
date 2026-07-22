@@ -29,11 +29,21 @@ import { getMaxRedditAccounts } from "../../lib/settings.js";
 
 const MIN_KARMA = 100;
 
-async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guildName: string): Promise<void> {
+async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: Guild): Promise<void> {
+  let tasksMention = "the active task channels";
+  try {
+    const { tasksChannel } = await setupGuild(guild);
+    if (tasksChannel) {
+      tasksMention = `<#${tasksChannel.id}>`;
+    }
+  } catch (err) {
+    logger.warn({ err }, "sendWorkspaceWelcome: failed to retrieve tasksChannel via setupGuild");
+  }
+
   const welcomeEmbed = makeEmbed(COLORS.SUCCESS)
     .setTitle("👋 Welcome to your workspace!")
     .setDescription(
-      `Hey <@${discordId}>! You're verified and ready to earn on **${guildName}**.\n\n` +
+      `Hey <@${discordId}>! You're verified and ready to earn on **${guild.name}**.\n\n` +
       `Below is a quick guide on how to complete tasks safely. Please read it to ensure your tasks get approved and your Reddit accounts stay safe.`
     );
 
@@ -42,7 +52,7 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guildNa
     .addFields(
       {
         name: "1️⃣ Claiming a Task",
-        value: "Head over to the active task channels (e.g. `#tasks`) and click the **Claim** button. Once claimed, the task details and buttons will appear right here in this channel.",
+        value: `Head over to the active task channels (e.g. ${tasksMention}) and click the **Claim** button. Once claimed, the task details and buttons will appear right here in this channel.`,
         inline: false
       },
       {
@@ -738,7 +748,7 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
       commentKarma: p.commentKarma,
     }).onConflictDoNothing({ target: redditAccounts.redditUsername });
 
-    await sendWorkspaceWelcome(workspaceCh, discordId, guild.name);
+    await sendWorkspaceWelcome(workspaceCh, discordId, guild);
 
     try {
       await member.send({
@@ -1043,7 +1053,7 @@ export async function handleVerifyAccept(
     }).onConflictDoNothing({ target: redditAccounts.redditUsername });
   }
 
-  await sendWorkspaceWelcome(workspaceCh, discordId, guild.name);
+  await sendWorkspaceWelcome(workspaceCh, discordId, guild);
 
   const updatedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
     .setColor(COLORS.SUCCESS)

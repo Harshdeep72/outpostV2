@@ -105,50 +105,38 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
 
   const setupi = new SlashCommandBuilder()
     .setName("setupi")
-    .setDescription("Save UPI ID for INR auto-payouts")
+    .setDescription("Save UPI ID for auto-payouts (India)")
     .setDMPermission(true)
     .addStringOption((o) =>
-      o.setName("upi_id").setDescription("Your UPI ID").setRequired(true)
+      o.setName("upi_id").setDescription("Your UPI ID (e.g. username@bank)").setRequired(true)
     );
 
-  const setpaypal = new SlashCommandBuilder()
-    .setName("setpaypal")
-    .setDescription("Save your PayPal email for payouts")
+  const setgcash = new SlashCommandBuilder()
+    .setName("setgcash")
+    .setDescription("Save GCash number for auto-payouts (Philippines)")
     .setDMPermission(true)
     .addStringOption((o) =>
-      o.setName("email").setDescription("Your PayPal email address").setRequired(true)
+      o.setName("number").setDescription("Your 11-digit GCash number (e.g. 09171234567)").setRequired(true)
     );
 
   const setwallet = new SlashCommandBuilder()
     .setName("setwallet")
-    .setDescription("Save a crypto wallet OR Binance Pay ID for payouts")
+    .setDescription("Save your USDT (BEP-20) wallet address for payouts")
     .setDMPermission(true)
     .addStringOption((o) =>
-      o.setName("coin").setDescription("Coin / payout method").setRequired(true)
+      o.setName("coin").setDescription("Coin").setRequired(true)
         .addChoices(
-          { name: "ETH", value: "ETH" },
           { name: "USDT", value: "USDT" },
-          { name: "BTC", value: "BTC" },
-          { name: "Binance Pay ID", value: "BINANCE" },
         )
     )
     .addStringOption((o) =>
-      o.setName("address").setDescription("Wallet address — or your Binance Pay ID (8–13 digit number)").setRequired(true)
+      o.setName("address").setDescription("USDT address on BEP-20 / BNB Smart Chain (0x...)").setRequired(true)
     )
     .addStringOption((o) =>
-      o.setName("network").setDescription("Chain / network — REQUIRED for USDT, optional for ETH/BTC, ignored for Binance")
+      o.setName("network").setDescription("Chain / network (BEP-20 only)")
         .setRequired(false)
         .addChoices(
-          { name: "TRC20 (Tron) — USDT",                value: "TRC20" },
-          { name: "ERC20 (Ethereum mainnet) — USDT/ETH", value: "ERC20" },
-          { name: "BEP20 (BNB Chain) — USDT",            value: "BEP20" },
-          { name: "Solana — USDT",                       value: "SOL" },
-          { name: "Polygon — USDT/ETH",                  value: "POLYGON" },
-          { name: "Arbitrum — ETH",                      value: "ARB" },
-          { name: "Optimism — ETH",                      value: "OP" },
-          { name: "Base — ETH",                          value: "BASE" },
-          { name: "Bitcoin (mainnet) — BTC",             value: "BTC" },
-          { name: "Lightning — BTC",                     value: "LIGHTNING" },
+          { name: "BEP20 (BNB Smart Chain) — USDT", value: "BEP20" },
         )
     );
 
@@ -417,15 +405,39 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("upi_id").setDescription("New UPI ID (e.g. name@bank)").setRequired(true)
     );
 
+  const adminsetgcash = new SlashCommandBuilder()
+    .setName("adminsetgcash")
+    .setDescription("[Admin] Set or overwrite a user's GCash number")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("The user whose GCash number to update").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("number").setDescription("New 11-digit GCash number (e.g. 09171234567)").setRequired(true)
+    );
+
+  const adminsetwallet = new SlashCommandBuilder()
+    .setName("adminsetwallet")
+    .setDescription("[Admin] Set or overwrite a user's USDT (BEP-20) address")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("The user whose wallet to update").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("address").setDescription("New BEP-20 address (0x...)").setRequired(true)
+    );
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
-    setupi, setpaypal, setwallet, wallet, leaderboard, resetleaderboard,
+    setupi, setgcash, setwallet, wallet, leaderboard, resetleaderboard,
     addmod, removemod, addadmin, flag, unflag,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, forcepayout, requeue,
-    adminsetupi,
+    adminsetupi, adminsetgcash, adminsetwallet,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

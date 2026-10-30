@@ -168,42 +168,17 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
 }
 
 export async function handleSetPaypal(interaction: ChatInputCommandInteraction) {
-  const email = interaction.options.getString("email", true).trim().toLowerCase();
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return interaction.reply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid email address. Please enter a valid PayPal email.")],
-      flags: 64,
-    });
-  }
-
-  await interaction.deferReply({ flags: 64 });
-
-  const user = await getUserByDiscordId(interaction.user.id);
-  if (!user?.verified) {
-    return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must verify with `/verify` before saving payout details.")],
-    });
-  }
-  if (user.flagged) {
-    return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
-    });
-  }
-  if (user.paypalEmail) {
-    return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You have already set a PayPal email. To change it, please contact an admin.")],
-    });
-  }
-
-  const duplicateFound = await checkDuplicateDestination(interaction, email, "PayPal email", interaction.user.id);
-  if (duplicateFound) return;
-
-  await db.update(users).set({ paypalEmail: email }).where(eq(users.discordId, interaction.user.id));
-  invalidateUser(interaction.user.id);
-
-  await interaction.editReply({
-    embeds: [makeEmbed(COLORS.SUCCESS).setDescription(`✅ PayPal email saved: \`${email}\``)],
+  return interaction.reply({
+    embeds: [
+      makeEmbed(COLORS.DANGER).setDescription(
+        "❌ **PayPal is not supported.**\n\n" +
+        "**Supported payout methods are:**\n" +
+        "• **USDT (BEP-20)** — `/setwallet`\n" +
+        "• **UPI** — `/setupi`\n" +
+        "• **GCash** — `/setgcash`"
+      ),
+    ],
+    flags: 64,
   });
 }
 
@@ -247,81 +222,92 @@ export async function handleSetupI(interaction: ChatInputCommandInteraction) {
   });
 }
 
-// Per-coin allowed networks. Sending crypto to the WRONG chain loses the
-// funds permanently, so we enforce this at the bot/UI layer instead of
-// trusting admins to remember the right combo at payout time.
+export async function handleSetGcash(interaction: ChatInputCommandInteraction) {
+  const rawNumber = interaction.options.getString("number", true).trim().replace(/[\s\-]/g, "");
+
+  // Format validation: 11 digits starting with 09, or 12 digits starting with +639 or 639
+  let cleanNumber = rawNumber;
+  if (/^09\d{9}$/.test(rawNumber)) {
+    cleanNumber = rawNumber;
+  } else if (/^(\+?63)9\d{9}$/.test(rawNumber)) {
+    cleanNumber = "0" + rawNumber.replace(/^\+?63/, "");
+  } else {
+    return interaction.reply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid GCash number. Please enter a valid 11-digit Philippine mobile number starting with `09` (e.g. `09171234567`).")],
+      flags: 64,
+    });
+  }
+
+  await interaction.deferReply({ flags: 64 });
+
+  const user = await getUserByDiscordId(interaction.user.id);
+  if (!user?.verified) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must verify with `/verify` before saving payout details.")],
+    });
+  }
+  if (user.flagged) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
+    });
+  }
+  if (user.gcashNumber) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You have already set a GCash number. To change it, please contact an admin.")],
+    });
+  }
+
+  const duplicateFound = await checkDuplicateDestination(interaction, cleanNumber, "GCash number", interaction.user.id);
+  if (duplicateFound) return;
+
+  const existing = (user.cryptoWallets as Record<string, unknown>) ?? {};
+  const updatedWallets = { ...existing, GCASH: { address: cleanNumber, network: "GCash" } };
+
+  await db.update(users).set({ gcashNumber: cleanNumber, cryptoWallets: updatedWallets }).where(eq(users.discordId, interaction.user.id));
+  invalidateUser(interaction.user.id);
+
+  await interaction.editReply({
+    embeds: [makeEmbed(COLORS.SUCCESS).setDescription(`✅ GCash number saved: \`${cleanNumber}\``)],
+  });
+}
+
+// Only USDT on BEP-20 (BNB Smart Chain) is supported per server policy.
 const ALLOWED_NETWORKS: Record<string, readonly string[]> = {
-  USDT: ["TRC20", "ERC20", "BEP20", "SOL", "POLYGON"],
-  ETH:  ["ERC20", "ARB", "OP", "BASE", "POLYGON"],
-  BTC:  ["BTC", "LIGHTNING"],
+  USDT: ["BEP20"],
 };
-// For coins where a single network is the realistic default, we fill it in
-// when the user omits the option — strict only for USDT.
 const DEFAULT_NETWORK: Record<string, string> = {
-  ETH:  "ERC20",
-  BTC:  "BTC",
+  USDT: "BEP20",
 };
-const NETWORK_REQUIRED: ReadonlySet<string> = new Set(["USDT"]);
+const NETWORK_REQUIRED: ReadonlySet<string> = new Set([]);
 
 export async function handleSetWallet(interaction: ChatInputCommandInteraction) {
   const coin = interaction.options.getString("coin", true);
   const address = interaction.options.getString("address", true).trim();
   const rawNetwork = interaction.options.getString("network", false);
-  const isBinance = coin === "BINANCE";
 
-  if (isBinance) {
-    // Binance Pay ID is a numeric string (currently 8–13 digits in the wild).
-    // Be strict here so we don't store a wallet address under the BINANCE key.
-    if (!/^\d{8,13}$/.test(address)) {
-      return interaction.reply({
-        embeds: [makeEmbed(COLORS.DANGER).setDescription(
-          "❌ That doesn't look like a Binance Pay ID.\n\n" +
-          "Open Binance → **Pay** → tap your name to copy your **Pay ID** " +
-          "(an 8–13 digit number). Then run `/setwallet coin:Binance Pay ID address:<that number>`."
-        )],
-        flags: 64,
-      });
-    }
-  } else if (address.length < 8 || address.length > 200) {
+  if (coin !== "USDT") {
     return interaction.reply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Wallet address must be 8–200 characters.")],
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only **USDT (BEP-20)** is supported for crypto payouts. Select coin: `USDT`.")],
       flags: 64,
     });
   }
 
-  // Resolve network. For Binance we ignore it entirely. For crypto, validate
-  // against the per-coin allow-list and fall back to a sensible default if
-  // the coin permits one. USDT is special — we REQUIRE a network because the
-  // same address won't work across TRC20/ERC20/BEP20/SOL/Polygon and there's
-  // no safe default. Sending USDT to the wrong chain = permanent loss.
-  let network: string | null = null;
-  if (!isBinance) {
-    const allowed = ALLOWED_NETWORKS[coin] ?? [];
-    if (rawNetwork) {
-      if (!allowed.includes(rawNetwork)) {
-        return interaction.reply({
-          embeds: [makeEmbed(COLORS.DANGER).setDescription(
-            `❌ \`${rawNetwork}\` is not a valid network for **${coin}**.\n\n` +
-            `Pick one of: ${allowed.map((n) => `\`${n}\``).join(", ")}.`
-          )],
-          flags: 64,
-        });
-      }
-      network = rawNetwork;
-    } else if (NETWORK_REQUIRED.has(coin)) {
-      return interaction.reply({
-        embeds: [makeEmbed(COLORS.DANGER).setDescription(
-          `❌ **USDT requires a network.**\n\n` +
-          `Sending USDT to the wrong chain = permanently lost funds. Pick one in the \`network\` option:\n` +
-          allowed.map((n) => `• \`${n}\``).join("\n") +
-          `\n\nNot sure? Check the Deposit screen in your wallet/exchange — the network shown there is the one to pick.`
-        )],
-        flags: 64,
-      });
-    } else {
-      network = DEFAULT_NETWORK[coin] ?? null;
-    }
+  if (rawNetwork && rawNetwork !== "BEP20") {
+    return interaction.reply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only the **BEP-20 (BNB Smart Chain)** network is supported for USDT.\n\nPlease pick `BEP20`.")],
+      flags: 64,
+    });
   }
+
+  // BEP-20 is BNB Smart Chain (EVM standard: 0x followed by 40 hex chars)
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return interaction.reply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid USDT (BEP-20) address. It must be a valid 42-character BNB Smart Chain address starting with `0x`.")],
+      flags: 64,
+    });
+  }
+
+  const network = "BEP20";
 
   await interaction.deferReply({ flags: 64 });
 
@@ -344,24 +330,64 @@ export async function handleSetWallet(interaction: ChatInputCommandInteraction) 
     });
   }
 
-  const duplicateFound = await checkDuplicateDestination(interaction, address, isBinance ? "Binance Pay ID" : coin + " wallet", interaction.user.id);
+  const duplicateFound = await checkDuplicateDestination(interaction, address, "USDT (BEP-20) wallet", interaction.user.id);
   if (duplicateFound) return;
 
-  // Storage shape: { address, network } object per coin. Backward-compat with
-  // older string entries (from before this option existed) is handled by
-  // every reader — they accept either shape. Binance Pay has no network so
-  // we still store a plain string to avoid spurious "network:null" noise.
-  const newEntry: unknown = isBinance ? address : { address, network };
+  const newEntry = { address, network };
   const updated = { ...existing, [coin]: newEntry };
 
   await db.update(users).set({ cryptoWallets: updated }).where(eq(users.discordId, interaction.user.id));
   invalidateUser(interaction.user.id);
 
-  const successMsg = isBinance
-    ? `✅ Binance Pay ID saved: \`${address}\`\nPayouts in stablecoin will be sent to this Binance account.`
-    : `✅ **${coin}${network ? ` (${network})` : ""}** wallet saved: \`${address}\``;
+  const successMsg = `✅ **USDT (BEP-20)** wallet saved: \`${address}\`\nPayouts will be sent via BNB Smart Chain.`;
   await interaction.editReply({
     embeds: [makeEmbed(COLORS.SUCCESS).setDescription(successMsg)],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin: set / overwrite any user's USDT (BEP-20) wallet
+// ---------------------------------------------------------------------------
+export async function handleAdminSetWallet(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const targetUser = interaction.options.getUser("user", true);
+  const address    = interaction.options.getString("address", true).trim();
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid USDT (BEP-20) address. Must be a valid 42-character address starting with `0x`.")],
+    });
+  }
+
+  const target = await getUserByDiscordId(targetUser.id);
+  if (!target) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ User <@${targetUser.id}> is not registered in the system.`)],
+    });
+  }
+
+  const existing = (target.cryptoWallets as Record<string, any>) ?? {};
+  const oldEntry = existing["USDT"];
+  const oldAddr = typeof oldEntry === "string" ? oldEntry : oldEntry?.address ?? "(none)";
+
+  const updatedWallets = { ...existing, USDT: { address, network: "BEP20" } };
+
+  await db.update(users).set({ cryptoWallets: updatedWallets }).where(eq(users.discordId, targetUser.id));
+  invalidateUser(targetUser.id);
+
+  logger.info({ admin: interaction.user.id, target: targetUser.id, oldAddr, address }, "Admin updated USDT wallet");
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ USDT (BEP-20) Wallet Updated")
+        .addFields(
+          { name: "User", value: `<@${targetUser.id}>`, inline: true },
+          { name: "Old Wallet", value: `\`${oldAddr}\``, inline: true },
+          { name: "New Wallet", value: `\`${address}\` (BEP20)`, inline: true },
+        ),
+    ],
   });
 }
 
@@ -415,6 +441,55 @@ export async function handleAdminSetUpi(interaction: ChatInputCommandInteraction
           { name: "User",    value: `<@${targetUser.id}>`, inline: true },
           { name: "Old UPI", value: `\`${oldUpiId}\``,     inline: true },
           { name: "New UPI", value: `\`${newUpiId}\``,     inline: true },
+        ),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin: set / overwrite any user's GCash number
+// ---------------------------------------------------------------------------
+export async function handleAdminSetGcash(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const targetUser = interaction.options.getUser("user", true);
+  const rawNumber = interaction.options.getString("number", true).trim().replace(/[\s\-]/g, "");
+
+  let cleanNumber = rawNumber;
+  if (/^09\d{9}$/.test(rawNumber)) {
+    cleanNumber = rawNumber;
+  } else if (/^(\+?63)9\d{9}$/.test(rawNumber)) {
+    cleanNumber = "0" + rawNumber.replace(/^\+?63/, "");
+  } else {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid GCash number format. Expected `09XXXXXXXXX` (11 digits).")],
+    });
+  }
+
+  const target = await getUserByDiscordId(targetUser.id);
+  if (!target) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ User <@${targetUser.id}> is not registered in the system.`)],
+    });
+  }
+
+  const oldNum = target.gcashNumber ?? "(none)";
+  const existing = (target.cryptoWallets as Record<string, unknown>) ?? {};
+  const updatedWallets = { ...existing, GCASH: { address: cleanNumber, network: "GCash" } };
+
+  await db.update(users).set({ gcashNumber: cleanNumber, cryptoWallets: updatedWallets }).where(eq(users.discordId, targetUser.id));
+  invalidateUser(targetUser.id);
+
+  logger.info({ admin: interaction.user.id, target: targetUser.id, oldNum, cleanNumber }, "Admin updated GCash number");
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ GCash Number Updated")
+        .addFields(
+          { name: "User", value: `<@${targetUser.id}>`, inline: true },
+          { name: "Old GCash", value: `\`${oldNum}\``, inline: true },
+          { name: "New GCash", value: `\`${cleanNumber}\``, inline: true },
         ),
     ],
   });

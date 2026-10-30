@@ -915,12 +915,13 @@ router.post("/users/:id/adjust-balance", requireAdminRole, async (req, res) => {
 
 router.patch("/users/:id", requireAuth, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { flagged, isMod, trustScore, paypalEmail, upiId, cryptoWallets } = req.body as {
+  const { flagged, isMod, trustScore, paypalEmail, upiId, gcashNumber, cryptoWallets } = req.body as {
     flagged?: boolean;
     isMod?: boolean;
     trustScore?: number;
     paypalEmail?: string | null;
     upiId?: string | null;
+    gcashNumber?: string | null;
     cryptoWallets?: Record<string, any>;
   };
   try {
@@ -930,6 +931,7 @@ router.patch("/users/:id", requireAuth, async (req, res) => {
     if (trustScore !== undefined) updates.trustScore = trustScore;
     if (paypalEmail !== undefined) updates.paypalEmail = paypalEmail;
     if (upiId !== undefined) updates.upiId = upiId;
+    if (gcashNumber !== undefined) updates.gcashNumber = gcashNumber;
     if (cryptoWallets !== undefined) updates.cryptoWallets = cryptoWallets;
 
     const [updated] = await db
@@ -3117,6 +3119,7 @@ router.get("/payment-methods", requireAdminRole, async (req, res) => {
     conditions.push(
       or(
         sql`${users.upiId} IS NOT NULL AND ${users.upiId} <> ''`,
+        sql`${users.gcashNumber} IS NOT NULL AND ${users.gcashNumber} <> ''`,
         sql`${users.paypalEmail} IS NOT NULL AND ${users.paypalEmail} <> ''`,
         sql`${users.cryptoWallets} <> '{}'::jsonb`,
       )
@@ -3128,6 +3131,7 @@ router.get("/payment-methods", requireAdminRole, async (req, res) => {
           ilike(users.discordUsername, `%${search}%`),
           ilike(users.redditUsername ?? sql`''`, `%${search}%`),
           ilike(users.upiId ?? sql`''`, `%${search}%`),
+          ilike(users.gcashNumber ?? sql`''`, `%${search}%`),
           ilike(users.paypalEmail ?? sql`''`, `%${search}%`),
         )
       );
@@ -3135,9 +3139,11 @@ router.get("/payment-methods", requireAdminRole, async (req, res) => {
 
     if (method === "upi") {
       conditions.push(sql`${users.upiId} IS NOT NULL AND ${users.upiId} <> ''`);
+    } else if (method === "gcash") {
+      conditions.push(sql`${users.gcashNumber} IS NOT NULL AND ${users.gcashNumber} <> ''`);
     } else if (method === "paypal") {
       conditions.push(sql`${users.paypalEmail} IS NOT NULL AND ${users.paypalEmail} <> ''`);
-    } else if (method === "crypto") {
+    } else if (method === "crypto" || method === "usdt") {
       conditions.push(sql`${users.cryptoWallets} <> '{}'::jsonb`);
     }
 
@@ -3153,6 +3159,7 @@ router.get("/payment-methods", requireAdminRole, async (req, res) => {
           verified: users.verified,
           flagged: users.flagged,
           upiId: users.upiId,
+          gcashNumber: users.gcashNumber,
           paypalEmail: users.paypalEmail,
           cryptoWallets: users.cryptoWallets,
           createdAt: users.createdAt,

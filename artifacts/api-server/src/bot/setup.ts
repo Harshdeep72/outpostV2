@@ -155,7 +155,7 @@ async function postGuideContent(ch: TextChannel) {
           },
           {
             name: "Step 5 — Earn & Withdraw",
-            value: "Accepted rewards go to **Pending Balance** first (hold period).\nThen move to **Available Balance**.\nPayouts happen **every Wednesday**.\nSet up your wallet with `/setupi` (UPI) or `/setwallet` (crypto / Binance Pay ID).",
+            value: "Accepted rewards go to **Pending Balance** first (hold period).\nThen move to **Available Balance**.\nPayouts happen **every Wednesday**.\nSet up your payout details with `/setupi` (UPI), `/setgcash` (GCash), or `/setwallet` (USDT BEP-20).",
           },
           {
             name: "🛡️ Trust Score",

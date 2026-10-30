@@ -581,7 +581,7 @@ export interface StatsCardData {
     removed: number;
   };
   recent: StatsCardRecentRow[]; // already sliced to render-able count
-  payments: { paypal: boolean; upi: boolean; crypto: boolean };
+  payments: { gcash?: boolean; upi: boolean; crypto: boolean; paypal?: boolean };
   // Optional: when present, the stat strip + recent-subs header label
   // change from "Last 7 days" to e.g. "Last 21 days". Counts in counts7d
   // are interpreted as the totals for THIS window regardless of the
@@ -836,9 +836,9 @@ export function renderStatsCard(d: StatsCardData): Buffer {
   scStrokeRound(ctx, PAD, y, SW - PAD * 2, FOOTER_H, 10, C.border);
   scText(ctx, "PAYMENT METHODS", PAD + 18, y + 22, { font: "bold 10px monospace", color: C.muted });
   const pmItems: Array<{ label: string; on: boolean }> = [
-    { label: "PayPal", on: d.payments.paypal },
-    { label: "UPI",    on: d.payments.upi },
-    { label: "Crypto", on: d.payments.crypto },
+    { label: "USDT (BEP-20)", on: d.payments.crypto },
+    { label: "UPI",           on: d.payments.upi },
+    { label: "GCash",         on: !!d.payments.gcash },
   ];
   let pmX = PAD + 18;
   const pmY = y + 44;

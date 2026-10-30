@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.js";
 
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
-import { handleWalletCommand, handleSetupI, handleSetWallet, handleSetPaypal, handleAdminSetUpi } from "./handlers/wallet.js";
+import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
@@ -63,8 +63,11 @@ export function registerInteractionHandler(client: Client) {
         if (name === "referraluse") return await timed(name, () => handleReferralUseCommand(interaction));
         if (name === "setupi")      return await timed(name, () => handleSetupI(interaction));
         if (name === "adminsetupi") return await timed(name, () => handleAdminSetUpi(interaction));
-        if (name === "setpaypal") return await timed(name, () => handleSetPaypal(interaction));
-        if (name === "setwallet") return await timed(name, () => handleSetWallet(interaction));
+        if (name === "setgcash")    return await timed(name, () => handleSetGcash(interaction));
+        if (name === "adminsetgcash") return await timed(name, () => handleAdminSetGcash(interaction));
+        if (name === "setwallet")   return await timed(name, () => handleSetWallet(interaction));
+        if (name === "adminsetwallet") return await timed(name, () => handleAdminSetWallet(interaction));
+        if (name === "setpaypal")   return await timed(name, () => handleSetPaypal(interaction));
         if (name === "wallet") return await timed(name, () => handleWalletCommand(interaction));
         if (name === "leaderboard") return await timed(name, () => handleLeaderboardCommand(interaction));
         if (name === "resetleaderboard") return await timed(name, () => handleResetLeaderboard(interaction));

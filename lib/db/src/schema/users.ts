@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   lastTaskCompletedAt: timestamp("last_task_completed_at", { withTimezone: true }),
   upiId: text("upi_id"),
   paypalEmail: text("paypal_email"),
+  gcashNumber: text("gcash_number"),
   cryptoWallets: jsonb("crypto_wallets").notNull().default({}),
   isMod: boolean("is_mod").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),

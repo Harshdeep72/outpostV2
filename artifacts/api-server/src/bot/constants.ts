@@ -61,7 +61,7 @@ export const COLORS = {
   ACCENT: 0xeb5528,
 } as const;
 
-export const COIN_CHOICES = ["ETH", "USDT", "BTC", "BINANCE"] as const;
+export const COIN_CHOICES = ["USDT"] as const;
 export type CoinChoice = (typeof COIN_CHOICES)[number];
 
 export const PAYOUT_DAY_UTC = 3;

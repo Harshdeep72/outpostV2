@@ -110,15 +110,21 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
       return true;
     };
 
-    if (user.upiId) { method = "UPI"; destination = user.upiId; }
-    else if (pickCrypto("USDT")) { /* picked */ }
-    else if (wallets["BINANCE"]) {
-      const bw = extractWallet(wallets["BINANCE"]);
-      if (bw) { method = "Binance Pay"; destination = bw.address; }
-    }
-    if (!method) {
-      if (pickCrypto("ETH")) { /* picked */ }
-      else if (pickCrypto("BTC")) { /* picked */ }
+    if (user.upiId) {
+      method = "UPI";
+      destination = user.upiId;
+    } else if (user.gcashNumber) {
+      method = "GCash";
+      destination = user.gcashNumber;
+    } else if (wallets["GCASH"]) {
+      const gw = extractWallet(wallets["GCASH"]);
+      if (gw) { method = "GCash"; destination = gw.address; }
+    } else if (wallets["USDT"]) {
+      const uw = extractWallet(wallets["USDT"]);
+      if (uw) {
+        method = "USDT (BEP-20)";
+        destination = uw.address;
+      }
     }
 
     if (!method || !destination) {
@@ -129,7 +135,7 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
           embeds: [
             makeEmbed(COLORS.WARNING)
               .setTitle("⚠️ No Payment Method")
-              .setDescription(`You have **${formatMoney(user.balanceAvailable)}** ready to pay out but no payment method saved.\n\nUse \`/setupi\` to save your UPI ID, or \`/setwallet\` to save a crypto wallet or Binance Pay ID.`),
+              .setDescription(`You have **${formatMoney(user.balanceAvailable)}** ready to pay out but no payment method saved.\n\n**Supported payment methods:**\n• \`/setupi\` for UPI\n• \`/setgcash\` for GCash\n• \`/setwallet\` for USDT (BEP-20).`),
           ],
         });
       } catch {
@@ -189,11 +195,13 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
       discordId: users.discordId,
       upiId: users.upiId,
       paypalEmail: users.paypalEmail,
+      gcashNumber: users.gcashNumber,
       cryptoWallets: users.cryptoWallets
     })
       .from(users)
       .where(sql`discord_id != ${user.discordId} AND (
         LOWER(upi_id) = ${normDest} OR 
+        LOWER(gcash_number) = ${normDest} OR 
         LOWER(paypal_email) = ${normDest} OR 
         LOWER(crypto_wallets::text) LIKE ${"%" + normDest + "%"}
       )`);
@@ -267,7 +275,7 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
   const totalAmount = eligible
     .filter((u: any) => {
       const wallets = (u.cryptoWallets as Record<string, string>) ?? {};
-      return u.upiId || wallets["USDT"] || wallets["BINANCE"] || wallets["ETH"] || wallets["BTC"];
+      return u.upiId || u.gcashNumber || wallets["GCASH"] || wallets["USDT"];
     })
     .reduce((sum: number, u: any) => sum + parseFloat(String(u.balanceAvailable)), 0);
 

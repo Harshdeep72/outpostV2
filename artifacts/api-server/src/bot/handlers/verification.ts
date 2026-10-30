@@ -77,8 +77,8 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
         name: "5️⃣ Save Your Payout Methods & Check Status 💰",
         value: "Use these commands to manage your earnings and profile:\n" +
                "• `/setupi upi_id:yourname@bank` for UPI\n" +
-               "• `/setwallet coin:USDT address:<your-wallet> network:TRC20` for USDT\n" +
-               "• `/setwallet coin:Binance Pay ID address:<your-id>` for Binance Pay\n" +
+               "• `/setgcash number:09XXXXXXXXX` for GCash\n" +
+               "• `/setwallet coin:USDT address:<0x...> network:BEP20` for USDT (BEP-20)\n" +
                "• `/mystatus` to view your active/completed claims, trust score, and streak\n" +
                "• `/wallet` to check your available and pending balances.",
         inline: false
@@ -757,9 +757,9 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
               `You've been auto-verified on **${guild.name}**!\n\n` +
               `📂 Workspace: <#${workspaceCh.id}>\n\n` +
               `**💰 Don't forget to set up payouts:**\n` +
-              `• \`/setwallet coin:USDT address:<your-wallet>\` for crypto\n` +
-              `• \`/setwallet coin:Binance Pay ID address:<your-pay-id>\` for Binance\n` +
               `• \`/setupi upi_id:yourname@bank\` for UPI\n` +
+              `• \`/setgcash number:09XXXXXXXXX\` for GCash\n` +
+              `• \`/setwallet coin:USDT address:<0x...> network:BEP20\` for USDT (BEP-20)\n` +
               `• \`/wallet\` to check your balance`
             ),
         ],
@@ -800,9 +800,9 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
             `Welcome! Your account is verified.\n\n` +
             `📂 Your workspace: <#${workspaceCh.id}>\n\n` +
             `**💰 Set up payouts so you can withdraw what you earn:**\n` +
-            `• Crypto wallet → \`/setwallet coin:USDT address:<your-wallet>\`\n` +
-            `• Binance Pay ID → \`/setwallet coin:Binance Pay ID address:<your-pay-id>\`\n` +
             `• UPI (India) → \`/setupi upi_id:yourname@bank\`\n` +
+            `• GCash (Philippines) → \`/setgcash number:09XXXXXXXXX\`\n` +
+            `• USDT BEP-20 → \`/setwallet coin:USDT address:<0x...> network:BEP20\`\n` +
             `• View your balance anytime → \`/wallet\``
           ),
       ],
@@ -1067,8 +1067,9 @@ export async function handleVerifyAccept(
           .setDescription(
             `You've been verified on **${guild.name}**! Head over to your workspace channel <#${workspaceCh.id}> to start claiming tasks.\n\n` +
             `**💰 Set up your payout method:**\n` +
-            `• \`/setwallet\` — save a crypto wallet (ETH/USDT/BTC) or Binance Pay ID\n` +
             `• \`/setupi\` — save a UPI ID (India)\n` +
+            `• \`/setgcash\` — save a GCash number (Philippines)\n` +
+            `• \`/setwallet\` — save a USDT (BEP-20) address\n` +
             `• \`/wallet\` — view your balance any time`
           ),
       ],

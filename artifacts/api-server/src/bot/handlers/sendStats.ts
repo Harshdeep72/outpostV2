@@ -109,7 +109,7 @@ interface StatsRow {
   // Active in-progress claims.
   active_claims: string;
   // Payment-method setup.
-  has_paypal: boolean;
+  has_gcash: boolean;
   has_upi: boolean;
   has_crypto: boolean;
   // 7-day rollup + per-task breakdown.
@@ -142,9 +142,9 @@ const STATS_SQL = `
     u.balance_pending::text     AS bal_pending,
     u.total_earned::text        AS bal_lifetime,
     (SELECT COUNT(*) FROM claims WHERE user_id = u.id AND status = 'claimed')::text AS active_claims,
-    (u.paypal_email IS NOT NULL AND u.paypal_email <> '') AS has_paypal,
+    (u.gcash_number IS NOT NULL AND u.gcash_number <> '') AS has_gcash,
     (u.upi_id IS NOT NULL AND u.upi_id <> '')             AS has_upi,
-    (u.crypto_wallets IS NOT NULL AND u.crypto_wallets::text <> '{}'::text) AS has_crypto,
+    (u.crypto_wallets IS NOT NULL AND (u.crypto_wallets->>'USDT') IS NOT NULL) AS has_crypto,
     (SELECT COUNT(*) FROM recent)::text                                                                AS total_7d,
     (SELECT COUNT(*) FROM recent WHERE review_status = 'accepted' AND moved_to_available = 1)::text   AS cleared_7d,
     (SELECT COUNT(*) FROM recent WHERE review_status = 'accepted' AND moved_to_available = 0)::text   AS hold_7d,
@@ -285,20 +285,20 @@ function buildStatsEmbed(row: StatsRow, discordUserId: string) {
 
   // ── Field: payment methods (only show missing — keeps the card tight) ─
   const missing: string[] = [];
-  if (!row.has_paypal) missing.push("⬜ PayPal — `/setpaypal email:you@example.com`");
   if (!row.has_upi)    missing.push("⬜ UPI — `/setupi upi_id:yourname@bank`");
-  if (!row.has_crypto) missing.push("⬜ Crypto / Binance Pay — `/setwallet` (pick a coin, paste your address)");
+  if (!row.has_gcash)  missing.push("⬜ GCash — `/setgcash number:09XXXXXXXXX`");
+  if (!row.has_crypto) missing.push("⬜ USDT (BEP-20) — `/setwallet coin:USDT address:0x... network:BEP20`");
   if (missing.length > 0) {
     embed.addFields({
       name: "💳 Finish setting up a payment method",
       value:
-        `So you can withdraw the moment your balance is available, add at least one:\n` +
+        `So you can receive auto-payouts, add at least one method:\n` +
         missing.join("\n"),
     });
   } else {
     embed.addFields({
       name: "💳 Payment methods",
-      value: "✅ You're fully set up — PayPal, UPI, and Crypto/Binance Pay are all on file. Use `/withdraw` whenever you're ready.",
+      value: "✅ You're fully set up — UPI, GCash, and USDT (BEP-20) are on file. Auto-payouts run weekly.",
     });
   }
 
@@ -457,7 +457,7 @@ export async function handleSendStatsCommand(interaction: ChatInputCommandIntera
               },
               recent: recentRows,
               payments: {
-                paypal: !!stats.has_paypal,
+                gcash:  !!stats.has_gcash,
                 upi:    !!stats.has_upi,
                 crypto: !!stats.has_crypto,
               },
@@ -636,7 +636,7 @@ async function buildSingleUserCard(
     },
     recent: recentRows,
     payments: {
-      paypal: !!stats.has_paypal,
+      gcash:  !!stats.has_gcash,
       upi:    !!stats.has_upi,
       crypto: !!stats.has_crypto,
     },

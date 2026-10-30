@@ -77,8 +77,9 @@ async function ensureTextChannel(
   parent: CategoryChannel,
   permissionOverwrites: any[] = []
 ): Promise<{ channel: TextChannel; created: boolean }> {
+  // Reuse existing channel anywhere in guild (e.g. #announcements in Information, or #chitchat for #general)
   let ch = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildText && c.name === name && c.parentId === parent.id
+    (c) => c.type === ChannelType.GuildText && (c.name === name || (name === CHANNELS.GENERAL && c.name === "chitchat"))
   ) as TextChannel | undefined;
   if (ch) return { channel: ch, created: false };
   ch = (await guild.channels.create({

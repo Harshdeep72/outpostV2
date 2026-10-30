@@ -68,8 +68,21 @@ export async function auditAndApproveBatchEarly(): Promise<{
       FROM submissions s
       JOIN users u ON u.id = s.user_id
      WHERE s.submitted_at > NOW() - INTERVAL '48 hours'
+       AND s.withdrawal_id IS NULL
      ORDER BY s.id ASC
   `);
+
+  if (subsResult.rows.length === 0) {
+    return {
+      totalChecked: 0,
+      liveApprovedCount: 0,
+      alreadyAcceptedCount: 0,
+      notLiveCount: 0,
+      totalPayoutAmount: 0,
+      items: [],
+      workers: [],
+    };
+  }
 
   const items: BatchItemResult[] = [];
   let liveApprovedCount = 0;

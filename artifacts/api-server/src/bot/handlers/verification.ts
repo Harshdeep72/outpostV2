@@ -96,7 +96,7 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
  * [50013] "Missing Permissions" on role assignment almost always means the
  * bot's highest role sits LOWER in the server hierarchy than the role it's
  * trying to assign. Fix: Server Settings → Roles → drag the bot's role
- * (outpostv2) above Verified/Mod/Admin.
+ * (Reddit Microtasks bot) above Verified/Mod/Admin.
  */
 async function addRoleOrThrowClear(member: import("discord.js").GuildMember, role: import("discord.js").Role): Promise<void> {
   try {
@@ -105,7 +105,7 @@ async function addRoleOrThrowClear(member: import("discord.js").GuildMember, rol
     if (err?.code === 50013) {
       throw new Error(
         `DiscordAPIError[50013]: Missing Permissions — the bot cannot assign the "${role.name}" role because the bot's role is below it in the server hierarchy.\n\n` +
-        `**Fix:** Go to Server Settings → Roles → drag the **outpostv2** bot role above **${role.name}**, then have the user retry.`
+        `**Fix:** Go to Server Settings → Roles → drag the bot role above **${role.name}**, then have the user retry.`
       );
     }
     throw err;
@@ -199,8 +199,8 @@ export async function handleVerifyCommand(interaction: ChatInputCommandInteracti
 }
 
 export async function handleVerifyStart(interaction: ButtonInteraction) {
-  // showModal() MUST be the very first response — no DB calls before it.
-  // The already-verified check is handled in handleVerifyModal after deferReply.
+  // showModal() MUST be the very first response — zero DB calls before it.
+  // The already-verified check and referral validation are handled in handleVerifyModal after deferReply.
   // Note: this button lives on a PUBLIC panel posted by an admin via /verify.
   // Each clicker gets their own ephemeral modal + reply.
   const modal = new ModalBuilder()
@@ -214,20 +214,17 @@ export async function handleVerifyStart(interaction: ButtonInteraction) {
     .setRequired(true)
     .setMaxLength(300);
 
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+  const referralInput = new TextInputBuilder()
+    .setCustomId("referral_input")
+    .setLabel("Referral Code (Optional)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(20);
 
-  const existing = await getUserByDiscordId(interaction.user.id);
-  const isAdditional = !!existing?.verified;
-
-  if (!isAdditional && !existing?.referredBy) {
-    const referralInput = new TextInputBuilder()
-      .setCustomId("referral_input")
-      .setLabel("Referral Code (Optional)")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false)
-      .setMaxLength(20);
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(referralInput));
-  }
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(input),
+    new ActionRowBuilder<TextInputBuilder>().addComponents(referralInput)
+  );
 
   await interaction.showModal(modal);
 }

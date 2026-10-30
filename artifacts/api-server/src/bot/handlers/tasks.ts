@@ -96,7 +96,7 @@ export async function handleCreateTaskCommand(interaction: ChatInputCommandInter
   // handler so the existing modal handler signature is unchanged.
   const slots = 1;
   const timeLimit = interaction.options.getInteger("time_limit") ?? 60;
-  const holdHours = interaction.options.getInteger("hold_hours") ?? 168;
+  const holdHours = interaction.options.getInteger("hold_hours") ?? 24;
   const minTrust = interaction.options.getInteger("min_trust") ?? 0;
   // Default true — explicit `false` opts the task out of the cooldown gate.
   const cooldownEnabledOpt = interaction.options.getBoolean("cooldown_enabled") ?? true;
@@ -1403,9 +1403,10 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     // ensures the hold window is a genuine "comment must stay live" gate, not
     // just a delay before an irreversible credit.
     //
-    // Minimum 7-day hold so there is always a window to catch deletions.
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-    const availableAt = new Date(Date.now() + SEVEN_DAYS_MS);
+    // Hold hours from task configuration (defaults to 24h)
+    const effectiveHoldHours = Math.max(0, task.pendingDelayHours ?? 24);
+    const holdMs = effectiveHoldHours * 60 * 60 * 1000;
+    const availableAt = new Date(Date.now() + holdMs);
 
     await db.update(submissions).set({
       reviewStatus: "pending_hold",
@@ -1433,7 +1434,11 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     invalidateStreak(user.discordId);
 
     const unixAvail = Math.floor(availableAt.getTime() / 1000);
-    const holdHoursDisplay = "7 days";
+    const holdHoursDisplay = effectiveHoldHours === 24
+      ? "24 hours"
+      : effectiveHoldHours >= 24 && effectiveHoldHours % 24 === 0
+      ? `${effectiveHoldHours / 24} days`
+      : `${effectiveHoldHours} hours`;
     const v = validation!;
     const upsLabel = typeof v.upvotes === "number" ? `${v.upvotes} ups` : "—";
     const ageLabel = typeof v.ageMinutes === "number"
@@ -1917,8 +1922,9 @@ export async function handleSubEditModal(interaction: ModalSubmitInteraction, su
   let descriptionText = `Proof URL updated to: ${newProofLink}\n\n`;
 
   if (validation && validation.autoApproved) {
-    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-    const availableAt = new Date(Date.now() + SEVEN_DAYS_MS);
+    const effectiveHoldHours = Math.max(0, task.pendingDelayHours ?? 24);
+    const holdMs = effectiveHoldHours * 60 * 60 * 1000;
+    const availableAt = new Date(Date.now() + holdMs);
 
     await db.update(submissions).set({
       proofLink: newProofLink,

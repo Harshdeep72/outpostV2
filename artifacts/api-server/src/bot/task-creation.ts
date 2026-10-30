@@ -322,9 +322,8 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
   // is the actual hold enforced at claim time in handleTaskClaim.
   const timeLimitMinutes = 20;
 
-  // Default verify/hold window changed from 24h → 7 days (168h) per product
-  // request. Per-task override is honored when caller passes input.holdHours.
-  const holdHours = input.holdHours ?? 168;
+  // Default verify/hold window: 24h. Per-task override is honored when caller passes input.holdHours.
+  const holdHours = input.holdHours ?? 24;
   if (!Number.isInteger(holdHours) || holdHours < 0 || holdHours > 720) {
     return { ok: false, error: "Hold hours must be 0–720." };
   }
@@ -1024,11 +1023,11 @@ export async function createBulkTasksFromCsv(args: {
   const maxClaimsPerUser = args.maxClaimsPerUser ?? 1;
   const campaignCooldownDefault = args.cooldownEnabled !== false;
   // Campaign-level hold-hours default (clamped to normalizeTaskInput's 0–720 range).
-  // Per-row hold_hours overrides this. Falls back to the system default (168h) when
+  // Per-row hold_hours overrides this. Falls back to the system default (24h) when
   // neither is supplied.
   const campaignHoldHours = (() => {
     const v = args.holdHoursDefault;
-    if (v == null || !Number.isFinite(v)) return undefined;
+    if (v == null || !Number.isFinite(v)) return 24;
     return Math.max(0, Math.min(720, Math.floor(v)));
   })();
 

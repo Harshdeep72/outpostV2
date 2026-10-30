@@ -55,7 +55,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setMinValue(5).setMaxValue(1440)
     )
     .addIntegerOption((o) =>
-      o.setName("hold_hours").setDescription("Hours to hold payout after acceptance (0–720, default 168 = 7 days)")
+      o.setName("hold_hours").setDescription("Hours to hold payout after acceptance (0–720, default 24 = 24 hours)")
         .setMinValue(0).setMaxValue(720)
     )
     .addIntegerOption((o) =>

@@ -468,6 +468,13 @@ const POST_FIXES: string[] = [
      "created_at"      TIMESTAMPTZ NOT NULL DEFAULT NOW()
    );`,
   `CREATE INDEX IF NOT EXISTS "admin_notes_discord_idx" ON "admin_notes" ("discord_id", "created_at" DESC);`,
+  // Retroactively fix any submissions placed on a 7-day hold down to the task's configured hold (24h)
+  `UPDATE "submissions" s
+     SET available_at = s.submitted_at + (COALESCE(t.pending_delay_hours, 24) || ' hours')::interval
+    FROM "tasks" t
+   WHERE s.task_id = t.id
+     AND s.review_status = 'pending_hold'
+     AND s.available_at > s.submitted_at + INTERVAL '26 hours';`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

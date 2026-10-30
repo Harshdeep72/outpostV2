@@ -398,7 +398,7 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
  */
 export function formatTaskCreator(creatorDiscordId: string | null | undefined): string {
   const id = (creatorDiscordId ?? "").trim();
-  if (!id) return "Outpost";
+  if (!id) return "Reddit Microtasks";
   if (id.startsWith("dashboard:")) return `Dashboard · ${id.slice("dashboard:".length)}`;
   return `<@${id}>`;
 }

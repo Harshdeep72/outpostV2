@@ -88,7 +88,7 @@ export async function handleStatsCommand(interaction: ChatInputCommandInteractio
     : "_No earnings yet_";
 
   const embed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("📊 Outpost Bot — Community Stats")
+    .setTitle("📊 Reddit Microtasks — Community Stats")
     .addFields(
       { name: "💰 Lifetime Earnings", value: formatMoney(a?.total_earned ?? "0"), inline: true },
       { name: "💸 Total Paid", value: formatMoney(p?.total_paid ?? "0"), inline: true },

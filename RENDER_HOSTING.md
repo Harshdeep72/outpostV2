@@ -1,4 +1,4 @@
-# Hosting Outpost Bot — Render (API + Bot) and a separate host for the Dashboard
+# Hosting Reddit Microtasks — Render (API + Bot) and a separate host for the Dashboard
 
 This guide deploys the project the way you asked: **Discord bot + API on Render**, **dashboard on a different platform** (Vercel / Netlify / Cloudflare Pages / Hostinger). The two halves stay loosely coupled through one env var, so you can swap either host later without touching the other.
 

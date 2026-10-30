@@ -414,7 +414,7 @@ export async function handleWdCreatorPay(
             { name: "Method", value: String(wd.method), inline: true },
             { name: "Sent To", value: `\`${wd.destination}\`` },
           )
-          .setFooter({ text: "Thanks for working with Outpost! 💸" }),
+          .setFooter({ text: "Thanks for working with Reddit Microtasks! 💸" }),
       ],
     });
   } catch {

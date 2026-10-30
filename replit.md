@@ -1,8 +1,8 @@
-# Outpost Bot Monorepo
+# Reddit Microtasks Monorepo
 
 ## Overview
 
-The Outpost Bot is a pnpm workspace monorepo designed to provide a full-featured Reddit micro-task earning system integrated with Discord. It allows users to earn rewards by completing micro-tasks on Reddit. The project also includes a full-stack admin dashboard for managing the system.
+The Reddit Microtasks is a pnpm workspace monorepo designed to provide a full-featured Reddit micro-task earning system integrated with Discord. It allows users to earn rewards by completing micro-tasks on Reddit. The project also includes a full-stack admin dashboard for managing the system.
 
 **Key Capabilities:**
 - Reddit verification and task management.

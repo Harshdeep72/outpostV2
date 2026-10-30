@@ -37,7 +37,7 @@ const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
 async function ensureRole(guild: Guild, name: string, color: number): Promise<Role> {
   let role = guild.roles.cache.find((r) => r.name === name);
   if (!role) {
-    role = await guild.roles.create({ name, color, reason: "Outpost Bot setup" });
+    role = await guild.roles.create({ name, color, reason: "Reddit Microtasks setup" });
     // After creating a role, try to position it just below the bot's highest
     // role so the bot always has authority to assign it. This is best-effort —
     // if it fails (e.g. bot lacks MANAGE_ROLES or the position is already fine)
@@ -65,7 +65,7 @@ async function ensureCategory(guild: Guild, name: string): Promise<CategoryChann
     cat = (await guild.channels.create({
       name,
       type: ChannelType.GuildCategory,
-      reason: "Outpost Bot bot setup",
+      reason: "Reddit Microtasks bot setup",
     })) as CategoryChannel;
   }
   return cat;
@@ -86,7 +86,7 @@ async function ensureTextChannel(
     type: ChannelType.GuildText,
     parent: parent.id,
     permissionOverwrites,
-    reason: "Outpost Bot bot setup",
+    reason: "Reddit Microtasks bot setup",
   })) as TextChannel;
   return { channel: ch, created: true };
 }
@@ -112,9 +112,9 @@ async function postStartHereContent(ch: TextChannel) {
     embeds: [
       new EmbedBuilder()
         .setColor(COLORS.PRIMARY)
-        .setTitle("👋 Welcome to Outpost Bot!")
+        .setTitle("👋 Welcome to Reddit Microtasks!")
         .setDescription(
-          "Outpost Bot is a **Reddit-based earning platform** powered by Discord.\n\n" +
+          "Reddit Microtasks is a **Reddit-based earning platform** powered by Discord.\n\n" +
           "Complete real tasks on Reddit and earn real money directly to your wallet."
         )
         .addFields(
@@ -122,7 +122,7 @@ async function postStartHereContent(ch: TextChannel) {
           { name: "🔗 Referral Program", value: "Run `/referral` to get your code.\nShare it with friends — earn **+$0.40** for each who verifies and completes a task." },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
-        .setFooter({ text: "Outpost Bot Bot • Start earning today" })
+        .setFooter({ text: "Reddit Microtasks • Start earning today" })
         .setTimestamp(),
     ],
   });
@@ -133,7 +133,7 @@ async function postGuideContent(ch: TextChannel) {
     embeds: [
       new EmbedBuilder()
         .setColor(COLORS.ACCENT)
-        .setTitle("📖 Outpost Bot Earning Guide")
+        .setTitle("📖 Reddit Microtasks Earning Guide")
         .setDescription("Read this before claiming your first task.")
         .addFields(
           {
@@ -165,7 +165,7 @@ async function postGuideContent(ch: TextChannel) {
             value: "• One Reddit account per Discord account\n• No fake or deleted proof links\n• No sharing tasks with others\n• Abuse = permanent flag + payout block",
           },
         )
-        .setFooter({ text: "Outpost Bot Bot • Need help? Ask in #general" })
+        .setFooter({ text: "Reddit Microtasks • Need help? Ask in #general" })
         .setTimestamp(),
     ],
   });
@@ -179,10 +179,10 @@ async function postUpdatesIntro(ch: TextChannel) {
         .setTitle("📣 Bot Updates")
         .setDescription(
           "This is where bot **updates, fixes, and new features** will be announced.\n\n" +
-          "Whenever the Outpost team ships an update, the patch notes appear here automatically.\n" +
+          "Whenever the Reddit Microtasks team ships an update, the patch notes appear here automatically.\n" +
           "Keep an eye on this channel so you never miss a new task type, payout improvement, or anti-cheat upgrade."
         )
-        .setFooter({ text: "Outpost Bot • Patch notes" })
+        .setFooter({ text: "Reddit Microtasks • Patch notes" })
         .setTimestamp(),
     ],
   });
@@ -195,7 +195,7 @@ async function postReferralEventsContent(ch: TextChannel) {
         .setColor(COLORS.SUCCESS)
         .setTitle("🎉 Referral Program — Active")
         .setDescription(
-          "Earn by inviting your friends to Outpost Bot!\n\n" +
+          "Earn by inviting your friends to Reddit Microtasks!\n\n" +
           "**How it works:**\n" +
           "1. Run `/referral` to get your unique code\n" +
           "2. Share it — your friend runs `/referraluse <code>`\n" +
@@ -205,7 +205,7 @@ async function postReferralEventsContent(ch: TextChannel) {
           "Anti-abuse protection is active — fair rewards for real referrals only.\n\n" +
           "Bot announcements about referral milestones will appear here."
         )
-        .setFooter({ text: "Outpost Bot Referral System" })
+        .setFooter({ text: "Reddit Microtasks Referral System" })
         .setTimestamp(),
     ],
   });
@@ -375,7 +375,7 @@ async function findOrCreateAvailableWorkspacesCategory(
   const created = (await guild.channels.create({
     name: newName,
     type: ChannelType.GuildCategory,
-    reason: "Outpost Bot: Workspaces category overflow (50-channel limit)",
+    reason: "Reddit Microtasks: Workspaces category overflow (50-channel limit)",
   })) as CategoryChannel;
   return created;
 }

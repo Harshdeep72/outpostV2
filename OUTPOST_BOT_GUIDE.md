@@ -1,4 +1,4 @@
-# Outpost Bot — Full Technical Guide
+# Reddit Microtasks — Full Technical Guide
 
 > **Stack:** Node.js 20 · TypeScript · discord.js v14 · Express 5 · Drizzle ORM · PostgreSQL (Neon) · React 19 + Vite · Python curl_cffi
 > **Monorepo layout:** `artifacts/api-server/` (bot + API) · `artifacts/db/` (schema) · `artifacts/dashboard/` (React admin UI)
@@ -21,7 +21,7 @@
 
 ## 1. System Overview
 
-Outpost Bot is a **task-to-earn** platform layered on Discord. Admins post tasks that require real Reddit activity (commenting, posting, upvoting, etc.) or social media actions (Twitter, Quora). Verified members claim a task, do the work, submit a Reddit URL as proof, and get paid automatically in crypto, PayPal, or UPI.
+Reddit Microtasks is a **task-to-earn** platform layered on Discord. Admins post tasks that require real Reddit activity (commenting, posting, upvoting, etc.) or social media actions (Twitter, Quora). Verified members claim a task, do the work, submit a Reddit URL as proof, and get paid automatically in crypto, PayPal, or UPI.
 
 The system has three major components that all run together as one Node.js process:
 

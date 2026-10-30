@@ -60,7 +60,7 @@ async function fetchSheetCsv(url: string): Promise<string> {
 
   const csvUrl = `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${parsed.gid}`;
   const res = await fetch(csvUrl, {
-    headers: { "User-Agent": "OutpostBot/1.0" },
+    headers: { "User-Agent": "RedditMicrotasksBot/1.0" },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {

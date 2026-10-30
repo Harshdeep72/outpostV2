@@ -88,7 +88,7 @@ async function fetchCommentThreadViaOAuth(
     const res = await undiciFetch(url, {
       dispatcher: agent,
       headers: {
-        "User-Agent": "OutpostBot/1.0",
+        "User-Agent": "RedditMicrotasksBot/1.0",
         "Authorization": `Bearer ${token}`,
         "Accept": "application/json",
       },

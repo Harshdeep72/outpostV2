@@ -94,7 +94,7 @@ async function runDigestTick(client: Client): Promise<void> {
 
       const embed = new EmbedBuilder()
         .setColor(COLORS.PRIMARY)
-        .setTitle("📬 Your daily Outpost digest")
+        .setTitle("📬 Your daily Reddit Microtasks digest")
         .setDescription(`Here's what happened in the last 24 hours.`)
         .addFields(
           { name: "💰 Earned (24h)", value: formatMoney(earned.toFixed(2)), inline: true },

@@ -75,7 +75,7 @@ export async function fetchRedditApiUrl(url: string): Promise<{ ok: boolean; sta
     const res = await undiciFetch(oauthUrl, {
       dispatcher: agent,
       headers: {
-        "User-Agent": "OutpostBot/1.0",
+        "User-Agent": "RedditMicrotasksBot/1.0",
         "Authorization": `Bearer ${token}`,
         "Accept": "application/json",
       },
@@ -108,7 +108,7 @@ export async function getOAuthToken(): Promise<string | null> {
       dispatcher: agent,
       method: "POST",
       headers: {
-        "User-Agent": "OutpostBot/1.0",
+        "User-Agent": "RedditMicrotasksBot/1.0",
         "Authorization": "Basic " + Buffer.from(`${clientId}:${secret}`).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -137,7 +137,7 @@ async function fetchViaOAuth(name: string): Promise<RedditFetchResult | null> {
     const res = await undiciFetch(`https://oauth.reddit.com/user/${name}/about?raw_json=1`, {
       dispatcher: agent,
       headers: {
-        "User-Agent": "OutpostBot/1.0",
+        "User-Agent": "RedditMicrotasksBot/1.0",
         "Authorization": `Bearer ${token}`,
         "Accept": "application/json",
       },
@@ -202,7 +202,7 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
   try {
     const { fetch: undiciFetch, Agent } = await import("undici");
     const agent = new Agent({ connect: { timeout: 6_000 }, bodyTimeout: 12_000, headersTimeout: 12_000 });
-    const headers = { "User-Agent": "OutpostBot/1.0", "Accept": "application/json" };
+    const headers = { "User-Agent": "RedditMicrotasksBot/1.0", "Accept": "application/json" };
 
     const [postsRes, commentsRes] = await Promise.all([
       undiciFetch(`${BASE}/posts/search?author=${encodeURIComponent(name)}&limit=1000&fields=${fields}`, { dispatcher: agent, headers }),
@@ -310,7 +310,7 @@ async function fetchViaPublicFrontend(name: string): Promise<RedditFetchResult |
       const res = await undiciFetch(url, {
         dispatcher: agent,
         headers: {
-          "User-Agent": "OutpostBot/1.0",
+          "User-Agent": "RedditMicrotasksBot/1.0",
           "Accept": "application/json",
         },
       });

@@ -1419,7 +1419,7 @@ router.post("/campaigns/:id/create-sheet", requireAuth, async (req, res) => {
       });
       return;
     }
-    const title = `Outpost: ${camp.rows[0].title} (${new Date().toISOString().slice(0, 10)})`;
+    const title = `Reddit Microtasks: ${camp.rows[0].title} (${new Date().toISOString().slice(0, 10)})`;
 
     const { spreadsheetId, url } = await gs.createCampaignSheet(title);
 

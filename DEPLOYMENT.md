@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide shows how to host Outpost Bot anywhere — Replit, a Contabo VPS,
+This guide shows how to host Reddit Microtasks anywhere — Replit, a Contabo VPS,
 Hostinger VPS, DigitalOcean droplet, or any other Linux server with Node.js.
 
 The same code runs in all environments. Only the env vars and start command differ.

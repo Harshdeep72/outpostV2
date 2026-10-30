@@ -34,7 +34,7 @@ export default function Login() {
             </svg>
           </div>
           <div className="leading-tight">
-            <p className="text-[15px] font-semibold text-zinc-100">Outpost Bot</p>
+            <p className="text-[15px] font-semibold text-zinc-100">Reddit Microtasks</p>
             <p className="text-[11px] text-zinc-500">Reddit operations console</p>
           </div>
         </div>
@@ -105,7 +105,7 @@ export default function Login() {
         </p>
 
         <p className="text-center text-[11px] text-zinc-600 mt-10">
-          Outpost Bot · v2 Flash Edition
+          Reddit Microtasks · v2 Flash Edition
         </p>
       </div>
     </div>

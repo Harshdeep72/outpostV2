@@ -75,7 +75,7 @@ export async function handleHealthCommand(interaction: ChatInputCommandInteracti
   const proxyLine = `**${m.proxyCount}** proxies loaded\n${fmtChannel("Proxy", m.proxy)}\n${fmtChannel("Direct fallback", m.direct)}`;
 
   const embed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("🩺 Outpost Bot — Deep Health Check")
+    .setTitle("🩺 Reddit Microtasks — Deep Health Check")
     .addFields(
       { name: "🌐 Discord WS", value: wsStr, inline: true },
       { name: "🗄️ Database", value: dbStr, inline: true },

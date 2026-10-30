@@ -81,7 +81,7 @@ function pageTitle(location: string): string {
       }
     }
   }
-  return best?.label ?? "Outpost Bot";
+  return best?.label ?? "Reddit Microtasks";
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {
@@ -139,7 +139,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </svg>
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[13.5px] font-semibold text-zinc-100 tracking-tight truncate">Outpost Bot</p>
+            <p className="text-[13.5px] font-semibold text-zinc-100 tracking-tight truncate">Reddit Microtasks</p>
             <p className="text-[10px] text-zinc-500">Reddit operations</p>
           </div>
         </div>

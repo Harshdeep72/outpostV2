@@ -167,7 +167,7 @@ async function computeLeaderboardSnapshot(guildId: string): Promise<{
   // ONLY a fallback if the PNG render fails; the channel post is image-based.
   const top10 = merged.slice(0, 10);
   const embed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("🏆 Outpost Bot Leaderboard")
+    .setTitle("🏆 Reddit Microtasks Leaderboard")
     .addFields({
       name: `🔥 This Week · ${weekRangeLabel}`,
       value:

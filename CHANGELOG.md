@@ -1,4 +1,4 @@
-# Outpost Bot — Changelog
+# Reddit Microtasks — Changelog
 
 This file is the source of truth for the bot's release notes. Each `## v…`
 section is parsed by the bot and posted to the `#updates` channel of every

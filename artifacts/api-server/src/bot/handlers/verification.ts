@@ -48,7 +48,7 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
     );
 
   const guideEmbed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("📖 Outpost Quick Start & Safety Guide")
+    .setTitle("📖 Reddit Microtasks Quick Start & Safety Guide")
     .addFields(
       {
         name: "1️⃣ Claiming a Task",
@@ -84,7 +84,7 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
         inline: false
       }
     )
-    .setFooter({ text: "Outpost Platform · Earn safely" });
+    .setFooter({ text: "Reddit Microtasks · Earn safely" });
 
   await workspaceCh.send({ embeds: [welcomeEmbed, guideEmbed] }).catch((err: any) => {
     logger.warn({ err, channelId: workspaceCh.id }, "Failed to send workspace welcome embeds");

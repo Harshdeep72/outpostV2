@@ -44,7 +44,7 @@ export async function handlePingCommand(interaction: ChatInputCommandInteraction
     .join("\n") || "_No cache activity yet_";
 
   const embed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("⚡ Outpost Bot — Pong!")
+    .setTitle("⚡ Reddit Microtasks — Pong!")
     .setDescription(`**v2 Flash Edition** is running.`)
     .addFields(
       { name: "🌐 Discord WS", value: `${wsEmoji} ${wsPing}ms`, inline: true },

@@ -78,7 +78,7 @@ export default function Overview() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Outpost Bot overview</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Reddit Microtasks overview</p>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">

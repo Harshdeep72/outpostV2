@@ -14,7 +14,7 @@ export async function ensureEarnerRoles(guild: Guild): Promise<Record<string, Ro
         role = await guild.roles.create({
           name: tier.roleName,
           color: tier.color,
-          reason: "Outpost Bot earner-tier auto-create",
+          reason: "Reddit Microtasks earner-tier auto-create",
           mentionable: false,
           hoist: false,
         });

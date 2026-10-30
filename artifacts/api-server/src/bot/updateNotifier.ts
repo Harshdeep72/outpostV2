@@ -99,7 +99,7 @@ function buildEmbed(entry: ChangelogEntry): EmbedBuilder {
     .setColor(COLORS.PRIMARY)
     .setTitle(`📦 Update — ${titleParts.join(" — ")}`)
     .setDescription(truncateForEmbed(entry.bodyMarkdown || "_(no patch notes provided)_"))
-    .setFooter({ text: `Outpost Bot • ${entry.date ?? "Patch notes"}` })
+    .setFooter({ text: `Reddit Microtasks • ${entry.date ?? "Patch notes"}` })
     .setTimestamp();
 }
 

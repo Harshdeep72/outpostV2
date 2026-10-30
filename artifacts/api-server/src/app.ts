@@ -340,6 +340,21 @@ if (!dashboardDistPath) {
   }
 }
 
+app.get("/sheet-converter", (_req: Request, res: Response) => {
+  const possiblePaths = [
+    path.resolve(process.cwd(), "artifacts/dashboard/public/sheet-converter.html"),
+    path.resolve(process.cwd(), "artifacts/dashboard/dist/public/sheet-converter.html"),
+    path.resolve(__dirname, "../../dashboard/public/sheet-converter.html"),
+    path.resolve(__dirname, "../../../artifacts/dashboard/public/sheet-converter.html"),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return res.sendFile(p);
+    }
+  }
+  res.status(404).send("Sheet converter not found");
+});
+
 if (dashboardDistPath) {
   if (!fs.existsSync(path.join(dashboardDistPath, "index.html")) && dashboardDistPath.includes("Outpost-sucks1-main/")) {
     const parts = dashboardDistPath.split("Outpost-sucks1-main/");

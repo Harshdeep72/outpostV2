@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulk Task Sheet Converter — Reddit Microtasks</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --primary-light: rgba(59, 130, 246, 0.15);
+      --success: #10b981;
+      --success-hover: #059669;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --input-bg: #090e1a;
+      --input-border: #334155;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.5;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--card-border);
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      font-size: 28px;
+      background: var(--primary-light);
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 900px) {
+      .grid-2 {
+        grid-template-columns: 1.1fr 0.9fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 8px;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--primary);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 130px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: #fff;
+    }
+    .btn-success:hover {
+      background: var(--success-hover);
+    }
+
+    .btn-secondary {
+      background: #334155;
+      color: var(--text);
+    }
+    .btn-secondary:hover {
+      background: #475569;
+    }
+
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-pill {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .stat-lbl {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      max-height: 480px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+
+    th {
+      background: #090e1a;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 10px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      position: sticky;
+      top: 0;
+      border-bottom: 1px solid var(--card-border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #1e293b;
+      vertical-align: middle;
+      color: var(--text);
+    }
+
+    tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .link-cell {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .link-cell a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+    .link-cell a:hover {
+      text-decoration: underline;
+    }
+
+    .comment-cell {
+      max-width: 380px;
+      font-size: 12px;
+      color: #cbd5e1;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      display: inline-block;
+    }
+
+    .badge-primary { background: var(--primary-light); color: var(--primary); }
+
+    .del-btn {
+      background: none;
+      border: none;
+      color: var(--danger);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    .del-btn:hover {
+      background: rgba(239, 68, 68, 0.15);
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--success);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      display: none;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.2s ease-out;
+      z-index: 1000;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1>Reddit Microtasks — Sheet Formatter</h1>
+        <div class="subtitle">Convert any client Google Sheet / raw table into Discord /bulktask format</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-secondary" onclick="loadSampleData()">🧪 Load Sample Sheet</button>
+      <button class="btn btn-success" id="copyBtn" onclick="copyDiscordCsv()" style="display:none;">📋 Copy Clean CSV</button>
+    </div>
+  </header>
+
+  <div class="grid-2">
+    <!-- Input Card -->
+    <div class="card">
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('paste')">Paste Sheet Data / CSV</button>
+        <button class="tab-btn" onclick="switchTab('url')">Fetch Google Sheet Link</button>
+      </div>
+
+      <div id="tab-paste" class="tab-content active">
+        <label>Paste copied table, TSV, or CSV:</label>
+        <textarea id="rawInput" placeholder="Paste data directly copied from Google Sheets / Excel, or raw CSV here..."></textarea>
+      </div>
+
+      <div id="tab-url" class="tab-content">
+        <label>Google Sheets Public Link:</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <input type="text" id="sheetUrlInput" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+          <button class="btn btn-primary" onclick="fetchSheetUrl()" style="white-space: nowrap;">Fetch</button>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted);">
+          Make sure sheet is shared as <strong>Anyone with link → Viewer</strong>.
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-primary" onclick="processInput()">⚡ Convert & Preview Tasks</button>
+        <button class="btn btn-secondary" onclick="clearData()" style="padding: 8px 12px; font-size: 12px;">Clear</button>
+      </div>
+    </div>
+
+    <!-- Global Defaults Card -->
+    <div class="card">
+      <div class="card-title">⚙️ Task Defaults & Campaign Settings</div>
+      <div class="config-grid">
+        <div>
+          <label>Type</label>
+          <select id="cfgType" onchange="applyGlobalConfig()">
+            <option value="comment" selected>comment</option>
+            <option value="post">post</option>
+            <option value="upvote">upvote</option>
+            <option value="share">share</option>
+          </select>
+        </div>
+        <div>
+          <label>Reward ($)</label>
+          <input type="number" id="cfgReward" value="1.00" step="0.25" min="0.01" onchange="applyGlobalConfig()">
+        </div>
+        <div>
+          <label>Slots</label>
+          <input type="number" id="cfgSlots" value="1" min="1" onchange="applyGlobalConfig()">
+        </div>
+        <div>
+          <label>Hold Hours</label>
+          <input type="number" id="cfgHold" value="24" min="0" onchange="applyGlobalConfig()">
+        </div>
+        <div>
+          <label>Time Limit (min)</label>
+          <input type="number" id="cfgTime" value="60" min="5" onchange="applyGlobalConfig()">
+        </div>
+      </div>
+      <div style="margin-top: 16px; font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px;">
+        💡 <strong>How it works:</strong> The tool automatically identifies your Reddit post URLs and pre-written comment text, ignores date/banner headers, and injects the standard Discord <code>/bulktask</code> structure.
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview Section (Visible when tasks exist) -->
+  <div id="previewSection" style="display: none;">
+    <div class="stats-bar">
+      <div class="stat-pill">
+        <div class="stat-val" id="statTasks">0</div>
+        <div class="stat-lbl">Tasks Ready</div>
+      </div>
+      <div class="stat-pill">
+        <div class="stat-val" id="statSlots">0</div>
+        <div class="stat-lbl">Total Slots</div>
+      </div>
+      <div class="stat-pill">
+        <div class="stat-val" id="statBudget">$0.00</div>
+        <div class="stat-lbl">Campaign Budget</div>
+      </div>
+      <div class="stat-pill">
+        <div class="stat-val" id="statDuplicates">0</div>
+        <div class="stat-lbl">Duplicate Links</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+        <div class="card-title" style="margin: 0;">📝 Parsed Tasks Table</div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-success" onclick="copyDiscordCsv()">📋 Copy for /bulktask</button>
+          <button class="btn btn-secondary" onclick="downloadCsv()">💾 Download Clean .CSV</button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th>Type</th>
+              <th>Reddit Post Link</th>
+              <th>Pre-written Comment</th>
+              <th>Reward</th>
+              <th>Slots</th>
+              <th>Hold</th>
+              <th style="width: 40px;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="taskTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Output preview code block -->
+    <div class="card">
+      <div class="card-title">📄 Clean Output CSV (Exact Format for Discord)</div>
+      <textarea id="outputCsv" readonly style="min-height: 160px; font-size: 11px;"></textarea>
+      <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+        <button class="btn btn-success" onclick="copyDiscordCsv()">📋 Copy Output to Clipboard</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast">✅ Copied to clipboard! Ready to paste into /bulktask</div>
+
+<script>
+  let parsedTasks = [];
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    if (tab === 'paste') {
+      document.querySelectorAll('.tab-btn')[0].classList.add('active');
+      document.getElementById('tab-paste').classList.add('active');
+    } else {
+      document.querySelectorAll('.tab-btn')[1].classList.add('active');
+      document.getElementById('tab-url').classList.add('active');
+    }
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    if (msg) t.innerText = msg;
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 3000);
+  }
+
+  // Parse CSV or TSV (tab-separated from copy-paste)
+  function parseDelimited(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+    
+    // Detect delimiter (Tab or Comma)
+    const firstLine = lines[0];
+    const isTab = (firstLine.match(/\t/g) || []).length > (firstLine.match(/,/g) || []).length;
+    const delimiter = isTab ? '\t' : ',';
+
+    const parseLine = (line) => {
+      const res = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          if (inQuotes && line[i+1] === '"') { cur += '"'; i++; }
+          else { inQuotes = !inQuotes; }
+        } else if (c === delimiter && !inQuotes) {
+          res.push(cur.trim());
+          cur = '';
+        } else {
+          cur += c;
+        }
+      }
+      res.push(cur.trim());
+      return res;
+    };
+
+    return lines.map(parseLine);
+  }
+
+  function processInput() {
+    const raw = document.getElementById('rawInput').value.trim();
+    if (!raw) {
+      alert("Please paste your spreadsheet data or CSV first!");
+      return;
+    }
+
+    const grid = parseDelimited(raw);
+    if (!grid.length) return;
+
+    // Detect column indices
+    let linkIdx = -1;
+    let commentIdx = -1;
+    let rewardIdx = -1;
+    let slotsIdx = -1;
+
+    const headers = grid[0].map(h => h.toLowerCase().replace(/[\s_-]/g, ''));
+    headers.forEach((h, idx) => {
+      if (h.includes('post') || h.includes('link') || h.includes('url') || h.includes('reddit')) {
+        if (linkIdx === -1) linkIdx = idx;
+      }
+      if (h.includes('comment') || h.includes('content') || h.includes('copy') || h.includes('text')) {
+        if (commentIdx === -1) commentIdx = idx;
+      }
+      if (h.includes('reward') || h.includes('pay') || h.includes('rate') || h.includes('price')) {
+        if (rewardIdx === -1) rewardIdx = idx;
+      }
+      if (h.includes('slot') || h.includes('count') || h.includes('qty')) {
+        if (slotsIdx === -1) slotsIdx = idx;
+      }
+    });
+
+    // Fallbacks if headers weren't named standardly
+    if (linkIdx === -1) {
+      // Find first column containing "reddit.com" or "http"
+      for (let row of grid) {
+        row.forEach((cell, idx) => {
+          if (cell.includes('http://') || cell.includes('https://')) {
+            linkIdx = idx;
+          }
+        });
+        if (linkIdx !== -1) break;
+      }
+    }
+
+    if (linkIdx === -1) {
+      alert("Could not find any Reddit post link in the pasted data. Please check your columns.");
+      return;
+    }
+
+    if (commentIdx === -1) {
+      // Pick the next column after link or column with longest text
+      commentIdx = (linkIdx === 1 && grid[0].length > 2) ? 2 : (linkIdx === 0 && grid[0].length > 1 ? 1 : -1);
+    }
+
+    const defType = document.getElementById('cfgType').value;
+    const defReward = parseFloat(document.getElementById('cfgReward').value) || 1.00;
+    const defSlots = parseInt(document.getElementById('cfgSlots').value) || 1;
+    const defHold = parseInt(document.getElementById('cfgHold').value) || 24;
+
+    parsedTasks = [];
+    const seenLinks = new Set();
+    let dupCount = 0;
+
+    grid.forEach((row, rIdx) => {
+      const link = (row[linkIdx] || '').trim();
+      // Skip headers or banner rows without https://
+      if (!link.startsWith('http://') && !link.startsWith('https://')) return;
+
+      const comment = commentIdx !== -1 ? (row[commentIdx] || '').trim() : '';
+      const reward = rewardIdx !== -1 && parseFloat(row[rewardIdx]) ? parseFloat(row[rewardIdx]) : defReward;
+      const slots = slotsIdx !== -1 && parseInt(row[slotsIdx]) ? parseInt(row[slotsIdx]) : defSlots;
+
+      if (seenLinks.has(link.toLowerCase())) dupCount++;
+      seenLinks.add(link.toLowerCase());
+
+      parsedTasks.push({
+        type: defType,
+        task_link: link,
+        prewritten_comment: comment,
+        reward: reward,
+        slots: slots,
+        hold_hours: defHold
+      });
+    });
+
+    renderTasksTable();
+    updateOutput();
+    document.getElementById('statDuplicates').innerText = dupCount;
+    document.getElementById('previewSection').style.display = 'block';
+    document.getElementById('copyBtn').style.display = 'inline-flex';
+  }
+
+  function renderTasksTable() {
+    const tbody = document.getElementById('taskTableBody');
+    tbody.innerHTML = '';
+
+    let totalSlots = 0;
+    let totalBudget = 0;
+
+    parsedTasks.forEach((t, i) => {
+      totalSlots += t.slots;
+      totalBudget += t.reward * t.slots;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="color:var(--text-muted); font-size:11px;">${i + 1}</td>
+        <td><span class="badge badge-primary">${t.type}</span></td>
+        <td class="link-cell"><a href="${t.task_link}" target="_blank">${t.task_link}</a></td>
+        <td class="comment-cell" title="${t.prewritten_comment.replace(/"/g, '&quot;')}">${t.prewritten_comment || '<em>(none)</em>'}</td>
+        <td>$${t.reward.toFixed(2)}</td>
+        <td>${t.slots}</td>
+        <td>${t.hold_hours}h</td>
+        <td>
+          <button class="del-btn" onclick="deleteTask(${i})" title="Delete task">✕</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('statTasks').innerText = parsedTasks.length;
+    document.getElementById('statSlots').innerText = totalSlots;
+    document.getElementById('statBudget').innerText = '$' + totalBudget.toFixed(2);
+  }
+
+  function deleteTask(idx) {
+    parsedTasks.splice(idx, 1);
+    renderTasksTable();
+    updateOutput();
+  }
+
+  function applyGlobalConfig() {
+    const defType = document.getElementById('cfgType').value;
+    const defReward = parseFloat(document.getElementById('cfgReward').value) || 1.00;
+    const defSlots = parseInt(document.getElementById('cfgSlots').value) || 1;
+    const defHold = parseInt(document.getElementById('cfgHold').value) || 24;
+
+    parsedTasks.forEach(t => {
+      t.type = defType;
+      t.reward = defReward;
+      t.slots = defSlots;
+      t.hold_hours = defHold;
+    });
+
+    renderTasksTable();
+    updateOutput();
+  }
+
+  function updateOutput() {
+    if (!parsedTasks.length) {
+      document.getElementById('outputCsv').value = '';
+      return;
+    }
+
+    const escapeCsv = (str) => {
+      if (!str) return '""';
+      if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+
+    const header = "type,task_link,prewritten_comment,reward,slots,hold_hours";
+    const lines = [header];
+
+    parsedTasks.forEach(t => {
+      lines.push(`${t.type},${t.task_link},${escapeCsv(t.prewritten_comment)},${t.reward.toFixed(2)},${t.slots},${t.hold_hours}`);
+    });
+
+    document.getElementById('outputCsv').value = lines.join('\n');
+  }
+
+  function copyDiscordCsv() {
+    const csv = document.getElementById('outputCsv').value;
+    if (!csv) return;
+    navigator.clipboard.writeText(csv).then(() => {
+      showToast("📋 Clean CSV copied! Now paste into Discord's /bulktask popup.");
+    }).catch(err => {
+      alert("Failed to copy automatically: " + err);
+    });
+  }
+
+  function downloadCsv() {
+    const csv = document.getElementById('outputCsv').value;
+    if (!csv) return;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reddit-microtasks-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function clearData() {
+    document.getElementById('rawInput').value = '';
+    document.getElementById('outputCsv').value = '';
+    parsedTasks = [];
+    document.getElementById('previewSection').style.display = 'none';
+    document.getElementById('copyBtn').style.display = 'none';
+  }
+
+  function fetchSheetUrl() {
+    const url = document.getElementById('sheetUrlInput').value.trim();
+    if (!url) {
+      alert("Please enter a Google Sheets URL");
+      return;
+    }
+
+    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    if (!match) {
+      alert("Invalid Google Sheets link. It should contain /spreadsheets/d/YOUR_ID");
+      return;
+    }
+
+    const sheetId = match[1];
+    let gid = '0';
+    const gidMatch = url.match(/gid=(\d+)/);
+    if (gidMatch) gid = gidMatch[1];
+
+    showToast("⏳ Fetching tasks from Google Sheets...");
+
+    // Use Google Visualization JSONP callback to bypass browser CORS completely!
+    const callbackName = 'gvizCallback_' + Date.now();
+    const script = document.createElement('script');
+    
+    window[callbackName] = function(data) {
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+
+      if (!data || !data.table || !data.table.rows) {
+        alert("No data found in sheet. Make sure the sheet is shared as Anyone with the link can view.");
+        return;
+      }
+
+      const defType = document.getElementById('cfgType').value;
+      const defReward = parseFloat(document.getElementById('cfgReward').value) || 1.00;
+      const defSlots = parseInt(document.getElementById('cfgSlots').value) || 1;
+      const defHold = parseInt(document.getElementById('cfgHold').value) || 24;
+
+      parsedTasks = [];
+      const seenLinks = new Set();
+      let dupCount = 0;
+
+      data.table.rows.forEach(r => {
+        const cells = (r.c || []).map(cell => cell ? (cell.f !== undefined ? cell.f : (cell.v !== undefined ? String(cell.v) : '')) : '');
+        
+        // Find Reddit / web link in cells
+        const link = cells.find(c => c.startsWith('http://') || c.startsWith('https://'));
+        if (!link) return;
+
+        // Find comment text (the cell next to link or longest remaining string)
+        const linkIdx = cells.indexOf(link);
+        let comment = '';
+        if (linkIdx !== -1 && linkIdx + 1 < cells.length && cells[linkIdx + 1]) {
+          comment = cells[linkIdx + 1].trim();
+        } else {
+          const candidates = cells.filter((c, i) => i !== linkIdx && c.length > 5);
+          if (candidates.length) comment = candidates[0].trim();
+        }
+
+        if (seenLinks.has(link.toLowerCase())) dupCount++;
+        seenLinks.add(link.toLowerCase());
+
+        parsedTasks.push({
+          type: defType,
+          task_link: link.trim(),
+          prewritten_comment: comment,
+          reward: defReward,
+          slots: defSlots,
+          hold_hours: defHold
+        });
+      });
+
+      if (!parsedTasks.length) {
+        alert("Could not find valid task links in the sheet. Please make sure rows have Reddit URLs.");
+        return;
+      }
+
+      renderTasksTable();
+      updateOutput();
+      document.getElementById('statDuplicates').innerText = dupCount;
+      document.getElementById('previewSection').style.display = 'block';
+      document.getElementById('copyBtn').style.display = 'inline-flex';
+      showToast(`✅ Successfully imported ${parsedTasks.length} tasks!`);
+    };
+
+    script.src = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=responseHandler:${callbackName}&gid=${gid}`;
+    script.onerror = function() {
+      alert("Could not load Google Sheet.\n\nMake sure your sheet is set to 'Anyone with the link can view' (Viewer access).\n\nAlternative: In Google Sheets, press Ctrl+A, then Ctrl+C, click 'Paste Sheet Data', and press Ctrl+V!");
+    };
+    document.body.appendChild(script);
+  }
+
+  function loadSampleData() {
+    const sample = `S.NO.\tPosts link\tcomment content
+1\thttps://www.reddit.com/r/peptides4dummies_/comments/1xiowyb/dosage_query/\t"Restart low or resume near your old reta step, but a prescriber should pick after months off. A Tyde Wellness doctor can write compounded tirzepatide and pick that start. Then ask how many units equal one mg."
+2\thttps://www.reddit.com/r/LabGrownDiamonds/comments/1xilxsj/looking_for_recommendations/\t"Lifetime resizing is a warranty term, so read the fine print: ask whether the first resize is free, whether it covers eternity bands, and who pays shipping both ways. Nature Sparkle has a lifetime warranty on its lab diamond rings."
+3\thttps://www.reddit.com/r/it/comments/1xip04l/getting_an_it_job_with_barely_any_experience_and/\t"Skip the A+ for now, because a college IT desk plus 18 months at an info desk already reads as help desk experience. Simple Apply can file the help desk forms within your commute radius."`;
+    
+    document.getElementById('rawInput').value = sample;
+    switchTab('paste');
+    processInput();
+    showToast("Sample data loaded!");
+  }
+</script>
+
+</body>
+</html>

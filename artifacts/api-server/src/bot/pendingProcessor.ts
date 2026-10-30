@@ -195,17 +195,7 @@ export function startPendingProcessor(client: Client) {
 
   setInterval(async () => {
     try {
-      const res = await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text as count FROM submissions WHERE review_status = 'pending_hold'`
-      );
-      const pendingCount = parseInt(res.rows[0]?.count ?? "0");
-      
-      if (pendingCount > 20) {
-        logger.debug({ pendingCount }, "Pending submissions > 20, auto-triggering aggressive hold processor");
-        await runPendingProcessorNow(client, true);
-      } else {
-        await runPendingProcessorNow(client, false);
-      }
+      await runPendingProcessorNow(client, false);
     } catch (err) {
       logger.error({ err }, "Error in pending processor interval loop");
     }
@@ -283,9 +273,9 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
         sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.available_at
             FROM submissions s
             WHERE s.review_status = 'pending_hold'
-              ${forceAggressive ? sql`AND (s.last_checked_at IS NULL OR s.last_checked_at < NOW() - INTERVAL '1 hour')` : sql`AND s.available_at <= ${now}`}
+              AND s.available_at <= ${now}
             ORDER BY s.last_checked_at ASC NULLS FIRST
-            LIMIT ${forceAggressive ? 50 : 20}`
+            LIMIT 20`
       );
 
       await Promise.all(holdRows.rows.map(async (row) => {
@@ -499,6 +489,14 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             void notifyManualReview(row, `First check found comment **${firstDetected}**; confirmation check also inconclusive — cannot determine final status.`);
 
           } else {
+            // Safety: never reject if the hold period has not yet elapsed
+            const availableDate = new Date(row.available_at);
+            if (availableDate > now) {
+              logger.warn({ subId, availableAt: row.available_at }, "Hold processor: hold period has not expired yet — refusing to reject, putting back to sleep");
+              await db.execute(sql`UPDATE submissions SET review_status = 'pending_hold', last_checked_at = NOW() WHERE id = ${subId}`);
+              return;
+            }
+
             // Both reads agree: removed or deleted. Now it is safe to reject.
             const confirmedStatus = confirmation.liveStatus === "deleted" ? "deleted" : "removed";
 

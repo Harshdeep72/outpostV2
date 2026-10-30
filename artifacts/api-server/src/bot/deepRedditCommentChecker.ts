@@ -464,13 +464,8 @@ async function fetchCommentViaRedditOsint(url: string): Promise<any> {
       return json.data;
     }
 
-    if (!res.ok) {
-      if (res.status === 404 || (json && json.message?.includes("not found"))) {
-        return { liveness: "not_found", author: "", subreddit: "", body_snippet: "" };
-      }
-      return null;
-    }
-    
+    // Do NOT treat external API 404/errors as "not_found" (which falsely treats live comments as deleted).
+    // Return null so the checker falls back to Python curl_cffi, direct JSON, or api_unreachable.
     return null;
   } catch (err: any) {
     logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");

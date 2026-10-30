@@ -1108,11 +1108,9 @@ export async function recheckRedditLiveness(proofUrl: string): Promise<LivenessR
     ) {
       liveStatus = "removed";
     } else if (validation.status === "comment_missing") {
-      // comment_missing means no source could find the comment on the post.
-      // During re-checks this is a strong signal the comment no longer exists —
-      // treat it as deleted so the wallet is corrected.  api_unreachable (all
-      // sources truly blocked) is kept as "unknown" for retry on next tick.
-      liveStatus = "deleted";
+      // If a comment was not found during re-check, treat as "unknown" so we retry
+      // rather than falsely rejecting a live comment due to Reddit API rate limiting or pagination.
+      liveStatus = "unknown";
     }
     return {
       liveStatus,

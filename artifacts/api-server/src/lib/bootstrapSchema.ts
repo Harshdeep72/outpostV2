@@ -475,6 +475,34 @@ const POST_FIXES: string[] = [
    WHERE s.task_id = t.id
      AND s.review_status = 'pending_hold'
      AND s.available_at > s.submitted_at + INTERVAL '26 hours';`,
+  // Retroactively restore any submissions wrongly rejected by premature hold check
+  `WITH wrongly_rejected AS (
+     SELECT id, user_id, discord_id, reward::numeric AS reward
+       FROM submissions
+      WHERE review_status = 'rejected'
+        AND review_reason LIKE 'Hold-end check%'
+        AND submitted_at > NOW() - INTERVAL '24 hours'
+   ),
+   aggregated AS (
+     SELECT user_id, SUM(reward) AS total_reward, COUNT(*) AS sub_count
+       FROM wrongly_rejected
+      GROUP BY user_id
+   )
+   UPDATE users u
+      SET balance_pending = u.balance_pending + a.total_reward,
+          trust_score = LEAST(1000, u.trust_score + (a.sub_count * 3))
+     FROM aggregated a
+    WHERE u.id = a.user_id;`,
+  `UPDATE "submissions" s
+      SET review_status = 'pending_hold',
+          live_status = 'live',
+          review_reason = 'Auto-restored (premature liveness check overridden)',
+          available_at = s.submitted_at + (COALESCE(t.pending_delay_hours, 24) || ' hours')::interval
+     FROM "tasks" t
+    WHERE s.task_id = t.id
+      AND s.review_status = 'rejected'
+      AND s.review_reason LIKE 'Hold-end check%'
+      AND s.submitted_at > NOW() - INTERVAL '24 hours';`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

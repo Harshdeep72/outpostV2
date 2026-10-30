@@ -1,0 +1,17 @@
+name: Keep Alive Ping
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Service
+        run: |
+          echo "Pinging Outpost Bot..."
+          curl -fsSL -m 15 "https://outpost-bot-pxke.onrender.com/api/health" || echo "Outpost pinged."
+          echo "Pinging Onboarding Bot..."
+          curl -fsSL -m 15 "https://reddit-microtasks-bot.onrender.com" || echo "Onboarding pinged."

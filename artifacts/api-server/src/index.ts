@@ -66,6 +66,24 @@ async function probeDatabase(): Promise<void> {
   logger.error("Database probe failed after 5 attempts — continuing anyway");
 }
 
+function startRenderKeepAlive(): void {
+  const PING_INTERVAL = 4 * 60 * 1000; // 4 minutes (Render sleeps at 15m)
+  const targets = [
+    "https://reddit-microtasks-bot.onrender.com/",
+    "https://outpost-bot-pxke.onrender.com/api/health",
+  ];
+  setInterval(async () => {
+    for (const url of targets) {
+      try {
+        const { fetch: undiciFetch } = await import("undici");
+        await undiciFetch(url, { headers: { "User-Agent": "RenderKeepAlive/1.0" } });
+      } catch {
+        // non-fatal
+      }
+    }
+  }, PING_INTERVAL).unref();
+}
+
 app.listen(port, async (err?: Error) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
@@ -73,6 +91,7 @@ app.listen(port, async (err?: Error) => {
   }
   logger.info({ port }, "Server listening");
 
+  startRenderKeepAlive();
   initRedditCookieManager();
 
   await probeDatabase();

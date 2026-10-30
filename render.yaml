@@ -36,6 +36,8 @@ services:
         value: production
       - key: NODE_VERSION
         value: 20
+      - key: DASHBOARD_DIST_PATH
+        value: /opt/render/project/src/artifacts/dashboard/dist/public
       # PYTHON_PATH tells the bot exactly where the venv Python is on Render.
       # This avoids path-resolution failures when process.cwd() differs from
       # the workspace root at runtime. Adjust if your Render project path differs.

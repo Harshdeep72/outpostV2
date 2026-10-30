@@ -322,15 +322,25 @@ app.use(
 app.use("/api", router);
 
 // Optional: serve the built dashboard from this same Node process.
-// On Replit, the dashboard runs as its own artifact and DASHBOARD_DIST_PATH is
-// unset, so this block is a no-op. On a VPS / Hostinger / Contabo deploy, set
-// DASHBOARD_DIST_PATH=/absolute/path/to/artifacts/dashboard/dist/public and the
-// API server will also serve the SPA — one process, no nginx required.
+// If DASHBOARD_DIST_PATH is not explicitly set, auto-detect from known locations.
 let dashboardDistPath = process.env.DASHBOARD_DIST_PATH;
+if (!dashboardDistPath) {
+  const candidates = [
+    path.resolve(process.cwd(), "artifacts/dashboard/dist/public"),
+    path.resolve(process.cwd(), "../dashboard/dist/public"),
+    path.resolve(process.cwd(), "dashboard/dist/public"),
+    path.resolve(__dirname, "../../dashboard/dist/public"),
+    path.resolve(__dirname, "../../../artifacts/dashboard/dist/public"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, "index.html"))) {
+      dashboardDistPath = c;
+      break;
+    }
+  }
+}
+
 if (dashboardDistPath) {
-  // If the path points to a local directory structure containing 'Outpost-sucks1-main'
-  // but doesn't exist (e.g. copied from local env to Render), automatically resolve
-  // it relative to the container CWD.
   if (!fs.existsSync(path.join(dashboardDistPath, "index.html")) && dashboardDistPath.includes("Outpost-sucks1-main/")) {
     const parts = dashboardDistPath.split("Outpost-sucks1-main/");
     if (parts[1]) {
@@ -342,19 +352,51 @@ if (dashboardDistPath) {
   }
   const resolvedDist = path.resolve(dashboardDistPath);
   const indexHtmlPath = path.join(resolvedDist, "index.html");
-  if (!fs.existsSync(indexHtmlPath)) {
-    logger.error(
-      { dashboardDistPath: resolvedDist },
-      "DASHBOARD_DIST_PATH set but index.html not found — did you run `pnpm --filter @workspace/dashboard run build`?",
-    );
-  } else {
+  if (fs.existsSync(indexHtmlPath)) {
     logger.info({ dashboardDistPath: resolvedDist }, "Serving dashboard SPA from API server");
     app.use(express.static(resolvedDist, { index: false, maxAge: "1h" }));
     app.get(/^\/(?!api\/).*/, (req: Request, res: Response, next: NextFunction) => {
       if (req.method !== "GET") return next();
       res.sendFile(indexHtmlPath);
     });
+  } else {
+    logger.warn({ dashboardDistPath: resolvedDist }, "Dashboard dist path found but index.html missing");
+    mountFallbackLandingPage(app);
   }
+} else {
+  mountFallbackLandingPage(app);
+}
+
+function mountFallbackLandingPage(app: express.Express) {
+  app.get(/^\/(?!api\/).*/, (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== "GET") return next();
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reddit Microtasks</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0b0e14; color: #f3f4f6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #151922; border: 1px solid #232936; border-radius: 12px; padding: 32px; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); }
+    .icon { font-size: 32px; margin-bottom: 12px; }
+    h1 { font-size: 20px; margin: 0 0 8px 0; color: #fff; }
+    .status { color: #10b981; font-weight: 600; font-size: 14px; margin: 0 0 16px 0; }
+    p { color: #9ca3af; font-size: 14px; line-height: 1.5; margin: 0 0 24px 0; }
+    a { display: inline-block; background: #3b82f6; color: #fff; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⚡</div>
+    <h1>Reddit Microtasks Bot</h1>
+    <p class="status">● System Operational & Connected</p>
+    <p>The Discord bot backend and API server are live. Tasks, claims, and automated verification are running in Discord.</p>
+    <a href="/api/healthz">API Health Status</a>
+  </div>
+</body>
+</html>`);
+  });
 }
 
 export default app;

@@ -8,7 +8,7 @@ import {
 import { startDbWarmer } from "@workspace/db";
 import { registerCommands } from "./registerCommands.js";
 import { registerInteractionHandler } from "./interactions.js";
-import { startPendingProcessor } from "./pendingProcessor.js";
+import { startPendingProcessor, notifyRestoredSubmissionsOnBoot } from "./pendingProcessor.js";
 import { startClaimExpirer } from "./claimExpirer.js";
 import { startDailyDigest } from "./dailyDigestSender.js";
 import { startAutoBumper } from "./autoBumper.js";
@@ -116,6 +116,9 @@ export async function startBot() {
     if (!schedulersStarted) {
       schedulersStarted = true;
       startPendingProcessor(client);
+      notifyRestoredSubmissionsOnBoot(client).catch((err) =>
+        logger.error({ err }, "Failed to notify restored submissions on boot")
+      );
       startClaimExpirer(client);
       startExpiryReminder(client);
       startDailyDigest(client);

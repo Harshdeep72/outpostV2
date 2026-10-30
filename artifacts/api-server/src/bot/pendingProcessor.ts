@@ -189,6 +189,66 @@ async function notifyHoldRejected(
   }
 }
 
+export async function notifyRestoredSubmissionsOnBoot(client: Client): Promise<void> {
+  try {
+    const res = await db.execute<{ id: string; discord_id: string; reward: string }>(
+      sql`SELECT s.id, s.discord_id, s.reward::text as reward
+          FROM submissions s
+          WHERE s.review_status = 'pending_hold'
+            AND s.review_reason = 'Auto-restored (premature liveness check overridden)'`
+    );
+
+    if (res.rows.length === 0) return;
+
+    logger.info({ count: res.rows.length }, "Sending restoration notices to affected users");
+
+    for (const row of res.rows) {
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle("✅ Submission Restored — System Verification Glitch Resolved")
+        .setDescription(
+          `Your submission **#${row.id}** has been automatically restored to **Pending Hold**.\n\n` +
+          `A temporary API timeout during an automated check mistakenly marked your comment as deleted. We have re-verified that your comment is intact and live!\n\n` +
+          `• **Reward:** $${row.reward} has been credited back to your pending balance\n` +
+          `• **Trust Score:** Any deducted trust points have been refunded\n` +
+          `• **Status:** Resumed 24-hour verification hold\n\n` +
+          `You do not need to take any action. Thank you for your patience!`
+        )
+        .setTimestamp(new Date());
+
+      try {
+        const user = await client.users.fetch(row.discord_id);
+        await user.send({ embeds: [embed] });
+      } catch (err) {
+        logger.debug({ err, discordId: row.discord_id, submissionId: row.id }, "Restored notify: DM failed");
+      }
+
+      try {
+        const wsRow = await db.execute<{ workspace_channel_id: string | null }>(
+          sql`SELECT workspace_channel_id FROM users WHERE discord_id = ${row.discord_id} LIMIT 1`
+        );
+        const wsId = wsRow.rows[0]?.workspace_channel_id;
+        if (wsId) {
+          const ch = await client.channels.fetch(wsId).catch(() => null);
+          if (ch && ch.isTextBased() && "send" in ch) {
+            await (ch as TextChannel).send({ embeds: [embed] }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        logger.debug({ err, discordId: row.discord_id, submissionId: row.id }, "Restored notify: workspace notify failed");
+      }
+
+      await db.execute(
+        sql`UPDATE submissions
+            SET review_reason = 'Auto-restored and notified (premature liveness check overridden)'
+            WHERE id = ${row.id}`
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, "Error notifying restored submissions on boot");
+  }
+}
+
 export function startPendingProcessor(client: Client) {
   if (started) return;
   started = true;

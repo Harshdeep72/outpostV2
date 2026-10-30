@@ -481,7 +481,7 @@ const POST_FIXES: string[] = [
        FROM submissions
       WHERE review_status = 'rejected'
         AND review_reason LIKE 'Hold-end check%'
-        AND submitted_at > NOW() - INTERVAL '24 hours'
+        AND submitted_at > NOW() - INTERVAL '48 hours'
    ),
    aggregated AS (
      SELECT user_id, SUM(reward) AS total_reward, COUNT(*) AS sub_count
@@ -502,7 +502,7 @@ const POST_FIXES: string[] = [
     WHERE s.task_id = t.id
       AND s.review_status = 'rejected'
       AND s.review_reason LIKE 'Hold-end check%'
-      AND s.submitted_at > NOW() - INTERVAL '24 hours';`,
+      AND s.submitted_at > NOW() - INTERVAL '48 hours';`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

@@ -257,6 +257,31 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
 
   const discordId = interaction.user.id;
 
+  // Check campaign-wide per-user cap
+  const campRes = await db.execute<{ max_claims_per_user: number | null }>(
+    sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${campaignId} LIMIT 1`
+  );
+  const rawCap = campRes.rows[0]?.max_claims_per_user;
+  const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
+  if (campCap > 0) {
+    const priorInCampaignRes = await db.execute<{ count: string }>(
+      sql`SELECT COUNT(DISTINCT t.id)::text AS count
+            FROM tasks t
+            LEFT JOIN submissions s ON s.task_id = t.id AND s.discord_id = ${discordId}
+            LEFT JOIN claims c ON c.task_id = t.id AND c.discord_id = ${discordId} AND c.status = 'claimed' AND (c.expires_at IS NULL OR c.expires_at > NOW())
+           WHERE t.campaign_id = ${campaignId}
+             AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
+    );
+    const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
+    if (priorInCampaign >= campCap) {
+      return interaction.editReply({
+        embeds: [makeEmbed(COLORS.WARNING).setDescription(
+          `⚠️ You have reached the maximum allowed of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign. Please wait for the next drop.`
+        )],
+      });
+    }
+  }
+
   // Pick the next eligible sub-task: oldest open slot the user hasn't already
   // claimed, submitted on, or been blocked from. Single ORDER BY id ASC keeps
   // assignment deterministic and avoids row-skew.
@@ -525,42 +550,30 @@ export async function handleTaskClaim(
 
   // CAMPAIGN-WIDE per-user cap.
   // ---------------------------------------------------------------------
-  // The dashboard label is "Allow same user to claim multiple tasks IN THIS
-  // CAMPAIGN" — i.e. the cap is meant to apply across all tasks within a
-  // single bulk-created campaign (operator picks "2" and one Discord user
-  // should be able to do at most 2 tasks in that campaign, not 2 per task).
-  // Previously we only enforced the per-task cap, so users could rack up
-  // (cap × N tasks) submissions in one campaign. This gate fixes that.
-  //
-  // Rules:
-  //   * Only runs for tasks that belong to a campaign (campaignId != null).
-  //   * Only runs when the campaign was created with allow_multiple_claims=true
-  //     (the operator opted into the multi-claim mode). Single-claim campaigns
-  //     are already covered by the per-task block above.
-  //   * cap = campaigns.max_claims_per_user; 0 means UNLIMITED (skip).
-  //   * Count = distinct submissions by this discord_id across all tasks of
-  //     the campaign. We count submissions (not claims) so an expired claim
-  //     with no proof doesn't burn a slot.
+  // Enforces a strict limit on how many tasks a single worker can claim/submit
+  // across an entire campaign (defaults to 1 task per campaign).
+  // 0 means UNLIMITED.
   const taskCampaignId = (task as typeof task & { campaignId?: number | null }).campaignId ?? null;
   if (taskCampaignId != null) {
-    const campRes = await db.execute<{ max_claims_per_user: number; allow_multiple_claims: boolean }>(
-      sql`SELECT max_claims_per_user, allow_multiple_claims FROM campaigns WHERE id = ${taskCampaignId} LIMIT 1`
+    const campRes = await db.execute<{ max_claims_per_user: number | null }>(
+      sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${taskCampaignId} LIMIT 1`
     );
-    const camp = campRes.rows[0];
-    if (camp && camp.allow_multiple_claims && camp.max_claims_per_user > 0) {
-      const campCap = camp.max_claims_per_user;
+    const rawCap = campRes.rows[0]?.max_claims_per_user;
+    const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
+    if (campCap > 0) {
       const priorInCampaignRes = await db.execute<{ count: string }>(
-        sql`SELECT COUNT(*)::text AS count
-              FROM submissions s
-              JOIN tasks t ON t.id = s.task_id
-              WHERE s.discord_id = ${discordId}
-                AND t.campaign_id = ${taskCampaignId}`
+        sql`SELECT COUNT(DISTINCT t.id)::text AS count
+              FROM tasks t
+              LEFT JOIN submissions s ON s.task_id = t.id AND s.discord_id = ${discordId}
+              LEFT JOIN claims c ON c.task_id = t.id AND c.discord_id = ${discordId} AND c.status = 'claimed' AND (c.expires_at IS NULL OR c.expires_at > NOW())
+             WHERE t.campaign_id = ${taskCampaignId}
+               AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
       );
       const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
       if (priorInCampaign >= campCap) {
         return interaction.editReply({
           embeds: [makeEmbed(COLORS.WARNING).setDescription(
-            `⚠️ You've already claimed the maximum of **${campCap}** task${campCap === 1 ? "" : "s"} in this campaign. Wait for the next campaign to drop.`
+            `⚠️ You have reached the maximum allowed of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign. Please wait for the next drop.`
           )],
         });
       }

@@ -220,34 +220,46 @@ export async function fetchAndFixSheet(sheetUrl: string): Promise<ImportResult> 
   if (!id) {
     return { ok: false, error: "Couldn't recognize that as a Google Sheets URL. Paste the full URL like https://docs.google.com/spreadsheets/d/<ID>/edit." };
   }
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 15000);
-  let res: Response;
-  try {
-    res = await fetch(csvUrl, { redirect: "follow", signal: controller.signal });
-  } catch (err: any) {
-    clearTimeout(t);
-    return { ok: false, error: `Couldn't reach Google Sheets: ${err?.message ?? String(err)}` };
+  const candidateUrls = [
+    `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`,
+    `https://docs.google.com/spreadsheets/d/${id}/export?format=csv`,
+  ];
+  let text = "";
+  let lastStatus = 0;
+  let success = false;
+
+  for (const candidate of candidateUrls) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(candidate, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RedditMicrotasksBot/1.0" },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+      lastStatus = res.status;
+      if (res.ok) {
+        const candidateText = await res.text();
+        if (candidateText && !candidateText.trim().startsWith("<!DOCTYPE") && !candidateText.trim().startsWith("<html")) {
+          text = candidateText;
+          success = true;
+          break;
+        }
+      }
+    } catch {
+      clearTimeout(t);
+    }
   }
-  clearTimeout(t);
-  if (!res.ok) {
-    if (res.status === 401 || res.status === 403 || res.status === 404) {
+
+  if (!success) {
+    if (lastStatus === 401 || lastStatus === 403 || lastStatus === 404) {
       return {
         ok: false,
-        error: `Sheet isn't accessible (HTTP ${res.status}). In Google Sheets, click Share → set "General access" to "Anyone with the link" → Viewer.`,
+        error: `Sheet isn't accessible (HTTP ${lastStatus}). In Google Sheets, click Share → set "General access" to "Anyone with the link" → Viewer.`,
       };
     }
-    return { ok: false, error: `Google Sheets returned HTTP ${res.status}.` };
-  }
-  // Sanity check: make sure we got CSV, not an HTML "sign in" redirect page.
-  const ctype = res.headers.get("content-type") || "";
-  const text = await res.text();
-  if (ctype.includes("text/html") || text.startsWith("<!DOCTYPE")) {
-    return {
-      ok: false,
-      error: 'Got a sign-in page instead of CSV. The sheet must be shared as "Anyone with the link can view".',
-    };
+    return { ok: false, error: `Google Sheets returned HTTP ${lastStatus || 400}. Ensure the sheet is public.` };
   }
   if (!text.trim()) {
     return { ok: false, error: "Sheet appears to be empty." };

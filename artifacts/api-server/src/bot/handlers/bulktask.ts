@@ -58,20 +58,38 @@ async function fetchSheetCsv(url: string): Promise<string> {
     );
   }
 
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${parsed.gid}`;
-  const res = await fetch(csvUrl, {
-    headers: { "User-Agent": "RedditMicrotasksBot/1.0" },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    if (res.status === 403) {
-      throw new Error(
-        "Google Sheets returned **Access Denied**.\n\nMake the sheet public:\n1. Click **Share** in Google Sheets\n2. Change to **Anyone with the link → Viewer**\n3. Try again."
-      );
+  const candidateUrls = [
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv&gid=${parsed.gid}`,
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv`,
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${parsed.gid}`,
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv`,
+  ];
+
+  let lastStatus = 0;
+  for (const candidate of candidateUrls) {
+    try {
+      const res = await fetch(candidate, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RedditMicrotasksBot/1.0" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      lastStatus = res.status;
+      if (res.ok) {
+        const text = await res.text();
+        if (text && !text.trim().startsWith("<!DOCTYPE") && !text.trim().startsWith("<html")) {
+          return text;
+        }
+      }
+    } catch {
+      // try next candidate endpoint
     }
-    throw new Error(`Google Sheets returned HTTP ${res.status}. Ensure the sheet is public and try again.`);
   }
-  return res.text();
+
+  if (lastStatus === 403 || lastStatus === 401) {
+    throw new Error(
+      "Google Sheets returned **Access Denied**.\n\nMake the sheet public:\n1. Click **Share** in Google Sheets\n2. Change to **Anyone with the link → Viewer**\n3. Try again."
+    );
+  }
+  throw new Error(`Google Sheets returned HTTP ${lastStatus || 400}. Ensure the sheet is public (Anyone with the link → Viewer) and try again.`);
 }
 
 export async function handleBulkTaskCommand(interaction: ChatInputCommandInteraction) {

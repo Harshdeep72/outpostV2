@@ -2438,6 +2438,18 @@ router.post("/reddit-test", requireAuth, async (req, res) => {
   }
 });
 
+// Early Batch Payout Audit & Approval endpoint
+router.all("/early-payout-batch", async (_req, res) => {
+  try {
+    const { auditAndApproveBatchEarly } = await import("../bot/earlyBatchPayout.js");
+    const result = await auditAndApproveBatchEarly();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    logger.error({ err }, "early-payout-batch route error");
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Bulk Reddit URL liveness checker. Accepts a list of URLs, fetches each one
 // directly from Reddit (same JSON endpoint /reddit-test uses) in parallel
 // with a small concurrency cap, and returns liveness/author/subreddit/posted

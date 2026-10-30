@@ -996,6 +996,48 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
   }
 }
 
+export async function handleEarlyPayout(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins can use `/earlypayout`.")],
+    });
+  }
+
+  try {
+    const { auditAndApproveBatchEarly } = await import("../earlyBatchPayout.js");
+    const result = await auditAndApproveBatchEarly();
+
+    const { withdrawalLogChannel } = await setupGuild(guild);
+
+    const lines = [
+      `**Batch Audit & Approval Complete:**`,
+      `• **Total Checked:** ${result.totalChecked}`,
+      `• **Newly Approved (Live):** ${result.liveApprovedCount}`,
+      `• **Previously Accepted:** ${result.alreadyAcceptedCount}`,
+      `• **Not Live / Filtered:** ${result.notLiveCount}`,
+      `• **Total Amount Ready for Payout:** $${result.totalPayoutAmount.toFixed(2)}`,
+      ``,
+      `Full breakdown and payment wallet list posted to <#${withdrawalLogChannel.id}>.`,
+    ];
+
+    await interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.SUCCESS)
+          .setTitle("✅ Early Payout Approved")
+          .setDescription(lines.join("\n")),
+      ],
+    });
+  } catch (err) {
+    logger.error({ err }, "handleEarlyPayout failed");
+    await interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Failed: ${String(err)}`)],
+    });
+  }
+}
+
 export async function handleForcePayout(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
   const guild = interaction.guild!;

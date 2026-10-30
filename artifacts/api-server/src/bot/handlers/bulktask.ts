@@ -100,10 +100,10 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("csv_data")
-          .setLabel("Paste CSV (header: type,title,task_link…)")
+          .setLabel("Paste CSV Data")
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(true)
-          .setPlaceholder("type,title,task_link,instructions,reward,slots")
+          .setPlaceholder("type,task_link,prewritten_comment,reward,slots,hold_hours")
           .setMaxLength(4000)
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -112,13 +112,13 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
           .setLabel("Campaign Name")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("e.g. April Twitter Push")
+          .setPlaceholder("e.g. Reddit Outreach")
           .setMaxLength(100)
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("interval_minutes")
-          .setLabel("Drip interval (seconds, e.g. 60 = 1 min, 0 = all at once)")
+          .setLabel("Drip Interval (seconds, 0 = all now)")
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
           .setValue(String(intervalMinutes))

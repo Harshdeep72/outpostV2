@@ -154,7 +154,7 @@ function drawCard(ctx: SKRSContext2D, x: number, y: number, w: number, h: number
 }
 
 function drawWordmark(ctx: SKRSContext2D): void {
-  drawText(ctx, "OUTPOST BOT", W - 30, H - 18, {
+  drawText(ctx, "REDDIT MICROTASKS", W - 30, H - 18, {
     font: "bold 10px monospace", color: C.muted, align: "right",
   });
 }
@@ -192,7 +192,7 @@ export async function renderWalletCard(d: WalletCardData): Promise<Buffer> {
   drawBackground(ctx);
   drawTopStrip(
     ctx,
-    "outpost › wallet",
+    "tasks › wallet",
     d.flagged ? "● FLAGGED" : "● ONLINE",
     d.flagged ? C.danger : C.good,
   );
@@ -286,7 +286,7 @@ export async function renderProfileCard(d: ProfileCardData): Promise<Buffer> {
   drawBackground(ctx);
   drawTopStrip(
     ctx,
-    "outpost › profile",
+    "tasks › profile",
     d.flagged ? "🚩 FLAGGED" : "✓ VERIFIED",
     d.flagged ? C.danger : C.good,
   );
@@ -430,7 +430,7 @@ export async function renderLeaderboardCard(d: LeaderboardCardData): Promise<Buf
     lt("No earners on the board yet — be the first!", LW / 2, LH / 2, {
       f: "20px sans-serif", c: "#a1a1aa", a: "center", b: "middle",
     });
-    lt("OUTPOST BOT", LW - 40, LH - 30, { f: "bold 12px monospace", c: "#52525b", a: "right" });
+    lt("REDDIT MICROTASKS", LW - 40, LH - 30, { f: "bold 12px monospace", c: "#52525b", a: "right" });
     return lcanvas.toBuffer("image/png");
   }
 
@@ -539,7 +539,7 @@ export async function renderLeaderboardCard(d: LeaderboardCardData): Promise<Buf
   lt(footerLine, LW / 2, Math.min(fy, LH - 50), {
     f: "15px sans-serif", c: "#a1a1aa", a: "center",
   });
-  lt("OUTPOST BOT", LW - 40, LH - 30, { f: "bold 12px monospace", c: "#52525b", a: "right" });
+  lt("REDDIT MICROTASKS", LW - 40, LH - 30, { f: "bold 12px monospace", c: "#52525b", a: "right" });
 
   return lcanvas.toBuffer("image/png");
 }
@@ -909,7 +909,7 @@ export function renderPayoutWeeklyCard(d: PayoutWeeklyCardData): Buffer {
   ctx.save();
   ctx.font = "12px monospace";
   ctx.fillStyle = C.muted;
-  ctx.fillText("outpost › payouts › weekly", 30, 38);
+  ctx.fillText("tasks › payouts › weekly", 30, 38);
   ctx.font = "bold 11px monospace";
   ctx.fillStyle = C.good;
   ctx.textAlign = "right";
@@ -1011,7 +1011,7 @@ export function renderPayoutWeeklyCard(d: PayoutWeeklyCardData): Buffer {
   drawText(ctx, `Generated ${d.payDate}, ${d.generatedAt}`, 30, footerY, {
     font: "10px monospace", color: C.muted,
   });
-  drawText(ctx, "OUTPOST BOT", W - 30, footerY, {
+  drawText(ctx, "REDDIT MICROTASKS", W - 30, footerY, {
     font: "bold 10px monospace", color: C.muted, align: "right",
   });
 
@@ -1049,7 +1049,7 @@ export function renderVerificationReviewCard(d: VerificationReviewCardData): Buf
   ctx.save();
   ctx.font = "12px monospace";
   ctx.fillStyle = C.muted;
-  ctx.fillText("outpost › verification › manual review", 30, 38);
+  ctx.fillText("tasks › verification › manual review", 30, 38);
   ctx.font = "bold 11px monospace";
   ctx.fillStyle = "#fbbf24"; // amber
   ctx.textAlign = "right";
@@ -1142,7 +1142,7 @@ export function renderVerificationReviewCard(d: VerificationReviewCardData): Buf
   drawText(ctx, new Date().toUTCString(), 30, VH - 14, {
     font: "10px monospace", color: C.muted,
   });
-  drawText(ctx, "OUTPOST BOT", VW - 30, VH - 14, {
+  drawText(ctx, "REDDIT MICROTASKS", VW - 30, VH - 14, {
     font: "bold 10px monospace", color: C.muted, align: "right",
   });
 

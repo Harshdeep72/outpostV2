@@ -872,12 +872,16 @@ export function parseTaskCsv(raw: string): ParsedTaskRow[] {
     headers.forEach((h, idx) => { row[h] = values[idx] ?? ""; });
 
     const lineNum = i + 1;
-    const type = (row["type"] ?? "").toLowerCase().trim();
+    const task_link = (row["task_link"] ?? row["posts_link"] ?? row["post_link"] ?? row["reddit_link"] ?? row["subreddit"] ?? row["link"] ?? row["url"] ?? "").trim();
+    if (!task_link) continue; // Skip header-like / banner rows (e.g. "Date 30.10.2026")
+
+    const type = (row["type"] ?? "").toLowerCase().trim() || "comment";
     const title = (row["title"] ?? "").trim();
-    const task_link = (row["task_link"] ?? row["twitter_link"] ?? row["reddit_link"] ?? row["subreddit"] ?? row["link"] ?? "").trim();
     const instructions = (row["instructions"] ?? "").trim();
-    const rewardRaw = parseFloat(row["reward"] ?? "0");
-    const slotsRaw = parseInt(row["slots"] ?? "1");
+    const rewardVal = row["reward"] ? parseFloat(row["reward"]) : 1.00;
+    const rewardRaw = isNaN(rewardVal) ? 1.00 : rewardVal;
+    const slotsVal = row["slots"] ? parseInt(row["slots"]) : 1;
+    const slotsRaw = isNaN(slotsVal) ? 1 : slotsVal;
     const timeLimitRaw = row["time_limit"] ? parseInt(row["time_limit"]) : 60;
     const holdHoursRaw = row["hold_hours"] ? parseInt(row["hold_hours"]) : undefined;
     const minTrustRaw = row["min_trust"] ? parseInt(row["min_trust"]) : 0;
@@ -889,7 +893,7 @@ export function parseTaskCsv(raw: string): ParsedTaskRow[] {
     let cooldownEnabled: boolean | undefined;
     if (["false", "0", "no", "off"].includes(cooldownRaw)) cooldownEnabled = false;
     else if (["true", "1", "yes", "on"].includes(cooldownRaw)) cooldownEnabled = true;
-    const prewritten = (row["prewritten_comment"] ?? row["comment"] ?? "").trim() || undefined;
+    const prewritten = (row["prewritten_comment"] ?? row["comment_content"] ?? row["comment"] ?? "").trim() || undefined;
     const postBody = (row["post_body"] ?? row["body"] ?? "").trim() || undefined;
     const flair = (row["flair"] ?? "").trim() || undefined;
     const imageUrl = (row["image_url"] ?? row["image"] ?? "").trim() || undefined;

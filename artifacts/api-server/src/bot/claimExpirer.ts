@@ -72,13 +72,6 @@ export function startClaimExpirer(client: Client) {
             const [refreshed] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
             if (refreshed && refreshed.status === "open" && refreshed.slotsFilled < refreshed.maxSlots) {
               const { tasksChannel } = await setupGuild(guild);
-              const reopenEmbed = makeEmbed(COLORS.PRIMARY)
-                .setTitle("🔄 Slot Reopened")
-                .setDescription(
-                  `**Task #${refreshed.id}** — **${refreshed.title}**\n\n` +
-                  `A claim expired without a submission, so the slot is back. Grab it!`
-                );
-              let reopenSent = false;
               if (refreshed.channelMessageId) {
                 try {
                   const msg = await (tasksChannel as TextChannel).messages.fetch(refreshed.channelMessageId);
@@ -90,26 +83,9 @@ export function startClaimExpirer(client: Client) {
                     embeds: prog ? [card, prog] : [card],
                     components: [buildPublicButtons(refreshed.id, false)],
                   });
-                  // Reply to the original task card so members get a clickable
-                  // jump-link back to the actual task instead of a standalone
-                  // ping floating in the channel.
-                  await msg.reply({
-                    embeds: [reopenEmbed],
-                    allowedMentions: { repliedUser: false, parse: [] },
-                  }).catch(() => {});
-                  reopenSent = true;
                 } catch (err) {
                   logger.warn({ err, taskId }, "Could not refresh public task message after expiry");
                 }
-              }
-              // Fallback when the original task message is gone (channel
-              // cleanup, deleted card, etc) — still notify so the slot
-              // doesn't sit silently.
-              if (!reopenSent) {
-                await (tasksChannel as TextChannel).send({
-                  embeds: [reopenEmbed],
-                  allowedMentions: { parse: [] },
-                }).catch(() => {});
               }
             }
           }

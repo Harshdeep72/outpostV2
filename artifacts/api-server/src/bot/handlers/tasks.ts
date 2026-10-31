@@ -1798,63 +1798,13 @@ export async function handleSubReviewReason(
 
   await db.update(claims).set({ status: newStatus }).where(eq(claims.id, sub.claimId));
   invalidateClaim(sub.claimId);
-  await db.execute(sql`UPDATE tasks SET slots_filled = GREATEST(0, slots_filled - 1) WHERE id = ${sub.taskId}`);
   invalidateTask(sub.taskId);
 
-  // Refresh merge-mode campaign summary (slot just freed up).
-  try {
-    const [tRow] = await db.select({ campaignId: tasks.campaignId }).from(tasks).where(eq(tasks.id, sub.taskId)).limit(1);
-    if (tRow?.campaignId) void refreshCampaignSummary(tRow.campaignId);
-  } catch { /* swallow */ }
+  // NOTE: Rejected submissions no longer reopen the task slot automatically.
+  // This prevents multiple workers from repeatedly targeting comments/threads
+  // where moderators are deleting comments. Admins can manually reopen a slot
+  // if desired using `/reopenslot`.
 
-  // Public #tasks notice: refresh the task card and reply to it so members
-  // see a freed slot land with a clickable jump-link. Wrapped — never blocks
-  // the review flow. Only fires on reject (slot is genuinely back); flags
-  // also free the slot but the user is being removed for abuse, so we skip
-  // the celebratory "grab it!" ping in that case.
-  if (action === "reject" && interaction.guild) {
-    try {
-      const { tasksChannel } = await setupGuild(interaction.guild);
-      const [refreshedT] = await db.select().from(tasks).where(eq(tasks.id, sub.taskId)).limit(1);
-      if (refreshedT && refreshedT.status === "open" && refreshedT.slotsFilled < refreshedT.maxSlots) {
-        const reopenEmbed = makeEmbed(COLORS.PRIMARY)
-          .setTitle("🔄 Slot Reopened")
-          .setDescription(
-            `**Task #${refreshedT.id}** — **${refreshedT.title}**\n\n` +
-            `A submission was rejected, so the slot is back. Grab it!`
-          );
-        let reopenSent = false;
-        if (refreshedT.channelMessageId) {
-          try {
-            const msg = await (tasksChannel as any).messages.fetch(refreshedT.channelMessageId);
-            const card = buildPublicTaskEmbed(refreshedT);
-            const prog = refreshedT.campaignId
-              ? await buildCampaignProgressEmbed(refreshedT.campaignId)
-              : null;
-            await msg.edit({
-              embeds: prog ? [card, prog] : [card],
-              components: [buildPublicButtons(refreshedT.id, false)],
-            }).catch(() => {});
-            await msg.reply({
-              embeds: [reopenEmbed],
-              allowedMentions: { repliedUser: false, parse: [] },
-            }).catch(() => {});
-            reopenSent = true;
-          } catch (err) {
-            logger.warn({ err, taskId: sub.taskId }, "Could not refresh public task card after submission review");
-          }
-        }
-        if (!reopenSent) {
-          await (tasksChannel as any).send({
-            embeds: [reopenEmbed],
-            allowedMentions: { parse: [] },
-          }).catch(() => {});
-        }
-      }
-    } catch (err) {
-      logger.warn({ err, taskId: sub.taskId }, "Failed to post slot-reopened notice after submission review");
-    }
-  }
   await db.execute(sql`UPDATE users SET trust_score = GREATEST(0, trust_score + ${trustDelta}) WHERE discord_id = ${sub.discordId}`);
   invalidateUser(sub.discordId);
 

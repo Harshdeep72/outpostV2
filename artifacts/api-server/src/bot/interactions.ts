@@ -23,7 +23,7 @@ import { handleTaskHistoryCommand, handlePayoutHistoryCommand, handleAdminPayout
 import { handlePingCommand } from "./handlers/ping.js";
 import { handleStatsCommand } from "./handlers/stats.js";
 import { handleHealthCommand } from "./handlers/health.js";
-import { handleCancelTaskCommand, handleCancelCampaignCommand } from "./handlers/canceltask.js";
+import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 
 const SLOW_HANDLER_MS = 800;
@@ -59,6 +59,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "bulktask") return await timed(name, () => handleBulkTaskCommand(interaction));
         if (name === "canceltask") return await timed(name, () => handleCancelTaskCommand(interaction));
         if (name === "cancelcampaign") return await timed(name, () => handleCancelCampaignCommand(interaction));
+        if (name === "campaignstatus") return await timed(name, () => handleCampaignStatusCommand(interaction));
         if (name === "referral") return await timed(name, () => handleReferralCommand(interaction));
         if (name === "referraluse") return await timed(name, () => handleReferralUseCommand(interaction));
         if (name === "setupi")      return await timed(name, () => handleSetupI(interaction));

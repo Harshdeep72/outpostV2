@@ -112,6 +112,81 @@ export async function handleCancelTaskCommand(interaction: ChatInputCommandInter
   });
 }
 
+export async function handleCampaignStatusCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const member = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(member, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins and Mods can view campaign status.")] });
+  }
+
+  let campaignId = interaction.options.getInteger("campaign_id");
+  if (!campaignId) {
+    const latest = await db.execute<{ id: number }>(
+      sql`SELECT id FROM campaigns ORDER BY id DESC LIMIT 1`
+    );
+    campaignId = latest.rows[0]?.id;
+  }
+
+  if (!campaignId) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.WARNING).setDescription("⚠️ No campaigns found.")] });
+  }
+
+  const campRes = await db.execute<{
+    id: number;
+    title: string;
+    total: string;
+    completed: string;
+    claimed: string;
+    unclaimed: string;
+  }>(
+    sql`SELECT
+          c.id,
+          c.title,
+          COUNT(t.id)::text AS total,
+          COUNT(t.id) FILTER (WHERE t.status = 'completed' OR t.status = 'closed')::text AS completed,
+          COUNT(t.id) FILTER (WHERE t.status = 'open' AND t.slots_filled >= t.max_slots)::text AS claimed,
+          COUNT(t.id) FILTER (WHERE t.status = 'open' AND t.slots_filled < t.max_slots)::text AS unclaimed
+        FROM campaigns c
+        LEFT JOIN tasks t ON t.campaign_id = c.id
+        WHERE c.id = ${campaignId}
+        GROUP BY c.id, c.title`
+  );
+
+  const row = campRes.rows[0];
+  if (!row) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Campaign #${campaignId} not found.`)] });
+  }
+
+  const unclaimedList = await db.execute<{ id: number; title: string; reddit_link: string }>(
+    sql`SELECT id, title, reddit_link FROM tasks
+        WHERE campaign_id = ${campaignId} AND status = 'open' AND slots_filled < max_slots
+        ORDER BY id ASC LIMIT 15`
+  );
+
+  const total = parseInt(row.total || "0");
+  const completed = parseInt(row.completed || "0");
+  const claimed = parseInt(row.claimed || "0");
+  const unclaimed = parseInt(row.unclaimed || "0");
+
+  const listText = unclaimedList.rows.length > 0
+    ? unclaimedList.rows.map((t) => `• **Task #${t.id}**: [${t.title}](${t.reddit_link})`).join("\n")
+    : "🎉 All tasks have been claimed!";
+
+  const embed = makeEmbed(COLORS.PRIMARY)
+    .setTitle(`📊 Campaign #${campaignId} Status`)
+    .setDescription(`**Title:** ${row.title}`)
+    .addFields(
+      { name: "📋 Total Tasks", value: String(total), inline: true },
+      { name: "⏳ Unclaimed Remaining", value: `**${unclaimed}**`, inline: true },
+      { name: "🔒 Active / Claimed", value: String(claimed), inline: true },
+      { name: "✅ Completed", value: String(completed), inline: true },
+      { name: `📌 Remaining Tasks (${unclaimed})`, value: listText.slice(0, 1024), inline: false },
+    );
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
 export async function handleCancelCampaignCommand(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
 

@@ -257,13 +257,22 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
 
   const discordId = interaction.user.id;
 
-  // Check campaign-wide per-user cap
+  // Check campaign-wide per-user cap scaled by linked Reddit accounts
   const campRes = await db.execute<{ max_claims_per_user: number | null }>(
     sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${campaignId} LIMIT 1`
   );
   const rawCap = campRes.rows[0]?.max_claims_per_user;
   const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
   if (campCap > 0) {
+    // Number of verified Reddit accounts this Discord user has linked
+    const accountsRes = await db.execute<{ count: string }>(
+      sql`SELECT COUNT(*)::text AS count FROM reddit_accounts WHERE discord_id = ${discordId}`
+    );
+    const linkedCount = Math.max(1, parseInt(accountsRes.rows[0]?.count ?? "1"));
+
+    // User cannot claim more tasks than their number of linked accounts
+    const effectiveCap = Math.min(campCap, linkedCount);
+
     const priorInCampaignRes = await db.execute<{ count: string }>(
       sql`SELECT COUNT(DISTINCT t.id)::text AS count
             FROM tasks t
@@ -273,10 +282,13 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
              AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
     );
     const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
-    if (priorInCampaign >= campCap) {
+    if (priorInCampaign >= effectiveCap) {
+      const upgradeMsg = linkedCount < campCap
+        ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account linked. Link more accounts using \`/verify\` to claim more tasks!*`
+        : "";
       return interaction.editReply({
         embeds: [makeEmbed(COLORS.WARNING).setDescription(
-          `⚠️ You have reached the maximum allowed of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign. Please wait for the next drop.`
+          `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`
         )],
       });
     }
@@ -561,6 +573,15 @@ export async function handleTaskClaim(
     const rawCap = campRes.rows[0]?.max_claims_per_user;
     const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
     if (campCap > 0) {
+      // Number of verified Reddit accounts this Discord user has linked
+      const accountsRes = await db.execute<{ count: string }>(
+        sql`SELECT COUNT(*)::text AS count FROM reddit_accounts WHERE discord_id = ${discordId}`
+      );
+      const linkedCount = Math.max(1, parseInt(accountsRes.rows[0]?.count ?? "1"));
+
+      // User cannot claim more tasks than their number of linked accounts
+      const effectiveCap = Math.min(campCap, linkedCount);
+
       const priorInCampaignRes = await db.execute<{ count: string }>(
         sql`SELECT COUNT(DISTINCT t.id)::text AS count
               FROM tasks t
@@ -570,10 +591,13 @@ export async function handleTaskClaim(
                AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
       );
       const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
-      if (priorInCampaign >= campCap) {
+      if (priorInCampaign >= effectiveCap) {
+        const upgradeMsg = linkedCount < campCap
+          ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account linked. Link more accounts using \`/verify\` to claim more tasks!*`
+          : "";
         return interaction.editReply({
           embeds: [makeEmbed(COLORS.WARNING).setDescription(
-            `⚠️ You have reached the maximum allowed of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign. Please wait for the next drop.`
+            `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`
           )],
         });
       }
@@ -1243,6 +1267,27 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
       taskCreatedAt: task.createdAt ?? undefined,
       taskType: task.type,
     });
+
+    if (validation?.authorFound && task.campaignId) {
+      const usedAuthor = validation.authorFound.toLowerCase().replace(/^u\//, "");
+      const existingInCampaign = await db.execute<{ id: number }>(
+        sql`SELECT s.id
+              FROM submissions s
+              JOIN tasks t ON t.id = s.task_id
+             WHERE t.campaign_id = ${task.campaignId}
+               AND s.discord_id = ${interaction.user.id}
+               AND LOWER(COALESCE(s.reddit_username_used, '')) = ${usedAuthor}
+             LIMIT 1`
+      );
+      if (existingInCampaign.rows.length > 0) {
+        return interaction.editReply({
+          embeds: [makeEmbed(COLORS.DANGER).setDescription(
+            `❌ You have already submitted a task in this campaign using Reddit account **u/${usedAuthor}**.\n\n` +
+            `Each task in a campaign must be completed using a **different** linked Reddit account.`
+          )],
+        });
+      }
+    }
   } else {
     const platformName = twitterTask ? "Twitter" : "Quora";
     await interaction.editReply({

@@ -101,7 +101,7 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
 
   const sheetsUrl = interaction.options.getString("sheets_url");
   const intervalMinutes = interaction.options.getInteger("interval_minutes") ?? 0;
-  const maxClaimsPerUser = interaction.options.getInteger("max_claims_per_user") ?? 1;
+  const maxClaimsPerUser = interaction.options.getInteger("max_claims_per_user") ?? 3;
 
   if (sheetsUrl) {
     await interaction.deferReply({ flags: 64 });
@@ -153,7 +153,7 @@ async function processBulkFromUrl(
   interaction: ChatInputCommandInteraction,
   sheetsUrl: string,
   intervalMinutes: number,
-  maxClaimsPerUser: number = 1,
+  maxClaimsPerUser: number = 3,
 ) {
   let csv: string;
   try {
@@ -236,8 +236,8 @@ export async function handleBulkTaskCsvModal(interaction: ModalSubmitInteraction
   if (intervalMinutes > 1440) intervalMinutes = 1440;
   // No Math.floor — allow fractional minutes (sub-minute drip intervals).
 
-  const customIdMax = Number(customIdParts[3] ?? "1");
-  const maxClaimsPerUser = Number.isFinite(customIdMax) && customIdMax >= 0 ? Math.floor(customIdMax) : 1;
+  const customIdMax = Number(customIdParts[3] ?? "3");
+  const maxClaimsPerUser = Number.isFinite(customIdMax) && customIdMax >= 0 ? Math.floor(customIdMax) : 3;
 
   try {
     parseTaskCsv(csvData);

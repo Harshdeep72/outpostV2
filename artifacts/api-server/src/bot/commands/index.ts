@@ -86,7 +86,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     )
     .addIntegerOption((o) =>
       o.setName("max_claims_per_user")
-        .setDescription("Max times a single user can claim tasks in this campaign (0 = unlimited, default 1)")
+        .setDescription("Max tasks a user can claim in this campaign (0 = unlimited, default 3 scaled by linked accounts)")
         .setMinValue(0).setMaxValue(100).setRequired(false)
     );
 

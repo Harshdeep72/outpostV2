@@ -262,7 +262,7 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
     sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${campaignId} LIMIT 1`
   );
   const rawCap = campRes.rows[0]?.max_claims_per_user;
-  const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
+  const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 3;
   if (campCap > 0) {
     // Number of verified Reddit accounts this Discord user has linked
     const accountsRes = await db.execute<{ count: string }>(
@@ -283,13 +283,17 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
     );
     const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
     if (priorInCampaign >= effectiveCap) {
-      const upgradeMsg = linkedCount < campCap
-        ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account linked. Link more accounts using \`/verify\` to claim more tasks!*`
-        : "";
+      let desc: string;
+      if (campCap < linkedCount) {
+        desc = `⚠️ This campaign is capped at a maximum of **${campCap}** task${campCap === 1 ? "" : "s"} per worker (even though you have ${linkedCount} linked Reddit accounts).`;
+      } else {
+        const upgradeMsg = linkedCount < campCap
+          ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account${linkedCount === 1 ? "" : "s"} linked. Link more accounts using \`/verify\` to claim more tasks!*`
+          : "";
+        desc = `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`;
+      }
       return interaction.editReply({
-        embeds: [makeEmbed(COLORS.WARNING).setDescription(
-          `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`
-        )],
+        embeds: [makeEmbed(COLORS.WARNING).setDescription(desc)],
       });
     }
   }
@@ -571,7 +575,7 @@ export async function handleTaskClaim(
       sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${taskCampaignId} LIMIT 1`
     );
     const rawCap = campRes.rows[0]?.max_claims_per_user;
-    const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 1;
+    const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 3;
     if (campCap > 0) {
       // Number of verified Reddit accounts this Discord user has linked
       const accountsRes = await db.execute<{ count: string }>(
@@ -592,13 +596,17 @@ export async function handleTaskClaim(
       );
       const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
       if (priorInCampaign >= effectiveCap) {
-        const upgradeMsg = linkedCount < campCap
-          ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account linked. Link more accounts using \`/verify\` to claim more tasks!*`
-          : "";
+        let desc: string;
+        if (campCap < linkedCount) {
+          desc = `⚠️ This campaign is capped at a maximum of **${campCap}** task${campCap === 1 ? "" : "s"} per worker (even though you have ${linkedCount} linked Reddit accounts).`;
+        } else {
+          const upgradeMsg = linkedCount < campCap
+            ? `\n\n💡 *This campaign allows up to **${campCap}** tasks, but you only have **${linkedCount}** Reddit account${linkedCount === 1 ? "" : "s"} linked. Link more accounts using \`/verify\` to claim more tasks!*`
+            : "";
+          desc = `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`;
+        }
         return interaction.editReply({
-          embeds: [makeEmbed(COLORS.WARNING).setDescription(
-            `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign (${linkedCount} linked Reddit account${linkedCount === 1 ? "" : "s"}).${upgradeMsg}`
-          )],
+          embeds: [makeEmbed(COLORS.WARNING).setDescription(desc)],
         });
       }
     }

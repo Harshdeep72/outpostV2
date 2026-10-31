@@ -884,7 +884,7 @@ export function parseTaskCsv(raw: string): ParsedTaskRow[] {
     const timeLimitRaw = row["time_limit"] ? parseInt(row["time_limit"]) : 60;
     const holdHoursRaw = row["hold_hours"] ? parseInt(row["hold_hours"]) : undefined;
     const minTrustRaw = row["min_trust"] ? parseInt(row["min_trust"]) : 0;
-    const maxClaimsRaw = row["max_claims_per_user"] ? parseInt(row["max_claims_per_user"]) : 1;
+    const maxClaimsRaw = row["max_claims_per_user"] ? parseInt(row["max_claims_per_user"]) : 3;
     // CSV column "cooldown_enabled" — accepts "false"/"0"/"no"/"off" to disable,
     // "true"/"1"/"yes"/"on" to force-enable. If the column is absent or blank we
     // leave `cooldownEnabled` undefined so the campaign-level default wins.
@@ -928,7 +928,7 @@ export function parseTaskCsv(raw: string): ParsedTaskRow[] {
       type, title, task_link, instructions,
       reward: rewardRaw, slots: slotsRaw,
       time_limit: timeLimitRaw, hold_hours: holdHoursRaw, min_trust: minTrustRaw,
-      max_claims_per_user: isNaN(maxClaimsRaw) ? 1 : maxClaimsRaw,
+      max_claims_per_user: isNaN(maxClaimsRaw) ? 3 : maxClaimsRaw,
       ...(cooldownEnabled === undefined ? {} : { cooldown_enabled: cooldownEnabled }),
       prewritten_comment: prewritten, post_body: postBody, flair,
       image_url: imageUrl,
@@ -956,7 +956,7 @@ export async function createTasksFromRows(
 
   for (const row of rows) {
     try {
-      const maxClaimsPerUser = row.max_claims_per_user ?? opts.maxClaimsPerUser ?? 1;
+      const maxClaimsPerUser = row.max_claims_per_user ?? opts.maxClaimsPerUser ?? 3;
       const norm = normalizeTaskInput({
         type: row.type, title: row.title, link: row.task_link,
         instructions: row.instructions,

@@ -277,6 +277,16 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("campaign_id").setDescription("Campaign ID (leave blank for latest active campaign)").setRequired(false).setMinValue(1)
     );
 
+  const assigntask = new SlashCommandBuilder()
+    .setName("assigntask")
+    .setDescription("Directly assign an unclaimed task to a specific user (admin/mod only)")
+    .addUserOption((o) =>
+      o.setName("user").setDescription("User to assign the task to").setRequired(true)
+    )
+    .addIntegerOption((o) =>
+      o.setName("task_id").setDescription("Task ID to assign").setRequired(true).setMinValue(1)
+    );
+
   const verifyuser = new SlashCommandBuilder()
     .setName("verifyuser")
     .setDescription("Manually verify or unverify a Discord user (admin/mod only)")
@@ -468,7 +478,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     addmod, removemod, addadmin, flag, unflag,
     disableclaim, enableclaim, blockclaim, unblockclaim,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
-    canceltask, cancelcampaign, campaignstatus, verifyuser,
+    canceltask, cancelcampaign, campaignstatus, assigntask, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
     adminsetupi, adminsetgcash, adminsetwallet,

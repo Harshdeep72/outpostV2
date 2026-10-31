@@ -7,7 +7,7 @@ import { upsertUserSmart } from "./db.js";
 import { logger } from "../lib/logger.js";
 
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
-import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
+import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleAssignTaskCommand, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
@@ -60,6 +60,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "canceltask") return await timed(name, () => handleCancelTaskCommand(interaction));
         if (name === "cancelcampaign") return await timed(name, () => handleCancelCampaignCommand(interaction));
         if (name === "campaignstatus") return await timed(name, () => handleCampaignStatusCommand(interaction));
+        if (name === "assigntask") return await timed(name, () => handleAssignTaskCommand(interaction));
         if (name === "referral") return await timed(name, () => handleReferralCommand(interaction));
         if (name === "referraluse") return await timed(name, () => handleReferralUseCommand(interaction));
         if (name === "setupi")      return await timed(name, () => handleSetupI(interaction));

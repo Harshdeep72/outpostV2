@@ -14,9 +14,9 @@ import { eq, or, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { tasks, claims, submissions, users, trustLogs } from "@workspace/db";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
-import { getUserByDiscordId, tryCompleteReferral, getTaskByIdCached, getClaimByIdCached, invalidateTask, invalidateClaim } from "../db.js";
+import { getUserByDiscordId, upsertUser, tryCompleteReferral, getTaskByIdCached, getClaimByIdCached, invalidateTask, invalidateClaim } from "../db.js";
 import { invalidateUser, invalidateLeaderboard } from "../cache.js";
-import { makeEmbed, formatMoney, hasVerifiedRole, hasModRole } from "../util.js";
+import { makeEmbed, formatMoney, hasVerifiedRole, hasModRole, hasAdminRole } from "../util.js";
 import { COLORS, TASK_COOLDOWN_MINUTES, CLAIM_TIMEOUT_MINUTES, MAX_CONCURRENT_CLAIMS, isTwitterTask, isQuoraTask, getPlatformLabel, TASK_PING_DELAY_MS, ANTI_FRAUD } from "../constants.js";
 import { getCooldownConfig } from "../../lib/settings.js";
 import { safeSyncEarnerRoles } from "../earnerRoles.js";
@@ -909,6 +909,170 @@ export async function handleTaskDetails(interaction: ButtonInteraction, taskId: 
   const task = await getTaskByIdCached(taskId);
   if (!task) return interaction.editReply({ content: "❌ Task not found." });
   await interaction.editReply({ embeds: [buildTaskEmbed(task)] });
+}
+
+export async function handleAssignTaskCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins and Mods can assign tasks.")] });
+  }
+
+  const targetUser = interaction.options.getUser("user", true);
+  const taskId = interaction.options.getInteger("task_id", true);
+
+  const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
+  if (!targetMember) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Target user is not in this server.")] });
+  }
+
+  const user = await upsertUser(targetUser.id, targetUser.username);
+  if (user.claimsBlocked || (user as any).claims_blocked) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.WARNING).setDescription(`⚠️ <@${targetUser.id}> has task claiming disabled. Enable their claims first with \`/enableclaim\`.`)] });
+  }
+
+  const task = await getTaskByIdCached(taskId);
+  if (!task) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Task #${taskId} not found.`)] });
+  }
+
+  if (task.status !== "open" || task.slotsFilled >= task.maxSlots) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.WARNING).setDescription(`⚠️ Task #${taskId} is not open or already has all slots filled (${task.slotsFilled}/${task.maxSlots}).`)] });
+  }
+
+  const expiresAt = new Date(Date.now() + CLAIM_TIMEOUT_MINUTES * 60 * 1000);
+  const reservation = await db.transaction(async (tx: any) => {
+    const updated = await tx.execute(
+      sql`UPDATE tasks SET slots_filled = slots_filled + 1
+          WHERE id = ${taskId} AND status = 'open' AND slots_filled < max_slots
+          RETURNING *`
+    );
+    if (updated.rowCount === 0) return null;
+    const [c] = await tx.insert(claims).values({
+      taskId,
+      userId: user.id,
+      discordId: targetUser.id,
+      status: "claimed",
+      expiresAt,
+    }).returning();
+    return { claim: c, updatedTaskRow: updated.rows[0]! };
+  });
+
+  if (!reservation) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Could not reserve slot on Task #${taskId}. It may have just been claimed.`)] });
+  }
+
+  invalidateTask(taskId);
+  const claim = reservation.claim;
+
+  // Refresh merge-mode campaign summary so remaining counts decrease
+  if ((task as any).campaignId) {
+    void refreshCampaignSummary((task as any).campaignId);
+  }
+
+  // Update public #tasks card if it exists
+  const r = reservation.updatedTaskRow as any;
+  const updatedTask: any = {
+    ...task,
+    slotsFilled: Number(r.slots_filled),
+    maxSlots: Number(r.max_slots),
+    status: r.status as string,
+    channelMessageId: r.channel_message_id as string | null,
+  };
+
+  if (updatedTask.channelMessageId) {
+    try {
+      const { tasksChannel } = await setupGuild(guild);
+      const msg = await tasksChannel.messages.fetch(updatedTask.channelMessageId);
+      const isFull = updatedTask.slotsFilled >= updatedTask.maxSlots;
+      const cardEmbed = buildPublicTaskEmbed(updatedTask);
+      const progressEmbed = updatedTask.campaignId
+        ? await buildCampaignProgressEmbed(updatedTask.campaignId)
+        : null;
+      await msg.edit({
+        embeds: progressEmbed ? [cardEmbed, progressEmbed] : [cardEmbed],
+        components: [buildPublicButtons(updatedTask.id, isFull || updatedTask.status !== "open")],
+      }).catch(() => {});
+    } catch {
+      logger.warn({ taskId }, "Could not re-edit task message after assignment");
+    }
+  }
+
+  // Post to target's workspace
+  const workspaceCh = await getOrCreateWorkspaceChannel(guild, targetMember);
+  if (!user.workspaceChannelId) {
+    await db.update(users).set({ workspaceChannelId: workspaceCh.id }).where(eq(users.discordId, targetUser.id));
+  }
+
+  const unixExpiry = Math.floor(expiresAt.getTime() / 1000);
+  const twitterTask = isTwitterTask(task.type);
+  const quoraTask = isQuoraTask(task.type);
+  const platform = getPlatformLabel(task.type);
+  const linkLabel = `${platform} Link`;
+  const openLabel = `Open ${platform}`;
+  const isPostTask = task.type === "post";
+  const fence = (s: string) => "```\n" + s.replace(/```/g, "''") + "\n```";
+
+  const wsFields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: "Type", value: task.type, inline: true },
+    { name: "Reward", value: formatMoney(task.reward), inline: true },
+    { name: `🔗 ${linkLabel} (tap to open / long-press to copy)`, value: `${fence(task.redditLink)}` },
+    ...(task.instructions && task.instructions.trim()
+      ? [{ name: "📖 Instructions (what to do)", value: task.instructions }]
+      : []),
+  ];
+
+  if (isPostTask) {
+    wsFields.push({ name: "📝 Post Title — paste this as the Reddit post title", value: fence(task.title.slice(0, 280)) });
+    if (task.prewrittenComment) {
+      wsFields.push({ name: "📄 Post Body — paste this as the Reddit post body", value: fence(task.prewrittenComment.slice(0, 900)) });
+    }
+  } else if (task.prewrittenComment) {
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
+    wsFields.push({ name: label, value: fence(task.prewrittenComment.slice(0, 900)) });
+  }
+
+  const wsEmbed = makeEmbed(COLORS.ACCENT)
+    .setTitle(`📋 Task Assigned — Task #${task.id}`)
+    .setDescription(`An admin has assigned this task to you!\nYou have until <t:${unixExpiry}:R> to complete and submit this task.`)
+    .addFields(...wsFields)
+    .setFooter({ text: `Claim #${claim.id} — Task #${taskId}` });
+
+  const wsButtons: ButtonBuilder[] = [
+    new ButtonBuilder().setCustomId(`claim:submit:${claim.id}`).setLabel("Submit Proof").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setURL(task.redditLink.replace(/\s+/g, "")).setLabel(openLabel).setStyle(ButtonStyle.Link),
+  ];
+  if (task.prewrittenComment) {
+    wsButtons.push(
+      new ButtonBuilder().setCustomId(`claim:copy:${task.id}`).setLabel("📋 Copy Comment").setStyle(ButtonStyle.Secondary)
+    );
+  }
+  wsButtons.push(
+    new ButtonBuilder().setCustomId(`claim:reject:${claim.id}`).setLabel("Reject Task").setStyle(ButtonStyle.Danger)
+  );
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(wsButtons);
+  const sentMsg = await workspaceCh.send({
+    content: `<@${targetUser.id}> You have been assigned Task #${taskId}!`,
+    embeds: [wsEmbed],
+    components: [row],
+  });
+
+  await db.update(claims).set({ workspaceMessageId: sentMsg.id }).where(eq(claims.id, claim.id));
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ Task Assigned Successfully")
+        .setDescription(
+          `**Task #${taskId}** has been directly assigned to <@${targetUser.id}> (\`${targetUser.username}\`).\n\n` +
+          `• **Ticket Channel:** <#${workspaceCh.id}>\n` +
+          `• **Deadline:** <t:${unixExpiry}:R>\n` +
+          `• **Campaign Remaining Count:** Updated automatically!`
+        ),
+    ],
+  });
 }
 
 export async function handleClaimSubmit(interaction: ButtonInteraction, claimId: number) {

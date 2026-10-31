@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { type Client, type TextChannel } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { invalidateTask, invalidateClaim } from "./cache.js";
+import { getUserByDiscordId } from "./db.js";
 import { setupGuild } from "./setup.js";
 import { buildPublicTaskEmbed, buildPublicButtons, buildCampaignProgressEmbed, refreshCampaignSummary } from "./task-creation.js";
 import { makeEmbed } from "./util.js";
@@ -24,7 +25,7 @@ export function startClaimExpirer(client: Client) {
       // a manual admin expire racing the cron) could both "expire" the same
       // claim and double-decrement slots_filled, leaving the task with
       // drifted slot counts.
-      const rows = await db.execute<{ id: string; discord_id: string; task_id: string }>(
+      const rows = await db.execute<{ id: string; discord_id: string; task_id: string; workspace_message_id: string | null }>(
         sql`UPDATE claims
               SET status = 'expired'
             WHERE status = 'claimed'
@@ -35,7 +36,7 @@ export function startClaimExpirer(client: Client) {
                  LIMIT 100
                  FOR UPDATE SKIP LOCKED
               )
-        RETURNING id, discord_id, task_id`
+        RETURNING id, discord_id, task_id, workspace_message_id`
       );
 
       for (const row of rows.rows) {
@@ -63,6 +64,33 @@ export function startClaimExpirer(client: Client) {
         );
         invalidateClaim(claimId);
         invalidateTask(taskId);
+
+        // Update user's private workspace message to show Claim Expired and remove active buttons
+        if (row.workspace_message_id) {
+          try {
+            const userRow = await getUserByDiscordId(row.discord_id);
+            if (userRow?.workspaceChannelId) {
+              const ch = await client.channels.fetch(userRow.workspaceChannelId).catch(() => null) as TextChannel | null;
+              if (ch) {
+                const msg = await ch.messages.fetch(row.workspace_message_id).catch(() => null);
+                if (msg) {
+                  const expiredEmbed = makeEmbed(COLORS.DANGER)
+                    .setTitle(`⏰ Claim Expired — Task #${taskId}`)
+                    .setDescription(
+                      `Your claim on **Task #${taskId}** expired because no proof was submitted within the time limit.\n\n` +
+                      `The slot has been released back to the server.`
+                    );
+                  await msg.edit({
+                    embeds: [expiredEmbed],
+                    components: [],
+                  }).catch(() => {});
+                }
+              }
+            }
+          } catch (err) {
+            logger.warn({ err, claimId }, "claimExpirer: failed to update expired workspace card");
+          }
+        }
 
         // Re-post the freed task to #tasks: refresh the existing public card
         // (Claim button re-enabled) and send a small ping so members notice.

@@ -71,6 +71,7 @@ function startRenderKeepAlive(): void {
   const targets = [
     "https://reddit-microtasks-bot.onrender.com/",
     "https://outpost-bot-pxke.onrender.com/api/health",
+    "https://outpostv2-8rv3.onrender.com/api/health",
   ];
   setInterval(async () => {
     for (const url of targets) {

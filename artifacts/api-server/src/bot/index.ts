@@ -155,8 +155,8 @@ export async function startBot() {
         }
       }, 5 * 60 * 1000);
 
-      cron.schedule("0 0 * * 3", async () => {
-        logger.info("Weekly payout cron triggered (00:00 UTC Wednesday)");
+      cron.schedule("0 0 * * 6", async () => {
+        logger.info("Weekly payout cron triggered (00:00 UTC Saturday)");
         for (const guild of client.guilds.cache.values()) {
           try {
             await runWeeklyPayouts(guild);

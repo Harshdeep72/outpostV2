@@ -119,7 +119,7 @@ async function postStartHereContent(ch: TextChannel) {
           "Complete real tasks on Reddit and earn real money directly to your wallet."
         )
         .addFields(
-          { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Wednesday!" },
+          { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Saturday!" },
           { name: "🔗 Referral Program", value: "Run `/referral` to get your code.\nShare it with friends — earn **+$0.40** for each who verifies and completes a task." },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
@@ -155,7 +155,7 @@ async function postGuideContent(ch: TextChannel) {
           },
           {
             name: "Step 5 — Earn & Withdraw",
-            value: "Accepted rewards go to **Pending Balance** first (hold period).\nThen move to **Available Balance**.\nPayouts happen **every Wednesday**.\nSet up your payout details with `/setupi` (UPI), `/setgcash` (GCash), or `/setwallet` (USDT BEP-20).",
+            value: "Accepted rewards go to **Pending Balance** first (hold period).\nThen move to **Available Balance**.\nPayouts happen **every Saturday**.\nSet up your payout details with `/setupi` (UPI), `/setgcash` (GCash), or `/setwallet` (USDT BEP-20).",
           },
           {
             name: "🛡️ Trust Score",

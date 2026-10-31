@@ -132,7 +132,7 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
       { name: "📅 Last 7 Days", value: `${formatMoney(stats.weekTotal)} (${stats.weekCount} tasks)`, inline: true },
       { name: "✅ Tasks Completed", value: String(stats.lifeCount), inline: true },
       { name: "🗓️ Next Payout", value: `<t:${unixPayout}:D> (<t:${unixPayout}:R>)`, inline: true },
-      { name: "💸 Auto Payouts", value: "Every Wednesday UTC", inline: true },
+      { name: "💸 Auto Payouts", value: "Every Saturday UTC", inline: true },
     );
 
   if (user.flagged) {

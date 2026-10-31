@@ -1,12 +1,12 @@
 // Weekly Payout Announcement — posts a single PNG summary to #announcements
-// once ALL of the current Wednesday's withdrawals have been finalized.
+// once ALL of the current Saturday's withdrawals have been finalized.
 //
 // SAFETY CONTRACT:
 //  - Caller (handlers/withdrawals.ts) wraps this in try/catch.
 //  - Any failure here MUST NOT block withdrawal finalization. We swallow and
 //    log; the withdrawal is already approved in the DB at the call site.
 //  - Idempotent: a successful post claims a row in system_settings; a second
-//    invocation for the same Wednesday is a no-op.
+//    invocation for the same Saturday is a no-op.
 
 import type { Guild } from "discord.js";
 import { AttachmentBuilder } from "discord.js";
@@ -224,7 +224,7 @@ export async function tryPostWeeklyPayoutAnnouncement(guild: Guild): Promise<voi
     const { announcementsChannel } = await setupGuild(guild);
     const file = new AttachmentBuilder(png, { name: "weekly-payout.png" });
     await announcementsChannel.send({
-      content: `🎉 **Wednesday Payday recap** — ${rows.length} ${rows.length === 1 ? "earner" : "earners"} got paid ${formatMoney(totalAmount.toFixed(2))} this week.`,
+      content: `🎉 **Saturday Payday recap** — ${rows.length} ${rows.length === 1 ? "earner" : "earners"} got paid ${formatMoney(totalAmount.toFixed(2))} this week.`,
       files: [file],
     });
 

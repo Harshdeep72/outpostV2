@@ -861,7 +861,7 @@ export function renderStatsCard(d: StatsCardData): Buffer {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Weekly Payout Announcement card. Posted to #announcements when ALL of a
-// Wednesday's withdrawals have been finalized. Lists each user that got paid
+// Saturday's withdrawals have been finalized. Lists each user that got paid
 // with their amount, masked destination, and the admin(s) who paid them.
 //
 // Same SAFETY CONTRACT as the rest of this file: pure renderer, no DB / no
@@ -922,7 +922,7 @@ export function renderPayoutWeeklyCard(d: PayoutWeeklyCardData): Buffer {
   ctx.restore();
 
   // Header
-  drawText(ctx, "Wednesday Payday", 30, 100, { font: "bold 24px sans-serif", color: C.text });
+  drawText(ctx, "Saturday Payday", 30, 100, { font: "bold 24px sans-serif", color: C.text });
   drawText(ctx, `${d.payDate} · ${d.totalUsers} user${d.totalUsers === 1 ? "" : "s"} paid by ${d.totalAdmins} admin${d.totalAdmins === 1 ? "" : "s"}`, 30, 122, {
     font: "13px sans-serif", color: C.muted, maxWidth: 700,
   });

@@ -64,7 +64,7 @@ export const COLORS = {
 export const COIN_CHOICES = ["USDT"] as const;
 export type CoinChoice = (typeof COIN_CHOICES)[number];
 
-export const PAYOUT_DAY_UTC = 3;
+export const PAYOUT_DAY_UTC = 6; // Saturday (0=Sun, 1=Mon, ..., 6=Sat)
 
 // `thread_reply` = a worker replies inside an existing Reddit thread (not the
 // top-level OP). `op_reply` = the worker is the OP of the thread and replies

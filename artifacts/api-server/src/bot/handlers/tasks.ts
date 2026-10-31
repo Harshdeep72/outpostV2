@@ -257,6 +257,23 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
 
   const discordId = interaction.user.id;
 
+  const user = await getUserByDiscordId(discordId);
+  if (user?.claimsBlocked || (user as any)?.claims_blocked) {
+    const reason = user?.claimBlockedReason ?? (user as any)?.claim_blocked_reason;
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("🚫 Task Claiming Disabled")
+          .setDescription(
+            `Your ability to claim tasks has been disabled by staff.${reason ? `\n\n**Reason:** ${reason}` : ""}\n\nPlease reach out to staff if you have questions.`
+          ),
+      ],
+    });
+  }
+  if (user?.flagged) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged. Contact an admin.")] });
+  }
+
   // Check campaign-wide per-user cap scaled by linked Reddit accounts
   const campRes = await db.execute<{ max_claims_per_user: number | null }>(
     sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${campaignId} LIMIT 1`
@@ -403,6 +420,19 @@ export async function handleTaskClaim(
 
   if (user.flagged) {
     return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged. Contact an admin.")] });
+  }
+
+  if (user.claimsBlocked || (user as any).claims_blocked) {
+    const reason = user.claimBlockedReason ?? (user as any).claim_blocked_reason;
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("🚫 Task Claiming Disabled")
+          .setDescription(
+            `Your ability to claim tasks has been disabled by staff.${reason ? `\n\n**Reason:** ${reason}` : ""}\n\nPlease reach out to staff if you have questions.`
+          ),
+      ],
+    });
   }
 
   // ---- Cooldown gate (Phase 2) ------------------------------------------

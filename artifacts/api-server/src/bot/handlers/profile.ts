@@ -120,7 +120,7 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
       { name: "Comment Karma", value: commentKarma.toLocaleString(), inline: true },
       { name: "Total Karma", value: totalKarma.toLocaleString(), inline: true },
       { name: "Trust Score", value: String(user.trustScore), inline: true },
-      { name: "Status", value: user.flagged ? "🚩 Flagged" : "✅ Active", inline: true },
+      { name: "Status", value: user.flagged ? "🚩 Flagged" : ((user as any).claimsBlocked || (user as any).claims_blocked ? "🚫 Claims Disabled" : "✅ Active"), inline: true },
       { name: "Tasks on Leaderboard", value: user.lastTaskCompletedAt ? `Last active <t:${Math.floor(new Date(user.lastTaskCompletedAt).getTime() / 1000)}:R>` : "None yet", inline: true },
       { name: "Balance Available", value: formatMoney(user.balanceAvailable), inline: true },
       { name: "Balance Pending", value: formatMoney(user.balancePending), inline: true },

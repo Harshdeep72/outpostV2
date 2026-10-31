@@ -180,6 +180,28 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDescription("Clear a user's flag")
     .addUserOption((o) => o.setName("user").setDescription("User to unflag").setRequired(true));
 
+  const disableclaim = new SlashCommandBuilder()
+    .setName("disableclaim")
+    .setDescription("Disable task claiming for a specific user (admin/mod only)")
+    .addUserOption((o) => o.setName("user").setDescription("User to disable task claiming for").setRequired(true))
+    .addStringOption((o) => o.setName("reason").setDescription("Reason for disabling claims (optional)"));
+
+  const enableclaim = new SlashCommandBuilder()
+    .setName("enableclaim")
+    .setDescription("Re-enable task claiming for a user (admin/mod only)")
+    .addUserOption((o) => o.setName("user").setDescription("User to re-enable task claiming for").setRequired(true));
+
+  const blockclaim = new SlashCommandBuilder()
+    .setName("blockclaim")
+    .setDescription("Disable task claiming for a specific user (alias for /disableclaim)")
+    .addUserOption((o) => o.setName("user").setDescription("User to disable task claiming for").setRequired(true))
+    .addStringOption((o) => o.setName("reason").setDescription("Reason for disabling claims (optional)"));
+
+  const unblockclaim = new SlashCommandBuilder()
+    .setName("unblockclaim")
+    .setDescription("Re-enable task claiming for a user (alias for /enableclaim)")
+    .addUserOption((o) => o.setName("user").setDescription("User to re-enable task claiming for").setRequired(true));
+
   const profile = new SlashCommandBuilder()
     .setName("profile")
     .setDescription("View a user's Reddit profile, karma, and earnings")
@@ -437,6 +459,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setgcash, setwallet, wallet, leaderboard, resetleaderboard,
     addmod, removemod, addadmin, flag, unflag,
+    disableclaim, enableclaim, blockclaim, unblockclaim,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,

@@ -25,6 +25,8 @@ export const users = pgTable("users", {
   isMod: boolean("is_mod").notNull().default(false),
   isAdmin: boolean("is_admin").notNull().default(false),
   flagged: boolean("flagged").notNull().default(false),
+  claimsBlocked: boolean("claims_blocked").notNull().default(false),
+  claimBlockedReason: text("claim_blocked_reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

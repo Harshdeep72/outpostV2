@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet } from "./handlers/wallet.js";
-import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
+import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
 import { handleWdApprove, handleWdCreatorPay, handleWdReject, handleWdRejectReason } from "./handlers/withdrawals.js";
@@ -76,6 +76,8 @@ export function registerInteractionHandler(client: Client) {
         if (name === "addadmin") return await timed(name, () => handleAddAdmin(interaction));
         if (name === "flag") return await timed(name, () => handleFlagUser(interaction));
         if (name === "unflag") return await timed(name, () => handleUnflagUser(interaction));
+        if (name === "disableclaim" || name === "blockclaim") return await timed(name, () => handleDisableClaim(interaction));
+        if (name === "enableclaim" || name === "unblockclaim") return await timed(name, () => handleEnableClaim(interaction));
         if (name === "profile") return await timed(name, () => handleProfileCommand(interaction));
         if (name === "digest") return await timed(name, () => handleDigestCommand(interaction));
         if (name === "massdm") return await timed(name, () => handleMassDmCommand(interaction));

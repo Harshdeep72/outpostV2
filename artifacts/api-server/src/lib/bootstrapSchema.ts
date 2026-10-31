@@ -369,7 +369,11 @@ const POST_FIXES: string[] = [
 
   // ---- max_claims_per_user: configurable per-user claim limit on tasks/campaigns ----
   `ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "max_claims_per_user" INTEGER NOT NULL DEFAULT 1;`,
-  `ALTER TABLE "campaigns" ADD COLUMN IF NOT EXISTS "max_claims_per_user" INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE "campaigns" ADD COLUMN IF NOT EXISTS "max_claims_per_user" INTEGER NOT NULL DEFAULT 3;`,
+
+  // ---- claims_blocked: allow admins/mods to disable task claiming for specific users ----
+  `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "claims_blocked" BOOLEAN NOT NULL DEFAULT false;`,
+  `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "claim_blocked_reason" TEXT;`,
 
   // ---- reddit_accounts (multi-Reddit-account support) ----
   // Created lazily here (additive). Each verified Reddit account a Discord

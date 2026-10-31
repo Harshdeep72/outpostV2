@@ -188,6 +188,101 @@ export async function handleUnflagUser(interaction: ChatInputCommandInteraction)
   });
 }
 
+export async function handleDisableClaim(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins and Mods can disable task claims.")] });
+  }
+
+  const target = interaction.options.getUser("user", true);
+  const reason = interaction.options.getString("reason")?.trim() || "No reason provided";
+
+  await upsertUser(target.id, target.username);
+  await db.execute(
+    sql`UPDATE users SET claims_blocked = true, claim_blocked_reason = ${reason} WHERE discord_id = ${target.id}`
+  );
+  invalidateUser(target.id);
+
+  // Check active claims count for admin visibility
+  const activeClaims = await db.execute<{ count: string }>(
+    sql`SELECT COUNT(*)::text as count FROM claims WHERE discord_id = ${target.id} AND status = 'claimed' AND (expires_at IS NULL OR expires_at > NOW())`
+  );
+  const activeCount = parseInt(activeClaims.rows[0]?.count ?? "0");
+
+  try {
+    const member = await guild.members.fetch(target.id);
+    await member.send({
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("🚫 Task Claiming Disabled")
+          .setDescription(
+            `Your ability to claim tasks on **${guild.name}** has been disabled by staff.\n\n` +
+            `**Reason:** ${reason}\n\n` +
+            `*If you believe this is a mistake or have questions, please reach out to staff in your ticket.*`
+          ),
+      ],
+    });
+  } catch {
+    logger.warn({ discordId: target.id }, "Could not DM claim-disabled user");
+  }
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.WARNING)
+        .setTitle("🚫 Task Claiming Disabled")
+        .setDescription(
+          `Task claiming has been disabled for <@${target.id}> (\`${target.username}\`).\n\n` +
+          `• **Reason:** ${reason}\n` +
+          `• **Active Claims Remaining:** ${activeCount}\n\n` +
+          `*To re-enable task claims later, run \`/enableclaim user:@${target.username}\`.*`
+        ),
+    ],
+  });
+}
+
+export async function handleEnableClaim(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild)) {
+    return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Admins and Mods can re-enable task claims.")] });
+  }
+
+  const target = interaction.options.getUser("user", true);
+
+  await upsertUser(target.id, target.username);
+  await db.execute(
+    sql`UPDATE users SET claims_blocked = false, claim_blocked_reason = NULL WHERE discord_id = ${target.id}`
+  );
+  invalidateUser(target.id);
+
+  try {
+    const member = await guild.members.fetch(target.id);
+    await member.send({
+      embeds: [
+        makeEmbed(COLORS.SUCCESS)
+          .setTitle("✅ Task Claiming Re-enabled")
+          .setDescription(
+            `Your ability to claim tasks on **${guild.name}** has been restored.\n\n` +
+            `You can now claim tasks from new drops again!`
+          ),
+      ],
+    });
+  } catch {
+    logger.warn({ discordId: target.id }, "Could not DM claim-enabled user");
+  }
+
+  await interaction.editReply({
+    embeds: [
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ Task Claiming Re-enabled")
+        .setDescription(`Task claiming has been re-enabled for <@${target.id}> (\`${target.username}\`).`),
+    ],
+  });
+}
+
 /**
  * Shared balance-adjustment logic used by both /addbalance, /removebalance,
  * and the dashboard's POST /admin/users/:id/adjust-balance endpoint. Pass a

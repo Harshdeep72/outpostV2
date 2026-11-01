@@ -837,36 +837,71 @@ export interface ParsedTaskRow {
   max_claims_per_user?: number;
 }
 
-export function parseTaskCsv(raw: string): ParsedTaskRow[] {
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) throw new Error("CSV must have a header row and at least one data row.");
+/**
+ * RFC 4180 compliant CSV parser that correctly handles:
+ * - Multi-line fields inside quotes (e.g. comments with 2+ paragraphs)
+ * - Escaped quotes ("") inside quotes
+ * - Commas inside quotes
+ * - CRLF (\r\n) and LF (\n) line breaks
+ */
+export function parseCsvRows(raw: string): string[][] {
+  const rows: string[][] = [];
+  let currentRow: string[] = [];
+  let currentField = "";
+  let inQuotes = false;
 
-  function splitCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]!;
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
-        else { inQuotes = !inQuotes; }
-      } else if (ch === "," && !inQuotes) {
-        result.push(current.trim());
-        current = "";
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    if (ch === '"') {
+      if (inQuotes && raw[i + 1] === '"') {
+        currentField += '"';
+        i++;
       } else {
-        current += ch;
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      currentRow.push(currentField.trim());
+      currentField = "";
+    } else if ((ch === '\r' || ch === '\n') && !inQuotes) {
+      if (ch === '\r' && raw[i + 1] === '\n') {
+        i++;
+      }
+      currentRow.push(currentField.trim());
+      currentField = "";
+      if (currentRow.some((f) => f.length > 0)) {
+        rows.push(currentRow);
+      }
+      currentRow = [];
+    } else {
+      if (ch === '\r') {
+        if (raw[i + 1] === '\n') i++;
+        currentField += '\n';
+      } else {
+        currentField += ch;
       }
     }
-    result.push(current.trim());
-    return result;
   }
 
-  const headers = splitCsvLine(lines[0]!).map((h) => h.toLowerCase().replace(/[\s-]/g, "_"));
+  if (currentField.length > 0 || currentRow.length > 0) {
+    currentRow.push(currentField.trim());
+    if (currentRow.some((f) => f.length > 0)) {
+      rows.push(currentRow);
+    }
+  }
+
+  return rows;
+}
+
+export function parseTaskCsv(raw: string): ParsedTaskRow[] {
+  const rowsData = parseCsvRows(raw);
+  if (rowsData.length < 2) throw new Error("CSV must have a header row and at least one data row.");
+
+  const headers = rowsData[0]!.map((h) => h.toLowerCase().replace(/[\s-]/g, "_"));
   const rows: ParsedTaskRow[] = [];
   const errors: string[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = splitCsvLine(lines[i]!);
+  for (let i = 1; i < rowsData.length; i++) {
+    const values = rowsData[i]!;
     const row: Record<string, string> = {};
     headers.forEach((h, idx) => { row[h] = values[idx] ?? ""; });
 

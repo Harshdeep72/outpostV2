@@ -361,6 +361,44 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
   return handleTaskClaim(interaction, nextId, { alreadyDeferred: true });
 }
 
+const fence = (s: string) => "```\n" + s.replace(/```/g, "''") + "\n```";
+
+function pushContentFields(
+  targetFields: Array<{ name: string; value: string; inline?: boolean }>,
+  fieldLabel: string,
+  text: string,
+  fenceFn: (s: string) => string
+) {
+  if (text.length <= 950) {
+    targetFields.push({ name: fieldLabel, value: fenceFn(text) });
+    return;
+  }
+  let rem = text;
+  let part = 1;
+  while (rem.length > 0) {
+    let cut = 950;
+    if (rem.length > 950) {
+      const p = rem.lastIndexOf("\n\n", 950);
+      if (p > 300) cut = p;
+      else {
+        const nl = rem.lastIndexOf("\n", 950);
+        if (nl > 300) cut = nl;
+        else {
+          const sp = rem.lastIndexOf(" ", 950);
+          if (sp > 300) cut = sp;
+        }
+      }
+    }
+    const chunk = rem.slice(0, cut).trim();
+    rem = rem.slice(cut).trim();
+    targetFields.push({
+      name: part === 1 && rem.length === 0 ? fieldLabel : `${fieldLabel} (Part ${part})`,
+      value: fenceFn(chunk),
+    });
+    part++;
+  }
+}
+
 export async function handleTaskClaim(
   interaction: ButtonInteraction,
   taskId: number,
@@ -814,7 +852,6 @@ export async function handleTaskClaim(
   // and shouldn't be shown as something to copy. Code blocks (```) give mobile
   // Discord a native copy button — critical for phone users.
   const isPostTask = task.type === "post";
-  const fence = (s: string) => "```\n" + s.replace(/```/g, "''") + "\n```";
 
   const wsFields: Array<{ name: string; value: string; inline?: boolean }> = [
     { name: "Type", value: task.type, inline: true },
@@ -830,11 +867,11 @@ export async function handleTaskClaim(
   if (isPostTask) {
     wsFields.push({ name: "📝 Post Title — paste this as the Reddit post title", value: fence(task.title.slice(0, 280)) });
     if (task.prewrittenComment) {
-      wsFields.push({ name: "📄 Post Body — paste this as the Reddit post body", value: fence(task.prewrittenComment.slice(0, 900)) });
+      pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
     const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
-    wsFields.push({ name: label, value: fence(task.prewrittenComment.slice(0, 900)) });
+    pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
   const wsEmbed = makeEmbed(COLORS.ACCENT)
@@ -883,11 +920,11 @@ export async function handleTaskClaim(
   if (isPostTask) {
     ephFields.push({ name: "📝 Post Title — paste this as the Reddit post title", value: fence(task.title.slice(0, 280)) });
     if (task.prewrittenComment) {
-      ephFields.push({ name: "📄 Post Body — paste this as the Reddit post body", value: fence(task.prewrittenComment.slice(0, 1000)) });
+      pushContentFields(ephFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
     const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
-    ephFields.push({ name: label, value: fence(task.prewrittenComment.slice(0, 1000)) });
+    pushContentFields(ephFields, label, task.prewrittenComment, fence);
   }
 
   const ephemeralEmbed = makeEmbed(COLORS.SUCCESS)
@@ -1012,7 +1049,6 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   const linkLabel = `${platform} Link`;
   const openLabel = `Open ${platform}`;
   const isPostTask = task.type === "post";
-  const fence = (s: string) => "```\n" + s.replace(/```/g, "''") + "\n```";
 
   const wsFields: Array<{ name: string; value: string; inline?: boolean }> = [
     { name: "Type", value: task.type, inline: true },
@@ -1026,11 +1062,11 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   if (isPostTask) {
     wsFields.push({ name: "📝 Post Title — paste this as the Reddit post title", value: fence(task.title.slice(0, 280)) });
     if (task.prewrittenComment) {
-      wsFields.push({ name: "📄 Post Body — paste this as the Reddit post body", value: fence(task.prewrittenComment.slice(0, 900)) });
+      pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
     const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
-    wsFields.push({ name: label, value: fence(task.prewrittenComment.slice(0, 900)) });
+    pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
   const wsEmbed = makeEmbed(COLORS.ACCENT)
@@ -1045,7 +1081,7 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   ];
   if (task.prewrittenComment) {
     wsButtons.push(
-      new ButtonBuilder().setCustomId(`claim:copy:${task.id}`).setLabel("📋 Copy Comment").setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`claim:copy:${claim.id}`).setLabel("📋 Copy Comment").setStyle(ButtonStyle.Secondary)
     );
   }
   wsButtons.push(

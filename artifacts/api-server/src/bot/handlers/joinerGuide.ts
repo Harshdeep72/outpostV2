@@ -42,9 +42,10 @@ export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): Embe
           "Once verified, rewards go into your pending hold and clear after the hold period.",
       },
       {
-        name: "💳 Fast Payouts (UPI, GCash, PayPal, Crypto)",
+        name: "💳 Payout Methods (UPI & PayPal Only)",
         value:
-          "Set up your payout details with `/setupi`, `/setgcash`, `/setwallet` (USDT), or `/setpaypal`.\n" +
+          "We support payouts via **UPI** and **PayPal** only.\n" +
+          "Set up your payment details with `/setupi` (for UPI) or `/setpaypal` (for PayPal).\n" +
           "Check your balance and payout status anytime with `/wallet`.",
       },
       {

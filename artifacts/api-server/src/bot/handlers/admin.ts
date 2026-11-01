@@ -1636,3 +1636,63 @@ export async function handleSubmissionSelect(interaction: StringSelectMenuIntera
 
   return interaction.followUp({ embeds: [embed], flags: 64 });
 }
+
+export async function handleVerifiedListCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can view the verified accounts list.")],
+    });
+  }
+
+  const verifiedUsers = await db.select({
+    discordId: users.discordId,
+    discordUsername: users.discordUsername,
+    redditUsername: users.redditUsername,
+    redditAccountAgeDays: users.redditAccountAgeDays,
+    redditPostKarma: users.redditPostKarma,
+    redditCommentKarma: users.redditCommentKarma,
+    createdAt: users.createdAt,
+  })
+    .from(users)
+    .where(eq(users.verified, true));
+
+  if (!verifiedUsers.length) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.MUTED).setDescription("No verified users found.")],
+    });
+  }
+
+  verifiedUsers.sort((a, b) => (b.redditAccountAgeDays ?? 0) - (a.redditAccountAgeDays ?? 0));
+
+  const lines = verifiedUsers.map((u, idx) => {
+    const ageDays = u.redditAccountAgeDays ?? 0;
+    const years = (ageDays / 365.25).toFixed(1);
+    const months = (ageDays / 30.4).toFixed(1);
+    const ageLabel = ageDays >= 365 ? `${ageDays}d (${years} yrs)` : `${ageDays}d (${months} mos)`;
+    const totalKarma = (u.redditPostKarma ?? 0) + (u.redditCommentKarma ?? 0);
+    const uname = u.redditUsername ?? "unknown";
+    const karmaLabel = totalKarma > 0 ? `${totalKarma.toLocaleString()} karma` : "Checked";
+    const rate = totalKarma >= 600 ? "₹200" : (totalKarma >= 500 ? "₹100 - ₹200" : "₹100");
+
+    return (
+      `**${idx + 1}.** <@${u.discordId}> (\`${u.discordUsername}\`)\n` +
+      `🔗 **[u/${uname}](https://www.reddit.com/user/${encodeURIComponent(uname)})** • **Age:** ${ageLabel}\n` +
+      `💰 **Rate:** \`${rate}\` • **Karma:** ${karmaLabel}`
+    );
+  });
+
+  const embed = makeEmbed(COLORS.PRIMARY)
+    .setTitle(`📋 Verified Reddit Accounts Directory (${verifiedUsers.length} Users)`)
+    .setDescription(
+      `**Tap any username link below to open their Reddit profile directly:**\n\n` +
+      lines.join("\n\n") +
+      `\n\n───────────────────────────\n` +
+      `**Total Verified Accounts:** **${verifiedUsers.length}**`
+    )
+    .setFooter({ text: `${guild.name} • Verified Directory` });
+
+  return interaction.editReply({ embeds: [embed] });
+}

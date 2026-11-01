@@ -499,6 +499,12 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("email").setDescription("New PayPal email address").setRequired(true)
     );
 
+  const verifiedlist = new SlashCommandBuilder()
+    .setName("verifiedlist")
+    .setDescription("[Admin] List all verified Reddit accounts with clickable profile links")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false);
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
     setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
@@ -508,7 +514,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
-    adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal,
+    adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

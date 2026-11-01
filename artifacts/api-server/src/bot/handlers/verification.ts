@@ -782,7 +782,7 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
       .setThumbnail(p.iconImg ?? null)
       .addFields(
         { name: "Discord User", value: `<@${discordId}> (${discordUsername})`, inline: true },
-        { name: "Reddit Account", value: `u/${p.name}`, inline: true },
+        { name: "Reddit Account", value: `[u/${p.name}](https://www.reddit.com/user/${encodeURIComponent(p.name)})`, inline: true },
         { name: "Account Age", value: `${p.accountAgeDays} days`, inline: true },
         { name: "Post Karma", value: p.karmaVerified ? p.linkKarma.toLocaleString() : "N/A (API blocked)", inline: true },
         { name: "Comment Karma", value: p.karmaVerified ? p.commentKarma.toLocaleString() : "N/A (API blocked)", inline: true },
@@ -791,6 +791,10 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
       .setFooter({ text: p.karmaVerified ? "Auto-verified — use 'Take Action' to revoke if needed" : "Auto-verified via RSS (karma unverifiable — Reddit API blocked). Revoke if account looks suspicious." });
 
     const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setLabel(`🔗 View u/${p.name}`)
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://www.reddit.com/user/${encodeURIComponent(p.name)}`),
       new ButtonBuilder()
         .setCustomId(`verify:revoke:${discordId}`)
         .setLabel("Take Action / Revoke")
@@ -857,6 +861,10 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
   invalidateUser(discordId);
 
   const manualRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setLabel(`🔗 View u/${parsed}`)
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://www.reddit.com/user/${encodeURIComponent(parsed)}`),
     new ButtonBuilder()
       .setCustomId(`verify:accept:${discordId}`)
       .setLabel("Accept")

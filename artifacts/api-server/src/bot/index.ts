@@ -26,6 +26,7 @@ import { runWeeklyPayouts } from "./handlers/weeklyPayouts.js";
 import { startProxyAutoReload, getProxyCount, setPoolDepletedCallback } from "./proxy.js";
 import { startCacheSweeper } from "./cache.js";
 import { setDiscordClient } from "./discord-client.js";
+import { handleGuildMemberAdd } from "./handlers/joinerGuide.js";
 import { logger } from "../lib/logger.js";
 
 let schedulersStarted = false;
@@ -81,6 +82,7 @@ export async function startBot() {
   client.on("shardDisconnect", (ev, id) => logger.warn({ ev, id }, "Shard disconnected"));
   client.on("shardReconnecting", (id) => logger.info({ id }, "Shard reconnecting"));
   client.on("shardResume", (id, replayed) => logger.info({ id, replayed }, "Shard resumed"));
+  client.on("guildMemberAdd", (member) => handleGuildMemberAdd(member));
 
   client.once("ready", async () => {
     logger.info({ tag: client.user?.tag, proxies: getProxyCount() }, "Discord bot ready (v2 Flash Edition)");

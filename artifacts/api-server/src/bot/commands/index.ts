@@ -287,6 +287,13 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("task_id").setDescription("Task ID to assign").setRequired(true).setMinValue(1)
     );
 
+  const joinerguide = new SlashCommandBuilder()
+    .setName("joinerguide")
+    .setDescription("Post the interactive joiner quick-start guide with verification button (admin/mod only)")
+    .addChannelOption((o) =>
+      o.setName("channel").setDescription("Channel to post into (defaults to current channel)").setRequired(false)
+    );
+
   const verifyuser = new SlashCommandBuilder()
     .setName("verifyuser")
     .setDescription("Manually verify or unverify a Discord user (admin/mod only)")
@@ -478,7 +485,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     addmod, removemod, addadmin, flag, unflag,
     disableclaim, enableclaim, blockclaim, unblockclaim,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
-    canceltask, cancelcampaign, campaignstatus, assigntask, verifyuser,
+    canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
     adminsetupi, adminsetgcash, adminsetwallet,

@@ -11,9 +11,9 @@ jobs:
     steps:
       - name: Ping Service
         run: |
-          echo "Pinging Outpost Bot (Server 1)..."
-          curl -fsSL -m 15 "https://outpost-bot-pxke.onrender.com/api/health" || echo "Outpost 1 pinged."
-          echo "Pinging Redditors Hub (Server 2)..."
-          curl -fsSL -m 15 "https://outpostv2-8rv3.onrender.com/api/health" || echo "Outpost 2 pinged."
+          echo "Pinging Outpost Bot..."
+          curl -fsSL -m 15 "https://outpost-bot-pxke.onrender.com/api/health" || echo "Outpost pinged."
+          echo "Pinging Redditors Hub..."
+          curl -fsSL -m 15 "https://outpostv2-8rv3.onrender.com/api/health" || echo "Redditors Hub pinged."
           echo "Pinging Onboarding Bot..."
           curl -fsSL -m 15 "https://reddit-microtasks-bot.onrender.com" || echo "Onboarding pinged."

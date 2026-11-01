@@ -23,6 +23,7 @@ import { handleTaskHistoryCommand, handlePayoutHistoryCommand, handleAdminPayout
 import { handlePingCommand } from "./handlers/ping.js";
 import { handleStatsCommand } from "./handlers/stats.js";
 import { handleHealthCommand } from "./handlers/health.js";
+import { handleJoinerGuideCommand } from "./handlers/joinerGuide.js";
 import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 
@@ -61,6 +62,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "cancelcampaign") return await timed(name, () => handleCancelCampaignCommand(interaction));
         if (name === "campaignstatus") return await timed(name, () => handleCampaignStatusCommand(interaction));
         if (name === "assigntask") return await timed(name, () => handleAssignTaskCommand(interaction));
+        if (name === "joinerguide") return await timed(name, () => handleJoinerGuideCommand(interaction));
         if (name === "referral") return await timed(name, () => handleReferralCommand(interaction));
         if (name === "referraluse") return await timed(name, () => handleReferralUseCommand(interaction));
         if (name === "setupi")      return await timed(name, () => handleSetupI(interaction));

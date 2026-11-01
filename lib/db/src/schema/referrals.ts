@@ -7,7 +7,7 @@ export const referrals = pgTable("referrals", {
   codeUsed: text("code_used").notNull(),
   status: text("status").notNull().default("pending"),
   rewardPaid: boolean("reward_paid").notNull().default(false),
-  rewardAmount: numeric("reward_amount", { precision: 12, scale: 2 }).notNull().default("0.40"),
+  rewardAmount: numeric("reward_amount", { precision: 12, scale: 2 }).notNull().default("0.30"),
   taskCompletedAt: timestamp("task_completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

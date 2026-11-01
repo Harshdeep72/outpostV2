@@ -6,6 +6,7 @@ import { validateRedditProof } from "./reddit-validator.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
 import { tryCompleteReferral } from "./db.js";
+import { notifyReferralCompletion } from "./handlers/referral.js";
 
 // Sweep every 30 min. We only act on rows older than AUTO_DECIDE_AFTER_MS,
 // so the cadence just controls how soon after the 24h mark we make the call.
@@ -206,23 +207,11 @@ async function autoAccept(client: Client, row: PendingRow): Promise<boolean> {
   try { logSubmissionEvent(parseInt(row.id), "accepted"); } catch { /* swallowed */ }
 
   // Referral payout — if this is the user's first accepted task and they
-  // were referred, credit $0.40 to the referrer + DM them. Manual accept
-  // does this via handleReferralAndLeaderboard; without it here, auto-
-  // accepted first tasks would silently rob referrers of their bonus.
+  // were referred, credit $0.30 to the referrer and $0.20 to the referred user.
   try {
     const ref = await tryCompleteReferral(row.discord_id, parseInt(row.user_id));
-    if (ref.completed && ref.referrerDiscordId) {
-      await dmUser(
-        client,
-        ref.referrerDiscordId,
-        new EmbedBuilder()
-          .setColor(0x57f287)
-          .setTitle("🎉 Referral Completed!")
-          .setDescription(
-            "One of your referrals just completed their first task! " +
-            "**+$0.40** has been added to your available balance.",
-          ),
-      );
+    if (ref.completed) {
+      await notifyReferralCompletion(client, ref);
     }
   } catch (err) {
     logger.warn({ err, subId: row.id }, "pending-sweeper: referral completion failed (non-fatal)");

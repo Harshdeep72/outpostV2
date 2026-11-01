@@ -9,6 +9,8 @@ import { recheckRedditLiveness } from "./reddit-validator.js";
 import { safeSyncEarnerRoles } from "./earnerRoles.js";
 import { setupGuild } from "./setup.js";
 import { getPrimaryGuild } from "./discord-client.js";
+import { tryCompleteReferral } from "./db.js";
+import { notifyReferralCompletion } from "./handlers/referral.js";
 
 let started = false;
 
@@ -312,6 +314,15 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
         invalidateUser(row.discord_id, userId);
         logSubmissionEvent(subId, "paid");
         await notifySubmissionCleared(client, row);
+
+        try {
+          const ref = await tryCompleteReferral(row.discord_id, userId);
+          if (ref.completed) {
+            await notifyReferralCompletion(client, ref);
+          }
+        } catch (err) {
+          logger.warn({ err, subId }, "Pending processor: referral completion failed (non-fatal)");
+        }
       }
 
       if (rows.rows.length > 0) {
@@ -413,6 +424,15 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
           safeSyncEarnerRoles(row.discord_id);
           logSubmissionEvent(subId, "paid");
           await notifySubmissionCleared(client, row);
+
+          try {
+            const ref = await tryCompleteReferral(row.discord_id, userId);
+            if (ref.completed) {
+              await notifyReferralCompletion(client, ref);
+            }
+          } catch (err) {
+            logger.warn({ err, subId }, "Hold processor: referral completion failed (non-fatal)");
+          }
 
           logger.info({ subId, discordId: row.discord_id, reward: row.reward }, "Hold processor: comment still live — payout issued");
           holdProcessed++;
@@ -528,6 +548,15 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             logSubmissionEvent(subId, "paid");
             await notifySubmissionCleared(client, row);
             void notifyFalsePositiveOverride(row, firstDetected);
+
+            try {
+              const ref = await tryCompleteReferral(row.discord_id, userId);
+              if (ref.completed) {
+                await notifyReferralCompletion(client, ref);
+              }
+            } catch (err) {
+              logger.warn({ err, subId }, "Hold processor false-positive: referral completion failed (non-fatal)");
+            }
             holdProcessed++;
 
           } else if (confirmation.liveStatus === "unknown") {

@@ -111,6 +111,8 @@ export const CLAIM_TIMEOUT_MINUTES = 20;
 // cooldown elapses, never while a prior claim is still un-submitted.
 export const MAX_CONCURRENT_CLAIMS = 1;
 
-export const REFERRAL_REWARD = "0.40";
+export const REFERRAL_REWARD = "0.30";
+export const REFERRAL_REWARD_REFERRER = "0.30";
+export const REFERRAL_REWARD_REFERRED = "0.20";
 export const MAX_REFERRAL_COMPLETIONS_PER_DAY = 10;
 export const MAX_REFERRALS_PER_HOUR = 5;

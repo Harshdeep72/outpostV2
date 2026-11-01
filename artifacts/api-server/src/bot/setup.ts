@@ -8,7 +8,7 @@ import {
   type Role,
   EmbedBuilder,
 } from "discord.js";
-import { CHANNELS, CATEGORIES, ROLES, COLORS } from "./constants.js";
+import { CHANNELS, CATEGORIES, ROLES, COLORS, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED } from "./constants.js";
 import { logger } from "../lib/logger.js";
 
 export interface GuildSetup {
@@ -120,7 +120,7 @@ async function postStartHereContent(ch: TextChannel) {
         )
         .addFields(
           { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Saturday!" },
-          { name: "🔗 Referral Program", value: "Run `/referral` to get your code.\nShare it with friends — earn **+$0.40** for each who verifies and completes a task." },
+          { name: "🔗 Referral Program", value: `Run \`/referral\` to get your code.\nShare it with friends — earn **+$${REFERRAL_REWARD_REFERRER}** when they complete their first task (they get **+$${REFERRAL_REWARD_REFERRED}** too!).` },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
         .setFooter({ text: "Reddit Microtasks • Start earning today" })
@@ -198,10 +198,10 @@ async function postReferralEventsContent(ch: TextChannel) {
         .setDescription(
           "Earn by inviting your friends to Reddit Microtasks!\n\n" +
           "**How it works:**\n" +
-          "1. Run `/referral` to get your unique code\n" +
-          "2. Share it — your friend runs `/referraluse <code>`\n" +
-          "3. They verify Reddit + complete 1 task\n" +
-          "4. You get **+$0.40** added directly to your balance!\n\n" +
+          "1. Run `/referral` to get your unique invite code\n" +
+          "2. Share it — your friend applies it during `/verify` or via `/referraluse <code>`\n" +
+          "3. They complete their first task and it gets approved\n" +
+          `4. You get **+$${REFERRAL_REWARD_REFERRER}** and they get **+$${REFERRAL_REWARD_REFERRED}** added directly to available balance!\n\n` +
           "**No limit** on how many people you can refer.\n" +
           "Anti-abuse protection is active — fair rewards for real referrals only.\n\n" +
           "Bot announcements about referral milestones will appear here."

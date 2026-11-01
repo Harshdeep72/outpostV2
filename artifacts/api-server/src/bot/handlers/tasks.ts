@@ -23,6 +23,7 @@ import { safeSyncEarnerRoles } from "../earnerRoles.js";
 import { logger } from "../../lib/logger.js";
 import { logSubmissionToSheet, logSubmissionEvent } from "../../lib/sheetsLogger.js";
 import { refreshLeaderboard } from "./leaderboard.js";
+import { notifyReferralCompletion } from "./referral.js";
 import { validateRedditProof, extractTaskSubreddit, detectAppUrl, appUrlHelpMessage } from "../reddit-validator.js";
 import { invalidateStreak } from "../streak.js";
 import { randomBytes } from "node:crypto";
@@ -1845,10 +1846,8 @@ async function member_dm(guild: any, discordId: string, embed: EmbedBuilder) {
 async function handleReferralAndLeaderboard(guild: any, discordId: string, userId: number) {
   try {
     const ref = await tryCompleteReferral(discordId, userId);
-    if (ref.completed && ref.referrerDiscordId) {
-      await member_dm(guild, ref.referrerDiscordId, makeEmbed(COLORS.SUCCESS)
-        .setTitle("🎉 Referral Completed!")
-        .setDescription(`One of your referrals just completed their first task! **+$0.40** has been added to your available balance.`));
+    if (ref.completed) {
+      await notifyReferralCompletion(guild, ref);
     }
   } catch (err) {
     logger.error({ err, discordId }, "Referral completion error");

@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS "referrals" (
   "code_used"           TEXT NOT NULL,
   "status"              TEXT NOT NULL DEFAULT 'pending',
   "reward_paid"         BOOLEAN NOT NULL DEFAULT false,
-  "reward_amount"       NUMERIC(12, 2) NOT NULL DEFAULT 0.40,
+  "reward_amount"       NUMERIC(12, 2) NOT NULL DEFAULT 0.30,
   "task_completed_at"   TIMESTAMPTZ,
   "created_at"          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -350,7 +350,7 @@ const POST_FIXES: string[] = [
   `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "code_used" TEXT NOT NULL DEFAULT '';`,
   `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'pending';`,
   `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "reward_paid" BOOLEAN NOT NULL DEFAULT false;`,
-  `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "reward_amount" NUMERIC(12,2) NOT NULL DEFAULT 0.40;`,
+  `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "reward_amount" NUMERIC(12,2) NOT NULL DEFAULT 0.30;`,
   `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "task_completed_at" TIMESTAMPTZ;`,
   `ALTER TABLE "referrals" ADD COLUMN IF NOT EXISTS "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
 

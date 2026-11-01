@@ -10,13 +10,14 @@ import { eq, sql } from "drizzle-orm";
 import { db, pool } from "@workspace/db";
 import { users, trustLogs } from "@workspace/db";
 import { setupGuild, invalidateSetupCache } from "../setup.js";
-import { upsertUser, getUserByDiscordId } from "../db.js";
+import { upsertUser, getUserByDiscordId, tryCompleteReferral } from "../db.js";
 import { invalidateUser } from "../cache.js";
 import { makeEmbed, formatMoney, hasAdminRole, hasModRole } from "../util.js";
 import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { checkSubmissionNow } from "../redditLivenessChecker.js";
 import { runWeeklyPayouts } from "./weeklyPayouts.js";
+import { notifyReferralCompletion } from "./referral.js";
 
 export async function handleSetupCommand(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: 64 });
@@ -908,6 +909,16 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
     await member.send({ embeds: [dmEmbed] });
   } catch {
     logger.warn({ discordId: row.discord_id }, "handleApproveSubmission: could not DM user");
+  }
+
+  // Check and credit referral bonus if this is their first approved task
+  try {
+    const ref = await tryCompleteReferral(row.discord_id, parseInt(row.user_id));
+    if (ref.completed) {
+      await notifyReferralCompletion(guild, ref);
+    }
+  } catch (err) {
+    logger.warn({ err, subId: submissionId }, "handleApproveSubmission: referral completion failed (non-fatal)");
   }
 
   return interaction.editReply({

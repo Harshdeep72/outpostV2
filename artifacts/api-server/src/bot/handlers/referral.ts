@@ -7,7 +7,7 @@ import { users, referrals } from "@workspace/db";
 import { getUserByDiscordId, getUserByReferralCode, upsertUser } from "../db.js";
 import { invalidateUser, referralStatsCache } from "../cache.js";
 import { makeEmbed, formatMoney } from "../util.js";
-import { COLORS, REFERRAL_REWARD } from "../constants.js";
+import { COLORS, REFERRAL_REWARD, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED, CHANNELS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 
 export async function handleReferralCommand(interaction: ChatInputCommandInteraction) {
@@ -48,7 +48,11 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle("🔗 Your Referral Info")
     .setDescription(
-      `Share your referral code with friends!\n\nThey must:\n> 1. Join the server\n> 2. Verify their Reddit account\n> 3. Complete at least **1 task**\n\nOnce all 3 steps are done, you earn **+$${REFERRAL_REWARD}** instantly to your available balance.`
+      `Share your referral code with friends!\n\n` +
+      `**How it works:**\n` +
+      `> 1. Your friend joins and applies your code with \`/referraluse\` or during \`/verify\`\n` +
+      `> 2. They complete their first task and get it approved\n` +
+      `> 3. **You get +$${REFERRAL_REWARD_REFERRER}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
     )
     .addFields(
       { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
@@ -121,7 +125,11 @@ export async function handleReferralUseCommand(interaction: ChatInputCommandInte
       makeEmbed(COLORS.SUCCESS)
         .setTitle("✅ Referral Code Applied!")
         .setDescription(
-          `Code \`${code}\` applied — referrer: **${referrer.discordUsername}**\n\nNow verify your Reddit account with \`/verify\` and complete your first task to unlock the referral reward for them.`
+          `Code \`${code}\` applied — referrer: **${referrer.discordUsername}**\n\n` +
+          `Now complete your first task! Once your task is approved:\n` +
+          `• You will receive a **+$${REFERRAL_REWARD_REFERRED}** welcome bonus\n` +
+          `• Your referrer will receive a **+$${REFERRAL_REWARD_REFERRER}** bonus\n` +
+          `Both bonuses are credited directly to available balance.`
         ),
     ],
   });
@@ -138,6 +146,92 @@ export async function markReferralVerified(discordId: string): Promise<void> {
     await db.update(referrals).set({ status: "verified" }).where(eq(referrals.id, ref[0]!.id));
     referralStatsCache.delete(ref[0]!.referrerDiscordId);
     logger.info({ discordId }, "Referral marked verified");
+  }
+}
+
+export async function notifyReferralCompletion(
+  clientOrGuild: any,
+  result: {
+    completed: boolean;
+    referrerDiscordId?: string;
+    referredDiscordId?: string;
+    referrerReward?: string;
+    referredReward?: string;
+  }
+): Promise<void> {
+  if (!result.completed || !result.referrerDiscordId || !result.referredDiscordId) return;
+
+  const referrerReward = result.referrerReward ?? REFERRAL_REWARD_REFERRER;
+  const referredReward = result.referredReward ?? REFERRAL_REWARD_REFERRED;
+
+  let client: any = null;
+  let guild: any = null;
+
+  if (clientOrGuild) {
+    if ("client" in clientOrGuild && clientOrGuild.client) {
+      guild = clientOrGuild;
+      client = clientOrGuild.client;
+    } else {
+      client = clientOrGuild;
+      guild = client.guilds?.cache?.first?.() ?? null;
+    }
+  }
+
+  // 1. DM Referrer
+  try {
+    const referrerUser = await client?.users?.fetch(result.referrerDiscordId).catch(() => null);
+    if (referrerUser) {
+      const dmEmbed = makeEmbed(COLORS.SUCCESS)
+        .setTitle("🎉 Referral Bonus Earned!")
+        .setDescription(
+          `One of your invited members (<@${result.referredDiscordId}>) just successfully completed their first task!\n\n` +
+          `**+$${referrerReward}** has been credited to your available balance.`
+        );
+      await referrerUser.send({ embeds: [dmEmbed] }).catch(() => {});
+    }
+  } catch (err) {
+    logger.warn({ err, referrerDiscordId: result.referrerDiscordId }, "Failed to DM referrer on completion");
+  }
+
+  // 2. DM Referred Member (new member)
+  try {
+    const referredUser = await client?.users?.fetch(result.referredDiscordId).catch(() => null);
+    if (referredUser) {
+      const dmEmbed = makeEmbed(COLORS.SUCCESS)
+        .setTitle("🎁 Welcome Referral Bonus!")
+        .setDescription(
+          `Congratulations on completing your first approved task!\n\n` +
+          `As a welcome bonus for being invited by a friend, **+$${referredReward}** has been added to your available balance.`
+        );
+      await referredUser.send({ embeds: [dmEmbed] }).catch(() => {});
+    }
+  } catch (err) {
+    logger.warn({ err, referredDiscordId: result.referredDiscordId }, "Failed to DM referred member on completion");
+  }
+
+  // 3. Post to #referral-events channel if available
+  try {
+    let eventsChannel: any = null;
+    if (guild?.channels?.cache) {
+      eventsChannel = guild.channels.cache.find((c: any) => c.name === CHANNELS.REFERRAL_EVENTS);
+    }
+    if (!eventsChannel && client?.channels?.cache) {
+      eventsChannel = client.channels.cache.find((c: any) => c.name === CHANNELS.REFERRAL_EVENTS);
+    }
+    if (eventsChannel && "send" in eventsChannel) {
+      const eventEmbed = makeEmbed(COLORS.SUCCESS)
+        .setTitle("🎉 Referral Milestone Completed!")
+        .setDescription(
+          `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first approved task!\n\n` +
+          `• Inviter earned: **+$${referrerReward}**\n` +
+          `• New member earned: **+$${referredReward}**\n\n` +
+          `Invite your friends using \`/referral\` to earn bonus cash!`
+        )
+        .setTimestamp();
+      await eventsChannel.send({ embeds: [eventEmbed] }).catch(() => {});
+    }
+  } catch (err) {
+    logger.warn({ err }, "Failed to post to referral-events channel");
   }
 }
 

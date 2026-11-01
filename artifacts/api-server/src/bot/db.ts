@@ -2,7 +2,13 @@ import { sql, eq } from "drizzle-orm";
 import { db } from "@workspace/db";
 import { users, trustLogs, referrals, tasks, claims } from "@workspace/db";
 import type { User } from "@workspace/db";
-import { REFERRAL_REWARD, MAX_REFERRAL_COMPLETIONS_PER_DAY, MAX_REFERRALS_PER_HOUR } from "./constants.js";
+import {
+  REFERRAL_REWARD,
+  REFERRAL_REWARD_REFERRER,
+  REFERRAL_REWARD_REFERRED,
+  MAX_REFERRAL_COMPLETIONS_PER_DAY,
+  MAX_REFERRALS_PER_HOUR,
+} from "./constants.js";
 import { logger } from "../lib/logger.js";
 import {
   userCache,
@@ -168,7 +174,13 @@ export { invalidateTask, invalidateClaim };
 export async function tryCompleteReferral(
   referredDiscordId: string,
   referredUserId: number
-): Promise<{ completed: boolean; referrerDiscordId?: string }> {
+): Promise<{
+  completed: boolean;
+  referrerDiscordId?: string;
+  referredDiscordId?: string;
+  referrerReward?: string;
+  referredReward?: string;
+}> {
   const referredUser = await getUserByDiscordId(referredDiscordId);
   if (!referredUser?.referredBy) return { completed: false };
 
@@ -177,7 +189,7 @@ export async function tryCompleteReferral(
     .limit(1);
 
   const ref = pendingReferral[0];
-  if (!ref || ref.status !== "verified" || ref.rewardPaid) return { completed: false };
+  if (!ref || ref.rewardPaid || ref.status === "completed") return { completed: false };
 
   const referrerDiscordId = ref.referrerDiscordId;
 
@@ -203,20 +215,60 @@ export async function tryCompleteReferral(
     return { completed: false };
   }
 
-  await db.update(referrals).set({
-    status: "completed",
-    rewardPaid: true,
-    taskCompletedAt: now,
-  }).where(eq(referrals.id, ref.id));
+  // Atomic update to avoid race conditions: ensure reward_paid is false and status is not completed
+  const updateResult = await db.execute<{ id: number }>(
+    sql`UPDATE referrals
+        SET status = 'completed',
+            reward_paid = true,
+            reward_amount = ${REFERRAL_REWARD_REFERRER}::numeric,
+            task_completed_at = ${now}
+        WHERE id = ${ref.id} AND reward_paid = false AND status != 'completed'
+        RETURNING id`
+  );
+  if (updateResult.rows.length === 0) {
+    return { completed: false };
+  }
 
+  // 1. Credit Referrer (+$0.30)
   await db.execute(
-    sql`UPDATE users SET referral_earnings = referral_earnings + ${REFERRAL_REWARD}::numeric, total_earned = total_earned + ${REFERRAL_REWARD}::numeric, balance_available = balance_available + ${REFERRAL_REWARD}::numeric WHERE discord_id = ${referrerDiscordId}`
+    sql`UPDATE users
+        SET referral_earnings = referral_earnings + ${REFERRAL_REWARD_REFERRER}::numeric,
+            total_earned = total_earned + ${REFERRAL_REWARD_REFERRER}::numeric,
+            balance_available = balance_available + ${REFERRAL_REWARD_REFERRER}::numeric
+        WHERE discord_id = ${referrerDiscordId}`
   );
   invalidateUser(referrerDiscordId);
 
-  // Lazy import to avoid a circular dep between db <-> earnerRoles.
-  import("./earnerRoles.js").then((m) => m.safeSyncEarnerRoles(referrerDiscordId)).catch(() => {});
+  // 2. Credit Referred member (+$0.20)
+  await db.execute(
+    sql`UPDATE users
+        SET total_earned = total_earned + ${REFERRAL_REWARD_REFERRED}::numeric,
+            balance_available = balance_available + ${REFERRAL_REWARD_REFERRED}::numeric
+        WHERE discord_id = ${referredDiscordId}`
+  );
+  invalidateUser(referredDiscordId, referredUserId);
 
-  logger.info({ referrerDiscordId, referredDiscordId, reward: REFERRAL_REWARD }, "Referral completed and credited");
-  return { completed: true, referrerDiscordId };
+  // Lazy import to avoid a circular dep between db <-> earnerRoles.
+  import("./earnerRoles.js").then((m) => {
+    m.safeSyncEarnerRoles(referrerDiscordId);
+    m.safeSyncEarnerRoles(referredDiscordId);
+  }).catch(() => {});
+
+  logger.info(
+    {
+      referrerDiscordId,
+      referredDiscordId,
+      referrerReward: REFERRAL_REWARD_REFERRER,
+      referredReward: REFERRAL_REWARD_REFERRED,
+    },
+    "Referral completed and credited to both inviter and new member"
+  );
+
+  return {
+    completed: true,
+    referrerDiscordId,
+    referredDiscordId,
+    referrerReward: REFERRAL_REWARD_REFERRER,
+    referredReward: REFERRAL_REWARD_REFERRED,
+  };
 }

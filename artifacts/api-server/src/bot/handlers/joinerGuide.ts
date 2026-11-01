@@ -11,7 +11,7 @@ import {
 import { setupGuild } from "../setup.js";
 import { upsertUserSmart } from "../db.js";
 import { makeEmbed, hasAdminRole, hasModRole } from "../util.js";
-import { COLORS } from "../constants.js";
+import { COLORS, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 
 export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): EmbedBuilder {
@@ -49,9 +49,9 @@ export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): Embe
           "Check your balance and payout status anytime with `/wallet`.",
       },
       {
-        name: "🎁 Earn +$0.40 Per Referral",
+        name: `🎁 Earn +$${REFERRAL_REWARD_REFERRER} Per Referral (+$${REFERRAL_REWARD_REFERRED} for Your Friend)`,
         value:
-          "Run `/referral` to get your personal invite code. Share it with friends to earn bonus cash for every referral who completes a task!",
+          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_REWARD_REFERRER}** and your friend earns **+$${REFERRAL_REWARD_REFERRED}** once they complete their first approved task!`,
       }
     )
     .setFooter({ text: `${guild.name} • Start earning today!` })

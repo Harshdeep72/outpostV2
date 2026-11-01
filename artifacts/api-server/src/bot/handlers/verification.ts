@@ -47,6 +47,15 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
       `Below is a quick guide on how to complete tasks safely. Please read it to ensure your tasks get approved and your Reddit accounts stay safe.`
     );
 
+  const isRedditorsHub = guild.id === "1565617335237345310" || guild.name.toLowerCase().includes("redditors hub");
+  const payoutCommands = isRedditorsHub
+    ? "• `/setupi upi_id:yourname@bank` for UPI\n" +
+      "• `/setpaypal email:your@email.com` for PayPal\n"
+    : "• `/setupi upi_id:yourname@bank` for UPI\n" +
+      "• `/setgcash number:09XXXXXXXXX` for GCash\n" +
+      "• `/setwallet coin:USDT address:<0x...> network:BEP20` for USDT (BEP-20)\n" +
+      "• `/setpaypal email:your@email.com` for PayPal\n";
+
   const guideEmbed = makeEmbed(COLORS.PRIMARY)
     .setTitle("📖 Reddit Microtasks Quick Start & Safety Guide")
     .addFields(
@@ -76,9 +85,7 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
       {
         name: "5️⃣ Save Your Payout Methods & Check Status 💰",
         value: "Use these commands to manage your earnings and profile:\n" +
-               "• `/setupi upi_id:yourname@bank` for UPI\n" +
-               "• `/setgcash number:09XXXXXXXXX` for GCash\n" +
-               "• `/setwallet coin:USDT address:<0x...> network:BEP20` for USDT (BEP-20)\n" +
+               payoutCommands +
                "• `/mystatus` to view your active/completed claims, trust score, and streak\n" +
                "• `/wallet` to check your available and pending balances.",
         inline: false

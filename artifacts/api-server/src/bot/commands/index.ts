@@ -140,6 +140,14 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         )
     );
 
+  const setpaypal = new SlashCommandBuilder()
+    .setName("setpaypal")
+    .setDescription("Save your PayPal email address for payouts")
+    .setDMPermission(true)
+    .addStringOption((o) =>
+      o.setName("email").setDescription("Your PayPal account email address").setRequired(true)
+    );
+
   const wallet = new SlashCommandBuilder()
     .setName("wallet")
     .setDescription("Show a public wallet card")
@@ -479,16 +487,28 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("address").setDescription("New BEP-20 address (0x...)").setRequired(true)
     );
 
+  const adminsetpaypal = new SlashCommandBuilder()
+    .setName("adminsetpaypal")
+    .setDescription("[Admin] Set or overwrite a user's PayPal email")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addUserOption((o) =>
+      o.setName("user").setDescription("The user whose PayPal email to update").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("email").setDescription("New PayPal email address").setRequired(true)
+    );
+
   return [
     verify, setup, createtask, bulktask, referral, referralUse,
-    setupi, setgcash, setwallet, wallet, leaderboard, resetleaderboard,
+    setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
     addmod, removemod, addadmin, flag, unflag,
     disableclaim, enableclaim, blockclaim, unblockclaim,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
-    adminsetupi, adminsetgcash, adminsetwallet,
+    adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

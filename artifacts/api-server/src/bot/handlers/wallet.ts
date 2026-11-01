@@ -168,17 +168,95 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
 }
 
 export async function handleSetPaypal(interaction: ChatInputCommandInteraction) {
-  return interaction.reply({
+  const email = interaction.options.getString("email", true).trim().toLowerCase();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return interaction.reply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid PayPal email address format. Expected format: `yourname@example.com`")],
+      flags: 64,
+    });
+  }
+
+  await interaction.deferReply({ flags: 64 });
+
+  const user = await getUserByDiscordId(interaction.user.id);
+  if (!user?.verified) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must verify with `/verify` before saving payout details.")],
+    });
+  }
+  if (user.flagged) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged — contact an admin.")],
+    });
+  }
+  if (user.paypalEmail) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ You have already set a PayPal email (\`${user.paypalEmail}\`). To change it, please contact an admin.`)],
+    });
+  }
+
+  const duplicateFound = await checkDuplicateDestination(interaction, email, "PayPal email", interaction.user.id);
+  if (duplicateFound) return;
+
+  await db.update(users).set({ paypalEmail: email }).where(eq(users.discordId, interaction.user.id));
+  invalidateUser(interaction.user.id);
+
+  await interaction.editReply({
+    embeds: [makeEmbed(COLORS.SUCCESS).setDescription(`✅ PayPal email saved: \`${email}\`\nPayouts will be sent to this PayPal account.`)],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin: set / overwrite any user's PayPal email
+// ---------------------------------------------------------------------------
+export async function handleAdminSetPaypal(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const targetUser = interaction.options.getUser("user", true);
+  const email = interaction.options.getString("email", true).trim().toLowerCase();
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Invalid PayPal email address format. Expected format: `yourname@example.com`")],
+    });
+  }
+
+  const target = await getUserByDiscordId(targetUser.id);
+  if (!target) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ User <@${targetUser.id}> is not registered in the system.`)],
+    });
+  }
+
+  const oldEmail = target.paypalEmail ?? "(none)";
+
+  const duplicate = await db.query.users.findFirst({
+    columns: { discordId: true },
+    where: (u, { and, ne, sql: s }) =>
+      and(s`LOWER(${u.paypalEmail}) = ${email.toLowerCase()}`, ne(u.discordId, targetUser.id)),
+  });
+  if (duplicate) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ PayPal email \`${email}\` is already linked to another account.`)],
+    });
+  }
+
+  await db.update(users).set({ paypalEmail: email }).where(eq(users.discordId, targetUser.id));
+  invalidateUser(targetUser.id);
+
+  logger.info({ admin: interaction.user.id, target: targetUser.id, oldEmail, newEmail: email }, "Admin updated PayPal email");
+
+  await interaction.editReply({
     embeds: [
-      makeEmbed(COLORS.DANGER).setDescription(
-        "❌ **PayPal is not supported.**\n\n" +
-        "**Supported payout methods are:**\n" +
-        "• **USDT (BEP-20)** — `/setwallet`\n" +
-        "• **UPI** — `/setupi`\n" +
-        "• **GCash** — `/setgcash`"
-      ),
+      makeEmbed(COLORS.SUCCESS)
+        .setTitle("✅ PayPal Email Updated")
+        .addFields(
+          { name: "User",       value: `<@${targetUser.id}>`, inline: true },
+          { name: "Old PayPal", value: `\`${oldEmail}\``,     inline: true },
+          { name: "New PayPal", value: `\`${email}\``,        inline: true },
+        ),
     ],
-    flags: 64,
   });
 }
 

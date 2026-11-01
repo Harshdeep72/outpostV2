@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.js";
 // guild behavior is unchanged.
 const DM_PUBLIC_COMMANDS = new Set([
   "digest", "referral", "referraluse",
-  "setupi", "setgcash", "setwallet",
+  "setupi", "setgcash", "setwallet", "setpaypal",
   "wallet", "profile", "ping", "stats", "mystatus",
 ]);
 

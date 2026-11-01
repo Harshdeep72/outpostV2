@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.js";
 
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleAssignTaskCommand, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
-import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet } from "./handlers/wallet.js";
+import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet, handleAdminSetPaypal } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
@@ -72,6 +72,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "setwallet")   return await timed(name, () => handleSetWallet(interaction));
         if (name === "adminsetwallet") return await timed(name, () => handleAdminSetWallet(interaction));
         if (name === "setpaypal")   return await timed(name, () => handleSetPaypal(interaction));
+        if (name === "adminsetpaypal") return await timed(name, () => handleAdminSetPaypal(interaction));
         if (name === "wallet") return await timed(name, () => handleWalletCommand(interaction));
         if (name === "leaderboard") return await timed(name, () => handleLeaderboardCommand(interaction));
         if (name === "resetleaderboard") return await timed(name, () => handleResetLeaderboard(interaction));

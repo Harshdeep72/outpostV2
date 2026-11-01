@@ -21,10 +21,10 @@ export async function registerCommands(): Promise<void> {
   const builders = getCommandBuilders();
   const body = builders.map((b) => b.toJSON());
 
-  const guildBody = body.filter((c) => !DM_PUBLIC_COMMANDS.has(c.name));
-
-  logger.info({ count: guildBody.length }, "Registering slash commands (guild scope)");
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: guildBody });
+  // Register all commands to the guild scope so they are instantly accessible
+  // and updated in the server without waiting for global cache propagation.
+  logger.info({ count: body.length }, "Registering slash commands (guild scope)");
+  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body });
   logger.info("Slash commands registered (guild scope)");
 
   // Also publish the DM-safe subset globally so they work in bot DMs and in all guilds.

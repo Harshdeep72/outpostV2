@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { get } from "@/lib/api";
+import { get, post } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CooldownEntry {
@@ -53,6 +53,9 @@ export default function Cooldowns() {
     refetchInterval: 30_000,
   });
 
+  const [isClearing, setIsClearing] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState<string | null>(null);
+
   // Tick once per second so per-row countdowns + progress bars update live,
   // without re-hitting the API. Remaining is computed from `ready_at` (ISO)
   // against `now`, so it stays accurate even between server refetches.
@@ -64,6 +67,38 @@ export default function Cooldowns() {
 
   const totalMs = (data?.cooldownMinutes ?? 0) * 60 * 1000;
 
+  async function handleClearAll() {
+    if (!window.confirm("Are you sure you want to clear all active cooldowns across all Reddit accounts and users?")) return;
+    setIsClearing(true);
+    setBannerMessage(null);
+    try {
+      const res = await post<{ success: boolean; message: string }>("/admin/cooldowns/clear", {});
+      setBannerMessage(res.message);
+      await refetch();
+    } catch (err: any) {
+      alert(err?.message ?? "Failed to clear cooldowns");
+    } finally {
+      setIsClearing(false);
+    }
+  }
+
+  async function handleClearSingle(entry: CooldownEntry) {
+    setIsClearing(true);
+    setBannerMessage(null);
+    try {
+      const body = entry.cooldown_type === "reddit" && entry.reddit_username
+        ? { reddit_username: entry.reddit_username }
+        : { discord_id: entry.discord_id };
+      const res = await post<{ success: boolean; message: string }>("/admin/cooldowns/clear", body);
+      setBannerMessage(res.message);
+      await refetch();
+    } catch (err: any) {
+      alert(err?.message ?? "Failed to clear cooldown");
+    } finally {
+      setIsClearing(false);
+    }
+  }
+
   return (
     <div className="p-6 max-w-5xl space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -73,14 +108,30 @@ export default function Cooldowns() {
             Users and Reddit accounts currently on cooldown. Auto-refreshes every 30 seconds.
           </p>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="px-3 py-1.5 rounded-lg border border-border bg-secondary text-sm hover:bg-secondary/80 transition disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {isFetching ? "Refreshing…" : "↻ Refresh"}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleClearAll}
+            disabled={isClearing || isFetching || !data || data.totalActive === 0}
+            className="px-3.5 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 font-medium text-sm hover:bg-red-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
+          >
+            {isClearing ? "Clearing…" : "⚡ Clear All Cooldowns"}
+          </button>
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="px-3 py-1.5 rounded-lg border border-border bg-secondary text-sm hover:bg-secondary/80 transition disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isFetching ? "Refreshing…" : "↻ Refresh"}
+          </button>
+        </div>
       </div>
+
+      {bannerMessage && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 px-4 py-3 text-sm flex items-center justify-between">
+          <span>✅ {bannerMessage}</span>
+          <button onClick={() => setBannerMessage(null)} className="text-emerald-400 hover:text-emerald-200 text-xs ml-3 font-semibold">✕</button>
+        </div>
+      )}
 
       {isLoading && (
         <div className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground text-sm">
@@ -149,6 +200,14 @@ export default function Cooldowns() {
                           <span className="font-mono text-sm text-amber-300 font-semibold whitespace-nowrap">
                             {fmtMs(liveRemaining)} left
                           </span>
+                          <button
+                            onClick={() => handleClearSingle(entry)}
+                            disabled={isClearing}
+                            className="px-2 py-0.5 rounded text-[11px] border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition disabled:opacity-50 font-medium"
+                            title="Clear cooldown for this account"
+                          >
+                            Clear
+                          </button>
                         </div>
                       </div>
 

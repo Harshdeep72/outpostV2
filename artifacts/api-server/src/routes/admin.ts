@@ -242,6 +242,58 @@ router.get("/cooldowns", requireAuth, async (_req, res) => {
   }
 });
 
+router.post("/cooldowns/clear", requireAuth, async (req, res) => {
+  try {
+    const { reddit_username, discord_id } = (req.body ?? {}) as { reddit_username?: string; discord_id?: string };
+
+    if (reddit_username) {
+      const clean = reddit_username.toLowerCase().replace(/^\/?u\//i, "").trim();
+      const result = await pool.query(
+        "UPDATE reddit_accounts SET last_used_at = NULL WHERE LOWER(reddit_username) = $1",
+        [clean]
+      );
+      logger.info({ reddit_username: clean, cleared: result.rowCount }, "Admin cleared cooldown for Reddit account");
+      return res.json({
+        success: true,
+        message: `Cleared cooldown for u/${clean}.`,
+        clearedReddit: result.rowCount ?? 0,
+      });
+    }
+
+    if (discord_id) {
+      const [r1, r2] = await Promise.all([
+        pool.query("UPDATE reddit_accounts SET last_used_at = NULL WHERE discord_id = $1", [discord_id]),
+        pool.query("UPDATE users SET last_task_completed_at = NULL WHERE discord_id = $1", [discord_id]),
+      ]);
+      const cleared = (r1.rowCount ?? 0) + (r2.rowCount ?? 0);
+      logger.info({ discord_id, cleared }, "Admin cleared cooldown for user");
+      return res.json({
+        success: true,
+        message: `Cleared cooldown for user <@${discord_id}>.`,
+        cleared,
+      });
+    }
+
+    // Clear all
+    const [r1, r2] = await Promise.all([
+      pool.query("UPDATE reddit_accounts SET last_used_at = NULL WHERE last_used_at IS NOT NULL"),
+      pool.query("UPDATE users SET last_task_completed_at = NULL WHERE last_task_completed_at IS NOT NULL"),
+    ]);
+    const clearedReddit = r1.rowCount ?? 0;
+    const clearedUsers = r2.rowCount ?? 0;
+    logger.info({ clearedReddit, clearedUsers }, "Admin cleared all active cooldowns");
+    return res.json({
+      success: true,
+      message: `Cleared cooldowns from ${clearedReddit} Reddit account(s) and ${clearedUsers} user(s).`,
+      clearedReddit,
+      clearedUsers,
+    });
+  } catch (err: any) {
+    logger.error({ err }, "POST /cooldowns/clear failed");
+    return res.status(500).json({ error: err?.message ?? "Failed to clear cooldowns" });
+  }
+});
+
 // ── Link an additional Reddit account to a user ──────────────────────────
 // Admin-only helper for when a worker asks to swap or add a Reddit account
 // without going through the in-Discord verification dance. This is purely

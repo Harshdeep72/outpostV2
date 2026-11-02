@@ -703,15 +703,17 @@ export async function handleTaskClaim(
     if (blockRes.rows.length > 0) {
       return interaction.editReply({
         embeds: [makeEmbed(COLORS.DANGER).setDescription(
-          "🚫 You let the 20-minute claim window expire on this task earlier, so you can't claim it again. Other tasks are unaffected — pick a different one."
+          "🚫 You let the claim window expire on this task earlier, so you can't claim it again. Other tasks are unaffected — pick a different one."
         )],
       });
     }
   }
 
-  // Hard cap claim hold at 20 minutes regardless of task.timeLimitMinutes —
-  // if the user hasn't submitted by then, the slot returns to #tasks.
-  const expiresAt = new Date(Date.now() + CLAIM_TIMEOUT_MINUTES * 60 * 1000);
+  // Claim hold duration: use task.timeLimitMinutes if configured (>0), otherwise default to CLAIM_TIMEOUT_MINUTES (60 min)
+  const effectiveTimeLimit = (task.timeLimitMinutes && task.timeLimitMinutes > 0)
+    ? task.timeLimitMinutes
+    : CLAIM_TIMEOUT_MINUTES;
+  const expiresAt = new Date(Date.now() + effectiveTimeLimit * 60 * 1000);
 
   // Atomic slot reservation: the conditional UPDATE is the source of truth.
   // If two users race here, only one will reserve the last slot — the other gets rowCount=0.
@@ -931,7 +933,7 @@ export async function handleTaskClaim(
   const ephemeralEmbed = makeEmbed(COLORS.SUCCESS)
     .setTitle(`✅ Task #${task.id} Claimed`)
     .setDescription(
-      `You have **${CLAIM_TIMEOUT_MINUTES} minutes** to complete and submit. Expires <t:${unixExpiry}:R>.\n` +
+      `You have **${effectiveTimeLimit} minutes** to complete and submit. Expires <t:${unixExpiry}:R>.\n` +
       `Workspace: <#${workspaceCh.id}> (use the Submit Proof button there).`
     )
     .addFields(...ephFields)
@@ -979,7 +981,10 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
     return interaction.editReply({ embeds: [makeEmbed(COLORS.WARNING).setDescription(`⚠️ Task #${taskId} is not open or already has all slots filled (${task.slotsFilled}/${task.maxSlots}).`)] });
   }
 
-  const expiresAt = new Date(Date.now() + CLAIM_TIMEOUT_MINUTES * 60 * 1000);
+  const effectiveTimeLimit = (task.timeLimitMinutes && task.timeLimitMinutes > 0)
+    ? task.timeLimitMinutes
+    : CLAIM_TIMEOUT_MINUTES;
+  const expiresAt = new Date(Date.now() + effectiveTimeLimit * 60 * 1000);
   const reservation = await db.transaction(async (tx: any) => {
     const updated = await tx.execute(
       sql`UPDATE tasks SET slots_filled = slots_filled + 1

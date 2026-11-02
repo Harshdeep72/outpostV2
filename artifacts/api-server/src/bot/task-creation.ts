@@ -15,6 +15,7 @@ import { makeEmbed, formatMoney } from "./util.js";
 import {
   COLORS,
   TASK_TYPES,
+  CLAIM_TIMEOUT_MINUTES,
   isTwitterTask,
   isQuoraTask,
   getPlatformLabel,
@@ -316,11 +317,11 @@ export function normalizeTaskInput(input: CreateTaskInput): { ok: true; task: No
     return { ok: false, error: "Slots must be an integer between 1 and 1000." };
   }
 
-  // Cap claim hold at 20 minutes — if the user doesn't submit proof in time,
-  // the slot is released back to the #tasks channel automatically.
-  // The persisted timeLimitMinutes is informational; CLAIM_TIMEOUT_MINUTES (20)
-  // is the actual hold enforced at claim time in handleTaskClaim.
-  const timeLimitMinutes = 20;
+  // Claim window defaults to CLAIM_TIMEOUT_MINUTES (60 min / 1 hour) — giving workers
+  // enough time to engage with the subreddit organically before commenting.
+  const timeLimitMinutes = (input.timeLimitMinutes && input.timeLimitMinutes > 0)
+    ? input.timeLimitMinutes
+    : CLAIM_TIMEOUT_MINUTES;
 
   // Default verify/hold window: 24h. Per-task override is honored when caller passes input.holdHours.
   const holdHours = input.holdHours ?? 24;

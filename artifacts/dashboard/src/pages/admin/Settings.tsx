@@ -29,7 +29,7 @@ export default function Settings() {
   });
 
   const [enabled, setEnabled] = useState(true);
-  const [minutes, setMinutes] = useState("240");
+  const [minutes, setMinutes] = useState("120");
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   useEffect(() => {

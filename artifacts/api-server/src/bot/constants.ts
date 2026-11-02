@@ -97,14 +97,12 @@ export function getPlatformLabel(type: string): string {
 
 export const TASK_PING_DELAY_MS = 5 * 60 * 1000;
 
-// Default global cooldown after a user submits a task.
-// Phase 2 will make this overridable via the dashboard Settings page and
-// per-task / per-reddit-account; this constant remains the fallback default.
-export const TASK_COOLDOWN_MINUTES = 240; // 4 hours
-// Hard cap on how long a claim is held before auto-expiring back to the channel.
-// Set to 20 minutes (was effectively 1h via timeLimitMinutes default) so unclaimed
-// slots return to the public #tasks channel quickly.
-export const CLAIM_TIMEOUT_MINUTES = 20;
+// Default global cooldown after a user submits a task (2 hours / 120 minutes).
+// Overridable via the dashboard Settings page and per-task / per-reddit-account.
+export const TASK_COOLDOWN_MINUTES = 120; // 2 hours
+// Default claim window duration (1 hour / 60 minutes).
+// Gives workers ample time to engage authentically in the subreddit before commenting.
+export const CLAIM_TIMEOUT_MINUTES = 60; // 1 hour
 // One active claim at a time per user. Once they submit (proof entered), the
 // claim moves to "submitted" status and stops counting toward this cap, AND
 // the 30-min cooldown begins — so they can claim a new task only after the

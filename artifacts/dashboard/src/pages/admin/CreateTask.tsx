@@ -59,8 +59,8 @@ export default function CreateTask() {
   const [flair, setFlair] = useState("");
   const [reward, setReward] = useState("0.10");
   // Single tasks are always 1-slot. For multi-slot drops, use the Bulk Tasks page.
-  const [timeLimitMinutes, setTimeLimitMinutes] = useState("30");
-  const [holdHours, setHoldHours] = useState("168");
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState("60");
+  const [holdHours, setHoldHours] = useState("24");
   const [minTrustScore, setMinTrustScore] = useState("0");
   const [cooldownEnabled, setCooldownEnabled] = useState(true);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);

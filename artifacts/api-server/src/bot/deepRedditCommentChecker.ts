@@ -137,8 +137,7 @@ async function fetchCommentThreadViaPython(
 
   try {
     const { fetch: undiciFetch } = await import("undici");
-    // Ensure we fetch the old.reddit.com JSON format, which requires ?raw_json=1 to avoid HTML encoding.
-    const targetUrl = `https://old.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`;
+    const targetUrl = `https://www.reddit.com/${sub}/comments/${postId}/_/${commentId}.json?raw_json=1&context=3`;
     const proxyEndpoint = `${osintUrl}/api/external/proxy/json?url=${encodeURIComponent(targetUrl)}`;
 
     // 20-second hard timeout — if HF Space is saturated (e.g. Inspector bulk run)

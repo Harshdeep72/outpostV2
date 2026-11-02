@@ -13,7 +13,5 @@ jobs:
         run: |
           echo "Pinging Outpost Bot..."
           curl -fsSL -m 15 "https://outpost-bot-pxke.onrender.com/api/health" || echo "Outpost pinged."
-          echo "Pinging Redditors Hub..."
-          curl -fsSL -m 15 "https://outpostv2-8rv3.onrender.com/api/health" || echo "Redditors Hub pinged."
           echo "Pinging Onboarding Bot..."
           curl -fsSL -m 15 "https://reddit-microtasks-bot.onrender.com" || echo "Onboarding pinged."

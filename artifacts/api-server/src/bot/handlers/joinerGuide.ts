@@ -10,9 +10,14 @@ import {
 } from "discord.js";
 import { setupGuild } from "../setup.js";
 import { upsertUserSmart } from "../db.js";
+import { pool } from "@workspace/db";
 import { makeEmbed, hasAdminRole, hasModRole } from "../util.js";
 import { COLORS, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED } from "../constants.js";
 import { logger } from "../../lib/logger.js";
+
+// Process-local memory set to quickly debounce duplicate gateway events
+const localWelcomedCache = new Map<string, number>();
+const LOCAL_CACHE_TTL_MS = 60_000; // 1 minute
 
 export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): EmbedBuilder {
   return makeEmbed(COLORS.PRIMARY)
@@ -94,12 +99,54 @@ export function buildJoinerGuideButtons(
 export async function handleGuildMemberAdd(member: GuildMember) {
   if (member.user.bot) return;
 
+  const now = Date.now();
+  const cachedTime = localWelcomedCache.get(member.id);
+  if (cachedTime && now - cachedTime < LOCAL_CACHE_TTL_MS) {
+    logger.debug({ userId: member.id }, "Skipping duplicate welcome (in-memory debounce)");
+    return;
+  }
+  localWelcomedCache.set(member.id, now);
+
   upsertUserSmart(member.id, member.user.username).catch((err) => {
     logger.warn({ err, userId: member.id }, "Failed to upsert new member");
   });
 
+  // Cross-instance / cluster deduplication:
+  // Atomically claim the welcome event in PostgreSQL. If another instance or
+  // event already welcomed this user in the last 24 hours, rowCount is 0.
+  try {
+    const claimRes = await pool.query(
+      `INSERT INTO member_welcomes (discord_id, welcomed_at)
+       VALUES ($1, NOW())
+       ON CONFLICT (discord_id) DO UPDATE
+         SET welcomed_at = NOW()
+         WHERE member_welcomes.welcomed_at < NOW() - INTERVAL '1 day'
+       RETURNING discord_id`,
+      [member.id]
+    );
+
+    if (claimRes.rowCount === 0) {
+      logger.info({ userId: member.id }, "Member already welcomed recently — skipping duplicate welcome message");
+      return;
+    }
+  } catch (dbErr) {
+    logger.warn({ err: dbErr, userId: member.id }, "Failed to query member_welcomes dedup table");
+    // Continue gracefully if DB table check throws
+  }
+
   try {
     const guild = member.guild;
+
+    // Auto-assign Tasker role if it exists in the server so permissions stay consistent
+    try {
+      const taskerRole = guild.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
+      if (taskerRole && !member.roles.cache.has(taskerRole.id)) {
+        await member.roles.add(taskerRole, "Auto-assign role on join").catch(() => {});
+      }
+    } catch {
+      // Non-fatal
+    }
+
     const setup = await setupGuild(guild);
 
     const embed = buildJoinerGuideEmbed(guild, member);

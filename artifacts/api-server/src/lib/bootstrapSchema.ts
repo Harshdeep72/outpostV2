@@ -472,6 +472,12 @@ const POST_FIXES: string[] = [
      "created_at"      TIMESTAMPTZ NOT NULL DEFAULT NOW()
    );`,
   `CREATE INDEX IF NOT EXISTS "admin_notes_discord_idx" ON "admin_notes" ("discord_id", "created_at" DESC);`,
+  // Member welcomes dedup table — ensures exactly ONE welcome message is sent per user
+  // across cluster instances, shards, or rapid reconnects.
+  `CREATE TABLE IF NOT EXISTS "member_welcomes" (
+     "discord_id"   TEXT PRIMARY KEY,
+     "welcomed_at"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );`,
   // Retroactively fix any submissions placed on a 7-day hold down to the task's configured hold (24h)
   `UPDATE "submissions" s
      SET available_at = s.submitted_at + (COALESCE(t.pending_delay_hours, 24) || ' hours')::interval

@@ -241,6 +241,10 @@ async function autoReject(client: Client, row: PendingRow, reason: string): Prom
   await db.execute(
     sql`UPDATE claims SET status = 'rejected' WHERE id = ${parseInt(row.claim_id)}`,
   );
+  // Release hold from balance_pending if funds were held in pending balance
+  await db.execute(
+    sql`UPDATE users SET balance_pending = GREATEST(0, balance_pending - ${row.reward}::numeric) WHERE id = ${parseInt(row.user_id)}`,
+  );
   // INTENTIONALLY do NOT decrement tasks.slots_filled here.
   // Once a task has been claimed and submitted, that slot is permanently
   // occupied until an admin explicitly reopens it. Automatic reopening on

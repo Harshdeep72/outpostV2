@@ -709,10 +709,8 @@ export async function handleTaskClaim(
     }
   }
 
-  // Claim hold duration: use task.timeLimitMinutes if configured (>0), otherwise default to CLAIM_TIMEOUT_MINUTES (60 min)
-  const effectiveTimeLimit = (task.timeLimitMinutes && task.timeLimitMinutes > 0)
-    ? task.timeLimitMinutes
-    : CLAIM_TIMEOUT_MINUTES;
+  // Claim hold duration: default to at least CLAIM_TIMEOUT_MINUTES (60 min)
+  const effectiveTimeLimit = Math.max(CLAIM_TIMEOUT_MINUTES, task.timeLimitMinutes || CLAIM_TIMEOUT_MINUTES);
   const expiresAt = new Date(Date.now() + effectiveTimeLimit * 60 * 1000);
 
   // Atomic slot reservation: the conditional UPDATE is the source of truth.
@@ -873,7 +871,7 @@ export async function handleTaskClaim(
       pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
-    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — please type it manually in your own words (keep the brand name)";
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
@@ -981,9 +979,7 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
     return interaction.editReply({ embeds: [makeEmbed(COLORS.WARNING).setDescription(`⚠️ Task #${taskId} is not open or already has all slots filled (${task.slotsFilled}/${task.maxSlots}).`)] });
   }
 
-  const effectiveTimeLimit = (task.timeLimitMinutes && task.timeLimitMinutes > 0)
-    ? task.timeLimitMinutes
-    : CLAIM_TIMEOUT_MINUTES;
+  const effectiveTimeLimit = Math.max(CLAIM_TIMEOUT_MINUTES, task.timeLimitMinutes || CLAIM_TIMEOUT_MINUTES);
   const expiresAt = new Date(Date.now() + effectiveTimeLimit * 60 * 1000);
   const reservation = await db.transaction(async (tx: any) => {
     const updated = await tx.execute(
@@ -1071,7 +1067,7 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
       pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
-    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — please type it manually in your own words (keep the brand name)";
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
@@ -1361,7 +1357,10 @@ export async function handleClaimCopy(
   // Plain text inside a fenced code block — Discord mobile shows a native
   // copy icon on the block. We escape any stray ``` to prevent breaking out.
   const safe = content.replace(/```/g, "''");
-  await interaction.editReply({ content: `📋 **Copy this ${label}** (tap the copy icon on mobile):\n\`\`\`\n${safe}\n\`\`\`` });
+  const tip = label === "comment"
+    ? "\n\n💡 **Tip:** Please type it manually in your own natural words while keeping the brand name for 100% comment survival!"
+    : "";
+  await interaction.editReply({ content: `📋 **Copy this ${label}** (tap the copy icon on mobile):\n\`\`\`\n${safe}\n\`\`\`${tip}` });
 }
 
 export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction, claimId: number) {

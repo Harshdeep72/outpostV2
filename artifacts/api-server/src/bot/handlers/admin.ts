@@ -821,20 +821,24 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   const rows = await db.execute<{
     id: string;
+    user_id: string;
     discord_id: string;
     reward: string;
     live_status: string;
     review_status: string;
     review_reason: string | null;
     moved_to_available: number;
+    claim_id: string | null;
   }>(
     sql`SELECT s.id::text            AS id,
+               s.user_id::text       AS user_id,
                s.discord_id          AS discord_id,
                s.reward::text        AS reward,
                s.live_status         AS live_status,
                s.review_status       AS review_status,
                s.review_reason       AS review_reason,
-               s.moved_to_available  AS moved_to_available
+               s.moved_to_available  AS moved_to_available,
+               s.claim_id::text      AS claim_id
         FROM submissions s
         WHERE s.id = ${submissionId}
         LIMIT 1`
@@ -847,11 +851,11 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
     });
   }
 
-  if (row.review_status !== "rejected") {
+  if (row.review_status !== "rejected" && row.review_status !== "pending" && row.review_status !== "pending_hold") {
     return interaction.editReply({
       embeds: [
         makeEmbed(COLORS.WARNING).setDescription(
-          `⚠️ Submission #${submissionId} is currently **${row.review_status}** — only rejected submissions can be manually approved.`
+          `⚠️ Submission #${submissionId} is currently **${row.review_status}** — only pending or rejected submissions can be manually approved.`
         ),
       ],
     });
@@ -859,17 +863,31 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   const reward = parseFloat(row.reward);
 
-  // Credit the reward to balance_available and restore the trust deduction.
-  await db.execute(
-    sql`UPDATE users
-        SET balance_available = balance_available + ${reward}::numeric,
-            total_earned      = total_earned      + ${reward}::numeric,
-            trust_score       = trust_score       + 0.05
-        WHERE discord_id = ${row.discord_id}`
-  );
+  // If already in pending / pending_hold, move balance_pending -> balance_available.
+  // If previously rejected, reward was already deducted from balance_pending, so credit directly to balance_available.
+  if (row.review_status === "rejected") {
+    await db.execute(
+      sql`UPDATE users
+          SET balance_available = balance_available + ${reward}::numeric,
+              total_earned      = total_earned      + ${reward}::numeric,
+              trust_score       = LEAST(1000, trust_score + 0.05),
+              last_task_completed_at = NOW()
+          WHERE discord_id = ${row.discord_id}`
+    );
+  } else {
+    await db.execute(
+      sql`UPDATE users
+          SET balance_pending   = GREATEST(0, balance_pending - ${reward}::numeric),
+              balance_available = balance_available + ${reward}::numeric,
+              total_earned      = total_earned      + ${reward}::numeric,
+              trust_score       = LEAST(1000, trust_score + 2),
+              last_task_completed_at = NOW()
+          WHERE discord_id = ${row.discord_id}`
+    );
+  }
 
   const adminTag = interaction.user.tag;
-  const reviewReason = `Manually approved by ${adminTag} — liveness check was incorrect.`;
+  const reviewReason = `Manually approved by ${adminTag} — hold-end / liveness check override.`;
 
   await db.execute(
     sql`UPDATE submissions
@@ -881,6 +899,12 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
             paid_at             = NOW()
         WHERE id = ${submissionId}`
   );
+
+  if (row.claim_id) {
+    await db.execute(
+      sql`UPDATE claims SET status = 'accepted' WHERE id = ${parseInt(row.claim_id)}`
+    ).catch(() => {});
+  }
 
   // Log the correction to trust_logs for audit trail.
   await db.execute(

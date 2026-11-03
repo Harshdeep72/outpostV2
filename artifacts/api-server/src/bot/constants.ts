@@ -29,6 +29,8 @@ export const ROLES = {
   BRONZE_EARNER: "Bronze Earner",
   SILVER_EARNER: "Silver Earner",
   GOLD_EARNER: "Gold Earner",
+  KARMA_10K: "10k+ Karma",
+  KARMA_5K: "5k+ Karma",
 } as const;
 
 export const EARNER_TIERS = [

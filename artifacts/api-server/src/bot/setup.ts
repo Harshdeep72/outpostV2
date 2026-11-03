@@ -16,6 +16,8 @@ export interface GuildSetup {
   modRole: Role;
   verifiedRole: Role;
   unverifiedRole: Role;
+  karma10kRole: Role;
+  karma5kRole: Role;
   earnCategory: CategoryChannel;
   workspacesCategory: CategoryChannel;
   communityCategory: CategoryChannel;
@@ -224,6 +226,8 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
 
   const adminRole = await ensureRole(guild, ROLES.ADMIN, COLORS.DANGER, true);
   const modRole = await ensureRole(guild, ROLES.MOD, COLORS.WARNING, true);
+  const karma10kRole = await ensureRole(guild, ROLES.KARMA_10K, 0xE67E22, true);
+  const karma5kRole = await ensureRole(guild, ROLES.KARMA_5K, 0x3498DB, true);
   const verifiedRole = await ensureRole(guild, ROLES.VERIFIED, COLORS.SUCCESS, true);
   const unverifiedRole = await ensureRole(guild, ROLES.UNVERIFIED, 0x95A5A6, true);
 
@@ -305,7 +309,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   if (updatesCreated) postUpdatesIntro(updatesChannel).catch(() => {});
 
   const setup: GuildSetup = {
-    adminRole, modRole, verifiedRole, unverifiedRole,
+    adminRole, modRole, verifiedRole, unverifiedRole, karma10kRole, karma5kRole,
     communityCategory, earnCategory, workspacesCategory,
     tasksChannel, verificationLogChannel, taskLogsChannel, withdrawalLogChannel, leaderboardChannel,
     startHereChannel, guideChannel, generalChannel, referralEventsChannel, announcementsChannel,

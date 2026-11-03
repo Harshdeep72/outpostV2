@@ -714,9 +714,18 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
     // ----- end additional-account path -----
 
     const member = await guild.members.fetch(discordId);
-    const { verifiedRole, unverifiedRole } = await setupGuild(guild);
+    const { verifiedRole, unverifiedRole, karma10kRole, karma5kRole } = await setupGuild(guild);
     await addRoleOrThrowClear(member, verifiedRole);
     if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
+
+    // Assign karma member tags if account meets 10k or 5k threshold
+    const totalKarma = (p.linkKarma || 0) + (p.commentKarma || 0);
+    if (totalKarma >= 10000) {
+      if (karma10kRole) await member.roles.add(karma10kRole).catch(() => {});
+      if (karma5kRole) await member.roles.add(karma5kRole).catch(() => {});
+    } else if (totalKarma >= 5000) {
+      if (karma5kRole) await member.roles.add(karma5kRole).catch(() => {});
+    }
 
     const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 
@@ -1028,9 +1037,17 @@ export async function handleVerifyAccept(
   }
 
   // ─── FIRST-TIME verification path (legacy, kept intact) ─────────────────
-  const { verifiedRole, unverifiedRole } = await setupGuild(guild);
+  const { verifiedRole, unverifiedRole, karma10kRole, karma5kRole } = await setupGuild(guild);
   await addRoleOrThrowClear(member, verifiedRole);
   if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
+
+  const totalKarma = (postKarma || 0) + (commentKarma || 0);
+  if (totalKarma >= 10000) {
+    if (karma10kRole) await member.roles.add(karma10kRole).catch(() => {});
+    if (karma5kRole) await member.roles.add(karma5kRole).catch(() => {});
+  } else if (totalKarma >= 5000) {
+    if (karma5kRole) await member.roles.add(karma5kRole).catch(() => {});
+  }
 
   const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 

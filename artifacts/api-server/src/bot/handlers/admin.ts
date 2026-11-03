@@ -39,7 +39,7 @@ export async function handleSetupCommand(interaction: ChatInputCommandInteractio
         .addFields(
           {
             name: "Roles",
-            value: [setup.adminRole, setup.modRole, setup.verifiedRole].map((r) => r.toString()).join("\n"),
+            value: [setup.adminRole, setup.modRole, setup.verifiedRole, setup.unverifiedRole].filter(Boolean).map((r) => r.toString()).join("\n"),
           },
           {
             name: "📣 Community Channels",

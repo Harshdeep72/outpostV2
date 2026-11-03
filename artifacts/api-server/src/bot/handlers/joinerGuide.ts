@@ -111,6 +111,27 @@ export async function handleGuildMemberAdd(member: GuildMember) {
     logger.warn({ err, userId: member.id }, "Failed to upsert new member");
   });
 
+  // Always ensure base roles on join (Unverified / Tasker)
+  try {
+    const guild = member.guild;
+    const setup = await setupGuild(guild);
+
+    const taskerRole = guild.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
+    if (taskerRole && !member.roles.cache.has(taskerRole.id)) {
+      await member.roles.add(taskerRole, "Auto-assign role on join").catch(() => {});
+    }
+
+    if (
+      setup.unverifiedRole &&
+      !member.roles.cache.has(setup.verifiedRole.id) &&
+      !member.roles.cache.has(setup.unverifiedRole.id)
+    ) {
+      await member.roles.add(setup.unverifiedRole, "Auto-assign Unverified role on join").catch(() => {});
+    }
+  } catch (err) {
+    logger.warn({ err, userId: member.id }, "Failed auto-assigning initial roles on join");
+  }
+
   // Cross-instance / cluster deduplication:
   // Atomically claim the welcome event in PostgreSQL. If another instance or
   // event already welcomed this user in the last 24 hours, rowCount is 0.
@@ -136,17 +157,6 @@ export async function handleGuildMemberAdd(member: GuildMember) {
 
   try {
     const guild = member.guild;
-
-    // Auto-assign Tasker role if it exists in the server so permissions stay consistent
-    try {
-      const taskerRole = guild.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
-      if (taskerRole && !member.roles.cache.has(taskerRole.id)) {
-        await member.roles.add(taskerRole, "Auto-assign role on join").catch(() => {});
-      }
-    } catch {
-      // Non-fatal
-    }
-
     const setup = await setupGuild(guild);
 
     const embed = buildJoinerGuideEmbed(guild, member);

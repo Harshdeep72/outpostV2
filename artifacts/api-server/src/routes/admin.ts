@@ -1057,10 +1057,11 @@ router.post("/users/:id/unverify", requireAdminRole, async (req, res) => {
     try {
       const guild = getPrimaryGuild();
       if (guild) {
-        const { verifiedRole } = await setupGuild(guild);
+        const { verifiedRole, unverifiedRole } = await setupGuild(guild);
         const member = await guild.members.fetch(user.discordId).catch(() => null);
         if (member) {
           await member.roles.remove(verifiedRole).catch(() => {});
+          if (unverifiedRole) await member.roles.add(unverifiedRole).catch(() => {});
           discordRoleRemoved = true;
         } else {
           discordWarning = "Member is no longer in the Discord server.";
@@ -1164,6 +1165,7 @@ router.post("/users/:id/verify", requireAdminRole, async (req, res) => {
           // the actual error so the dashboard can show a meaningful message.
           try {
             await member.roles.add(setup.verifiedRole);
+            if (setup.unverifiedRole) await member.roles.remove(setup.unverifiedRole).catch(() => {});
             discordRoleAdded = true;
           } catch (err: any) {
             req.log.error({ err: err?.message ?? String(err), userId: id, discordId: user.discordId }, "Failed to add verified role");

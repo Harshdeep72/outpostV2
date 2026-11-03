@@ -714,8 +714,9 @@ async function handleVerifyModalInner(interaction: ModalSubmitInteraction) {
     // ----- end additional-account path -----
 
     const member = await guild.members.fetch(discordId);
-    const { verifiedRole } = await setupGuild(guild);
+    const { verifiedRole, unverifiedRole } = await setupGuild(guild);
     await addRoleOrThrowClear(member, verifiedRole);
+    if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
 
     const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 
@@ -1027,8 +1028,9 @@ export async function handleVerifyAccept(
   }
 
   // ─── FIRST-TIME verification path (legacy, kept intact) ─────────────────
-  const { verifiedRole } = await setupGuild(guild);
+  const { verifiedRole, unverifiedRole } = await setupGuild(guild);
   await addRoleOrThrowClear(member, verifiedRole);
+  if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
 
   const workspaceCh = await getOrCreateWorkspaceChannel(guild, member);
 
@@ -1139,8 +1141,9 @@ export async function handleAdminVerifyCommand(interaction: ChatInputCommandInte
     await db.execute(sql`DELETE FROM reddit_accounts WHERE discord_id = ${discordId}`);
     invalidateUser(discordId);
 
-    const { verifiedRole } = await setupGuild(guild);
+    const { verifiedRole, unverifiedRole } = await setupGuild(guild);
     await targetMember.roles.remove(verifiedRole).catch(() => {});
+    if (unverifiedRole) await targetMember.roles.add(unverifiedRole).catch(() => {});
 
     try {
       await targetMember.send({
@@ -1174,8 +1177,9 @@ export async function handleAdminVerifyCommand(interaction: ChatInputCommandInte
   }
   redditUsername = redditUsername.toLowerCase().replace(/^u\//i, "");
 
-  const { verifiedRole } = await setupGuild(guild);
+  const { verifiedRole, unverifiedRole } = await setupGuild(guild);
   await targetMember.roles.add(verifiedRole).catch(() => {});
+  if (unverifiedRole) await targetMember.roles.remove(unverifiedRole).catch(() => {});
 
   const workspaceCh = await getOrCreateWorkspaceChannel(guild, targetMember);
 
@@ -1278,8 +1282,9 @@ export async function handleVerifyRejectReason(
 
   try {
     const member = await guild.members.fetch(discordId);
-    const { verifiedRole } = await setupGuild(guild);
+    const { verifiedRole, unverifiedRole } = await setupGuild(guild);
     await member.roles.remove(verifiedRole).catch(() => {});
+    if (unverifiedRole) await member.roles.add(unverifiedRole).catch(() => {});
 
     await member.send({
       embeds: [
@@ -1351,7 +1356,10 @@ export async function unlinkRedditAccount(opts: {
       try {
         const setup = await setupGuild(guild);
         const member = await guild.members.fetch(discordId).catch(() => null);
-        if (member) await member.roles.remove(setup.verifiedRole).catch(() => {});
+        if (member) {
+          await member.roles.remove(setup.verifiedRole).catch(() => {});
+          if (setup.unverifiedRole) await member.roles.add(setup.unverifiedRole).catch(() => {});
+        }
       } catch (err) {
         logger.warn({ err, discordId }, "Could not strip verified role after unlink");
       }

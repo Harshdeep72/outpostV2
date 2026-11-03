@@ -25,6 +25,7 @@ export const ROLES = {
   ADMIN: "Admin",
   MOD: "Mod",
   VERIFIED: "Verified",
+  UNVERIFIED: "Unverified",
   BRONZE_EARNER: "Bronze Earner",
   SILVER_EARNER: "Silver Earner",
   GOLD_EARNER: "Gold Earner",

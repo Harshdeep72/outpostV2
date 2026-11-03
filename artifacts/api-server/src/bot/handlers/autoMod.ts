@@ -10,6 +10,8 @@ import { hasAdminRole, hasModRole } from "../util.js";
 export const CHITCHAT_CHANNEL_ID = "1565314111372394583";
 // #media channel ID where messages must be real photos or videos (no GIFs, no plain texting)
 export const MEDIA_CHANNEL_ID = "1567226854778208318";
+// #tasks channel ID where messages must be posted by staff/bot only
+export const TASKS_CHANNEL_ID = "1565661343737192531";
 
 /**
  * Checks whether content or attachments contain non-GIF images or file uploads
@@ -166,6 +168,20 @@ export async function handleAutoModMessage(
       } catch (err) {
         logger.warn({ err }, "Failed to auto-moderate media channel message");
       }
+    }
+    return;
+  }
+
+  // 3. #tasks: Read-only for regular members. Only bot and staff can post tasks.
+  if (message.channelId === TASKS_CHANNEL_ID) {
+    try {
+      await message.delete();
+      logger.info(
+        { author: message.author.tag, channel: message.channelId },
+        "AutoMod deleted non-staff message from #tasks"
+      );
+    } catch (err) {
+      logger.warn({ err }, "Failed to auto-moderate tasks channel message");
     }
     return;
   }

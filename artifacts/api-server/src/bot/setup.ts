@@ -35,10 +35,10 @@ export interface GuildSetup {
 
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
 
-async function ensureRole(guild: Guild, name: string, color: number): Promise<Role> {
+async function ensureRole(guild: Guild, name: string, color: number, hoist = false): Promise<Role> {
   let role = guild.roles.cache.find((r) => r.name === name);
   if (!role) {
-    role = await guild.roles.create({ name, color, reason: "Reddit Microtasks setup" });
+    role = await guild.roles.create({ name, color, hoist, reason: "Reddit Microtasks setup" });
     // After creating a role, try to position it just below the bot's highest
     // role so the bot always has authority to assign it. This is best-effort —
     // if it fails (e.g. bot lacks MANAGE_ROLES or the position is already fine)
@@ -54,6 +54,8 @@ async function ensureRole(guild: Guild, name: string, color: number): Promise<Ro
     } catch {
       // Ignore — hierarchy nudge is best-effort only
     }
+  } else if (hoist && !role.hoist) {
+    await role.setHoist(true).catch(() => {});
   }
   return role;
 }
@@ -220,10 +222,10 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   await guild.roles.fetch();
   await guild.channels.fetch();
 
-  const adminRole = await ensureRole(guild, ROLES.ADMIN, COLORS.DANGER);
-  const modRole = await ensureRole(guild, ROLES.MOD, COLORS.WARNING);
-  const verifiedRole = await ensureRole(guild, ROLES.VERIFIED, COLORS.SUCCESS);
-  const unverifiedRole = await ensureRole(guild, ROLES.UNVERIFIED, 0x95A5A6);
+  const adminRole = await ensureRole(guild, ROLES.ADMIN, COLORS.DANGER, true);
+  const modRole = await ensureRole(guild, ROLES.MOD, COLORS.WARNING, true);
+  const verifiedRole = await ensureRole(guild, ROLES.VERIFIED, COLORS.SUCCESS, true);
+  const unverifiedRole = await ensureRole(guild, ROLES.UNVERIFIED, 0x95A5A6, true);
 
   const everyoneId = guild.roles.everyone.id;
   const adminId = adminRole.id;

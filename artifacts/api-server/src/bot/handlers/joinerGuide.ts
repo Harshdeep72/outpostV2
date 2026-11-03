@@ -111,15 +111,10 @@ export async function handleGuildMemberAdd(member: GuildMember) {
     logger.warn({ err, userId: member.id }, "Failed to upsert new member");
   });
 
-  // Always ensure base roles on join (Unverified / Tasker)
+  // Always ensure Unverified role on join for new members
   try {
     const guild = member.guild;
     const setup = await setupGuild(guild);
-
-    const taskerRole = guild.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
-    if (taskerRole && !member.roles.cache.has(taskerRole.id)) {
-      await member.roles.add(taskerRole, "Auto-assign role on join").catch(() => {});
-    }
 
     if (
       setup.unverifiedRole &&

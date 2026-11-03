@@ -57,6 +57,29 @@ function liveStatusBadge(status: string | null) {
   return <Badge color={map[status] ?? "zinc"}>{status}</Badge>;
 }
 
+function reviewStatusBadge(status: string | null | undefined) {
+  if (!status) return <span className="text-zinc-500 text-[10px]">—</span>;
+  const map: Record<string, string> = {
+    accepted: "emerald",
+    approved: "emerald",
+    rejected: "red",
+    pending: "amber",
+    pending_hold: "amber",
+  };
+  return <Badge color={map[status] ?? "zinc"}>{status}</Badge>;
+}
+
+function withdrawalStatusBadge(status: string | null | undefined) {
+  if (!status) return <span className="text-zinc-500 text-[10px]">—</span>;
+  const map: Record<string, string> = {
+    approved: "emerald",
+    paid: "emerald",
+    rejected: "red",
+    pending: "amber",
+  };
+  return <Badge color={map[status] ?? "zinc"}>{status}</Badge>;
+}
+
 function CopyButton({ text }: { text: string | null }) {
   const [copied, setCopied] = useState(false);
   if (!text) return null;
@@ -73,7 +96,7 @@ function CopyButton({ text }: { text: string | null }) {
 
 export default function WorkerProfile() {
   const params = useParams<{ id: string }>();
-  const id = parseInt(params.id);
+  const id = params?.id ? parseInt(params.id, 10) : NaN;
   const qc = useQueryClient();
   const { user: me } = useAuth();
   const isAdmin = me?.role === "admin" || me?.role === "dev";
@@ -95,6 +118,9 @@ export default function WorkerProfile() {
   });
 
   const [noteBody, setNoteBody] = useState("");
+  const [sendStatsMsg, setSendStatsMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+
   const addNote = useMutation({
     mutationFn: (body: string) => post<Note>(`/admin/users/${id}/notes`, { body }),
     onSuccess: () => { setNoteBody(""); qc.invalidateQueries({ queryKey: ["worker-notes", id] }); },
@@ -108,7 +134,6 @@ export default function WorkerProfile() {
   // the ◀/▶ buttons attached to the message. We don't poll for
   // delivery; the API returns ok=true as soon as Discord accepts the
   // message, and we surface that as a transient confirmation pill.
-  const [sendStatsMsg, setSendStatsMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const sendStats = useMutation({
     mutationFn: () => post<{ ok: true; totalPages?: number; totalSubs?: number }>(
       `/admin/users/${id}/send-stats`,
@@ -142,11 +167,14 @@ export default function WorkerProfile() {
   if (!Number.isFinite(id)) return <div className="p-7 text-red-400 text-[13px]">Invalid user id.</div>;
   if (profile.isLoading) return <div className="p-7 text-zinc-500 text-[13px]">Loading…</div>;
   if (profile.error) return <div className="p-7 text-red-400 text-[13px]">Failed: {(profile.error as Error).message}</div>;
-  if (!profile.data) return null;
+  if (!profile.data?.user || !profile.data?.stats) return <div className="p-7 text-zinc-400 text-[13px]">User profile not found.</div>;
 
-  const { user, stats, recentSubmissions, recentClaims, withdrawals, rejectionReasons, taskBlocks } = profile.data;
-
-  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const { user, stats } = profile.data;
+  const recentSubmissions = profile.data.recentSubmissions ?? [];
+  const recentClaims = profile.data.recentClaims ?? [];
+  const withdrawals = profile.data.withdrawals ?? [];
+  const rejectionReasons = profile.data.rejectionReasons ?? [];
+  const taskBlocks = profile.data.taskBlocks ?? [];
 
   return (
     <div className="p-5 sm:p-7 space-y-5 max-w-6xl">
@@ -217,7 +245,7 @@ export default function WorkerProfile() {
                 <li key={s.id} className="px-4 py-2.5 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-zinc-300 font-medium truncate max-w-[220px]">#{s.task_id} {s.task_title ?? "—"}</span>
-                    <Badge color={statusColor(s.review_status) as any}>{s.review_status}</Badge>
+                    {reviewStatusBadge(s.review_status)}
                     {liveStatusBadge(s.live_status)}
                     <span className="font-mono text-emerald-300 ml-auto">{formatCurrency(s.reward)}</span>
                   </div>
@@ -257,7 +285,7 @@ export default function WorkerProfile() {
                 <span className="font-mono">#{w.id}</span>,
                 <span className="font-mono text-emerald-300">{formatCurrency(w.amount)}</span>,
                 <span className="text-zinc-400">{w.method}</span>,
-                <Badge color={statusColor(w.status) as any}>{w.status}</Badge>,
+                withdrawalStatusBadge(w.status),
                 <span className="text-zinc-500">{timeAgo(w.requested_at)}</span>,
               ],
             }))} />

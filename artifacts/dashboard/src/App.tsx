@@ -2,6 +2,7 @@ import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Layout from "@/components/Layout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import SetupPassword from "@/pages/SetupPassword";
@@ -65,32 +66,34 @@ function ProtectedApp() {
 
   return (
     <Layout>
-      <Switch>
-        <Route path="/admin" component={Overview} />
-        <Route path="/admin/verified" component={VerifiedUsers} />
-        <Route path="/admin/payments" component={PaymentMethods} />
-        <Route path="/admin/users" component={Users} />
-        <Route path="/admin/tasks" component={Tasks} />
-        <Route path="/admin/tasks/new" component={CreateTask} />
-        <Route path="/admin/tasks/bulk" component={BulkTasks} />
-        <Route path="/admin/submissions" component={Submissions} />
-        <Route path="/admin/tasks-by-creator" component={TasksByCreator} />
-        <Route path="/admin/exports" component={Exports} />
-        <Route path="/admin/creator-earnings" component={CreatorEarnings} />
-        <Route path="/admin/workers/:id" component={WorkerProfile} />
-        <Route path="/admin/fraud-signals" component={FraudSignals} />
-        <Route path="/admin/campaigns" component={Campaigns} />
-        <Route path="/admin/reddit-test" component={RedditTest} />
-        <Route path="/admin/console" component={Console} />
-        {isAdmin && <Route path="/admin/settings" component={Settings} />}
-        <Route path="/admin/cooldowns" component={Cooldowns} />
-        {isAdmin && <Route path="/admin/applications" component={Applications} />}
-        {isAdmin && <Route path="/admin/admin-users" component={AdminUsers} />}
-        <Route path="/login"><Redirect to="/admin" /></Route>
-        <Route path="/register"><Redirect to="/admin" /></Route>
-        <Route path="/"><Redirect to="/admin" /></Route>
-        <Route><Redirect to="/admin" /></Route>
-      </Switch>
+      <ErrorBoundary>
+        <Switch>
+          <Route path="/admin" component={Overview} />
+          <Route path="/admin/verified" component={VerifiedUsers} />
+          <Route path="/admin/payments" component={PaymentMethods} />
+          <Route path="/admin/users" component={Users} />
+          <Route path="/admin/tasks" component={Tasks} />
+          <Route path="/admin/tasks/new" component={CreateTask} />
+          <Route path="/admin/tasks/bulk" component={BulkTasks} />
+          <Route path="/admin/submissions" component={Submissions} />
+          <Route path="/admin/tasks-by-creator" component={TasksByCreator} />
+          <Route path="/admin/exports" component={Exports} />
+          <Route path="/admin/creator-earnings" component={CreatorEarnings} />
+          <Route path="/admin/workers/:id" component={WorkerProfile} />
+          <Route path="/admin/fraud-signals" component={FraudSignals} />
+          <Route path="/admin/campaigns" component={Campaigns} />
+          <Route path="/admin/reddit-test" component={RedditTest} />
+          <Route path="/admin/console" component={Console} />
+          {isAdmin && <Route path="/admin/settings" component={Settings} />}
+          <Route path="/admin/cooldowns" component={Cooldowns} />
+          {isAdmin && <Route path="/admin/applications" component={Applications} />}
+          {isAdmin && <Route path="/admin/admin-users" component={AdminUsers} />}
+          <Route path="/login"><Redirect to="/admin" /></Route>
+          <Route path="/register"><Redirect to="/admin" /></Route>
+          <Route path="/"><Redirect to="/admin" /></Route>
+          <Route><Redirect to="/admin" /></Route>
+        </Switch>
+      </ErrorBoundary>
     </Layout>
   );
 }

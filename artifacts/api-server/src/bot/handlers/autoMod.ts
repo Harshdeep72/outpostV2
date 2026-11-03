@@ -8,7 +8,7 @@ import { hasAdminRole, hasModRole } from "../util.js";
 
 // #chitchat channel ID where images are disallowed (text & gifs only)
 export const CHITCHAT_CHANNEL_ID = "1565314111372394583";
-// #media channel ID where messages must contain media (images, videos, gifs)
+// #media channel ID where messages must be real photos or videos (no GIFs, no plain texting)
 export const MEDIA_CHANNEL_ID = "1567226854778208318";
 
 /**
@@ -51,34 +51,57 @@ export function isForbiddenMediaInChitchat(
 }
 
 /**
- * Checks whether message contains any media (attachment or media URL).
- * Used for #media to ensure messages contain media (no pure text chatting).
+ * Checks whether message contains valid non-GIF photos, images, or videos.
+ * Used for #media where GIFs and pure texting are disallowed.
  */
-export function hasMedia(
+export function isValidMediaOnly(
   content: string,
   attachments: { contentType?: string | null; name?: string | null }[] = []
 ): boolean {
-  // Direct attachments (photos, videos, audio, files)
-  if (attachments.length > 0) return true;
+  // 1. Check attachments
+  let hasValidMediaAttachment = false;
+  for (const att of attachments) {
+    const ct = att.contentType?.toLowerCase() || "";
+    const name = att.name?.toLowerCase() || "";
 
-  // Media link providers or media file extensions in URLs
+    // Explicitly reject GIFs
+    if (ct === "image/gif" || name.endsWith(".gif") || name.endsWith(".gifv")) {
+      return false;
+    }
+
+    // Allow non-gif images and videos
+    if (
+      ct.startsWith("image/") ||
+      ct.startsWith("video/") ||
+      /\.(png|jpe?g|webp|bmp|heic|mp4|webm|mov|mkv)$/i.test(name)
+    ) {
+      hasValidMediaAttachment = true;
+    }
+  }
+  if (hasValidMediaAttachment) return true;
+
+  // 2. Check URLs in content
   const urlRegex = /(https?:\/\/[^\s]+)/gi;
   const matches = content.match(urlRegex) || [];
+  if (matches.length === 0) return false; // Pure text with no attachments = disallowed
+
+  let hasValidMediaUrl = false;
   for (const url of matches) {
-    if (
-      /https?:\/\/(www\.)?(tenor\.com|giphy\.com|klipy\.com|gfycat\.com|imgur\.com|streamable\.com|youtube\.com|youtu\.be|tiktok\.com|instagram\.com\/p|reddit\.com\/r\/[^\/]+\/comments)\//i.test(
-        url
-      )
-    ) {
-      return true;
+    // Explicitly reject GIF providers or .gif links
+    if (/https?:\/\/(www\.)?(tenor\.com|giphy\.com|klipy\.com|gfycat\.com)\//i.test(url)) {
+      return false;
     }
     const cleanUrl = url.split("?")[0]?.toLowerCase() || "";
-    if (/\.(png|jpe?g|webp|bmp|heic|svg|gif|gifv|mp4|webm|mov|mkv)$/i.test(cleanUrl)) {
-      return true;
+    if (cleanUrl.endsWith(".gif") || cleanUrl.endsWith(".gifv")) {
+      return false;
+    }
+    // Allow direct image or video URLs
+    if (/\.(png|jpe?g|webp|bmp|heic|mp4|webm|mov|mkv)$/i.test(cleanUrl)) {
+      hasValidMediaUrl = true;
     }
   }
 
-  return false;
+  return hasValidMediaUrl;
 }
 
 function isStaff(message: Message | OmitPartialGroupDMChannel<Message>): boolean {
@@ -125,20 +148,20 @@ export async function handleAutoModMessage(
     return;
   }
 
-  // 2. #media: Media only (images, videos, GIFs). Pure text chat is disallowed.
+  // 2. #media: Photos & videos ONLY. GIFs and pure texting are disallowed.
   if (message.channelId === MEDIA_CHANNEL_ID) {
-    if (!hasMedia(message.content, attachments)) {
+    if (!isValidMediaOnly(message.content, attachments)) {
       try {
         await message.delete();
         const warning = await message.channel.send({
-          content: `⚠️ <@${message.author.id}>, <#${MEDIA_CHANNEL_ID}> is for media only (photos, videos, GIFs). Please keep text chatting and discussions in <#${CHITCHAT_CHANNEL_ID}>!`,
+          content: `⚠️ <@${message.author.id}>, <#${MEDIA_CHANNEL_ID}> is strictly for photos and videos (no GIFs or plain text). Please chat and share GIFs in <#${CHITCHAT_CHANNEL_ID}>!`,
         });
         setTimeout(() => {
           warning.delete().catch(() => {});
         }, 6000).unref?.();
         logger.info(
           { author: message.author.tag, channel: message.channelId },
-          "AutoMod removed non-media message from #media"
+          "AutoMod removed non-media or GIF message from #media"
         );
       } catch (err) {
         logger.warn({ err }, "Failed to auto-moderate media channel message");

@@ -436,8 +436,22 @@ export async function handleTaskClaim(
   // Check Discord role first; fall back to the DB `verified` flag so users
   // who were manually verified (role may have failed to assign) can still claim.
   if (!hasVerifiedRole(member, guild) && !user?.verified) {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("verify:start")
+        .setLabel("🔗 Click Here to Verify Reddit Account")
+        .setStyle(ButtonStyle.Success)
+    );
     return interaction.editReply({
-      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must be verified to claim tasks. Run `/verify` first.")],
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("🔒 Verification Required")
+          .setDescription(
+            "You need to verify your Reddit account before claiming tasks.\n\n" +
+            "Click the button below to link your Reddit account in seconds:"
+          ),
+      ],
+      components: [row],
     });
   }
 
@@ -1457,8 +1471,15 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     // Without this, the validator's author check is skipped (expectedAuthor === "") and
     // anyone could submit anyone else's Reddit post as proof.
     if (!user.redditUsername) {
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId("verify:start")
+          .setLabel("🔗 Click Here to Verify Reddit Account")
+          .setStyle(ButtonStyle.Success)
+      );
       return interaction.editReply({
-        embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must link your Reddit account first. Run `/verify` to link it before submitting Reddit proofs.")],
+        embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ You must link your Reddit account first before submitting Reddit proofs.")],
+        components: [row],
       });
     }
     // Multi-Reddit-account: the proof author is acceptable if it matches ANY

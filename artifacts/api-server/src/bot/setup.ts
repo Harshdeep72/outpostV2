@@ -125,6 +125,7 @@ async function postStartHereContent(ch: TextChannel) {
         )
         .addFields(
           { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Saturday!" },
+          { name: "🛡️ Account Safety & Anti-Ban FAQ", value: "• **Alts Welcome:** You can link up to 3 Reddit accounts — feel free to use an alt rather than your personal main.\n• **Zero Passwords:** We never ask for Reddit passwords, emails, or sensitive tokens. Verification only checks public profile karma & age.\n• **Anti-Ban Protection:** Our 5–6 min pre-engagement guidelines and cooldowns are specifically engineered to keep your Reddit accounts completely safe." },
           { name: "🔗 Referral Program", value: `Run \`/referral\` to get your code.\nShare it with friends — earn **+$${REFERRAL_REWARD_REFERRER}** when they complete their first task (they get **+$${REFERRAL_REWARD_REFERRED}** too!).` },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
@@ -145,6 +146,10 @@ async function postGuideContent(ch: TextChannel) {
           {
             name: "Step 1 — Verify Your Reddit Account",
             value: "Run `/verify` → click **Verify** → enter your Reddit username or profile link.\nA mod will check your account (karma, age) and approve you.\n\nRequirements vary per task — some tasks need higher trust scores.",
+          },
+          {
+            name: "🛡️ Account Safety & Anti-Ban FAQ",
+            value: "• **Is it safe?** Yes! Reddit Microtasks is built with account longevity in mind.\n• **Use Alts if Preferred:** You can link up to 3 Reddit accounts. You do **NOT** have to use your main account.\n• **Zero Credentials:** We never ask for passwords or private logins. Verification only checks public profile karma & age.\n• **Why the 5-6 Minute Rule?** Reddit filters flag rapid copy-paste comments. Taking 5-6 minutes to browse the post, upvote, and paraphrase ensures your comment sticks permanently and keeps your account in 100% good standing.",
           },
           {
             name: "Step 2 — Claim a Task",

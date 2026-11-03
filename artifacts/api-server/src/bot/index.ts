@@ -24,6 +24,7 @@ import { runUpdateNotifierOnBoot } from "./updateNotifier.js";
 import { refreshLeaderboard, checkAndRolloverWeek } from "./handlers/leaderboard.js";
 import { runWeeklyPayouts } from "./handlers/weeklyPayouts.js";
 import { startProxyAutoReload, getProxyCount, setPoolDepletedCallback } from "./proxy.js";
+import { startServerStatsUpdater } from "./serverStats.js";
 import { startCacheSweeper } from "./cache.js";
 import { setDiscordClient } from "./discord-client.js";
 import { handleGuildMemberAdd } from "./handlers/joinerGuide.js";
@@ -142,6 +143,7 @@ export async function startBot() {
       // to its Google Sheet (cost control for Neon). Sheet is the long-term
       // archive. See submissionRetention.ts for the safety design.
       startSubmissionRetention();
+      startServerStatsUpdater(client);
 
       setInterval(async () => {
         for (const guild of client.guilds.cache.values()) {

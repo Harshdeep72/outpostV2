@@ -73,17 +73,27 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
         inline: false
       },
       {
-        name: "3️⃣ Simulate Human Timing (60s Rule) ⏳",
-        value: "Do not post your comment immediately. Scroll down slowly as if reading the comments and spend at least **60 to 90 seconds** on the thread before posting your comment.",
+        name: "3️⃣ Act Like a Real Human (Browse & Blend In) 🛡️",
+        value: "• **Surf the subreddit first:** Don't just open the link and comment immediately. Browse other posts, upvote or downvote naturally, and drop a casual comment or two on other threads to look like an authentic Redditor.\n" +
+               "• **You have 1 Full Hour (60 Mins):** There is no need to rush. Take your time to blend in — rushing triggers Reddit's automated spam detection.\n" +
+               "• **Simulate human reading:** Spend at least **60 to 90 seconds** scrolling through the thread before commenting.",
         inline: false
       },
       {
-        name: "4️⃣ Submit Proof & Earn ✅",
+        name: "4️⃣ Writing Your Comment (Tweak & Never Copy-Paste!) ✍️",
+        value: "• ❌ **NEVER copy-paste directly:** Reddit AI automatically detects and removes identical copy-pasted comments.\n" +
+               "• ✍️ **Type it manually:** Always type out your comment manually.\n" +
+               "• 🔄 **Tweak the wording:** Rephrase slightly, change a few words, or make minor natural grammar/spelling quirks so every comment looks distinct.\n" +
+               "• 🎯 **Keep the core motive & brand intact:** Do not change the underlying motive/point of the comment, and ensure the brand/product name remains exact.",
+        inline: false
+      },
+      {
+        name: "5️⃣ Submit Proof & Earn ✅",
         value: "After commenting, copy your comment's direct share link. Click the **Submit Proof** button here in your workspace, paste the link, and submit.",
         inline: false
       },
       {
-        name: "5️⃣ Save Your Payout Methods & Check Status 💰",
+        name: "6️⃣ Save Your Payout Methods & Check Status 💰",
         value: "Use these commands to manage your earnings and profile:\n" +
                payoutCommands +
                "• `/mystatus` to view your active/completed claims, trust score, and streak\n" +

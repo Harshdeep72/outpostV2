@@ -152,7 +152,11 @@ async function postGuideContent(ch: TextChannel) {
           },
           {
             name: "Step 3 — Complete the Task",
-            value: "Your personal workspace channel will be assigned with full task details.\nComplete the task on Reddit using your verified account.\nCopy the direct link to your post/comment.",
+            value: "Your personal workspace channel will be assigned with full task details.\n" +
+                   "• Complete the task on Reddit using your verified account.\n" +
+                   "• **Do NOT copy-paste directly:** Reddit AI filters identical comments. Type manually & tweak words slightly while keeping the core motive and brand intact.\n" +
+                   "• Surf the subreddit and blend in like a real human. You have a full 60-minute window!\n" +
+                   "• Copy the direct share link to your comment.",
           },
           {
             name: "Step 4 — Submit Proof",

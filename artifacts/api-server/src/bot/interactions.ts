@@ -149,6 +149,8 @@ export function registerInteractionHandler(client: Client) {
 
         if (scope === "claim") {
           if (action === "submit") return await timed(tag, () => handleClaimSubmit(interaction, parseInt(p1)));
+          if (action === "submitforce") return await timed(tag, () => handleClaimSubmit(interaction, parseInt(p1), { force: true }));
+          if (action === "dismiss") return await interaction.deferUpdate().catch(() => {});
           if (action === "copy") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "comment"));
           if (action === "copytitle") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "title"));
           if (action === "copybody") return await timed(tag, () => handleClaimCopy(interaction, parseInt(p1), "body"));

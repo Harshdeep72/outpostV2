@@ -15,7 +15,7 @@ import { db } from "@workspace/db";
 import { tasks, claims, submissions, users, trustLogs } from "@workspace/db";
 import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
 import { getUserByDiscordId, upsertUser, tryCompleteReferral, getTaskByIdCached, getClaimByIdCached, invalidateTask, invalidateClaim } from "../db.js";
-import { invalidateUser, invalidateLeaderboard } from "../cache.js";
+import { invalidateUser, invalidateLeaderboard, claimCache } from "../cache.js";
 import { makeEmbed, formatMoney, hasVerifiedRole, hasModRole, hasAdminRole } from "../util.js";
 import { COLORS, TASK_COOLDOWN_MINUTES, CLAIM_TIMEOUT_MINUTES, MAX_CONCURRENT_CLAIMS, isTwitterTask, isQuoraTask, getPlatformLabel, TASK_PING_DELAY_MS, ANTI_FRAUD } from "../constants.js";
 import { getCooldownConfig } from "../../lib/settings.js";
@@ -759,6 +759,7 @@ export async function handleTaskClaim(
 
   const claim = reservation.claim;
   if (!claim) return interaction.editReply({ content: "❌ Failed to create claim." });
+  claimCache.set(claim.id, claim);
 
   // Map the snake_case row from execute() back to camelCase shape used by the rest of the handler.
   const r = reservation.updatedTaskRow as any;
@@ -861,6 +862,14 @@ export async function handleTaskClaim(
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
+  if (!twitterTask && !quoraTask) {
+    wsFields.push({
+      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
+      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      inline: false,
+    });
+  }
+
   const wsEmbed = makeEmbed(COLORS.ACCENT)
     .setTitle(`📋 Task Claimed — Task #${task.id}`)
     .setDescription(`You have until <t:${unixExpiry}:R> to complete and submit this task.`)
@@ -912,6 +921,14 @@ export async function handleTaskClaim(
   } else if (task.prewrittenComment) {
     const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
     pushContentFields(ephFields, label, task.prewrittenComment, fence);
+  }
+
+  if (!twitterTask && !quoraTask) {
+    ephFields.push({
+      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
+      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      inline: false,
+    });
   }
 
   const ephemeralEmbed = makeEmbed(COLORS.SUCCESS)
@@ -1057,6 +1074,14 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
+  if (!twitterTask && !quoraTask) {
+    wsFields.push({
+      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
+      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      inline: false,
+    });
+  }
+
   const wsEmbed = makeEmbed(COLORS.ACCENT)
     .setTitle(`📋 Task Assigned — Task #${task.id}`)
     .setDescription(`An admin has assigned this task to you!\nYou have until <t:${unixExpiry}:R> to complete and submit this task.`)
@@ -1099,9 +1124,54 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   });
 }
 
-export async function handleClaimSubmit(interaction: ButtonInteraction, claimId: number) {
-  // CRITICAL: showModal() must be the FIRST interaction response within 3 seconds.
-  // We do NOT make any DB calls here — full validation happens in handleClaimSubmitModal.
+export async function handleClaimSubmit(
+  interaction: ButtonInteraction,
+  claimId: number,
+  opts: { force?: boolean } = {}
+) {
+  // If not force-opened, check if the claim is too fresh (< 3 minutes) for Reddit tasks
+  if (!opts.force) {
+    const claim = await getClaimByIdCached(claimId);
+    if (claim && claim.claimedAt) {
+      const task = await getTaskByIdCached(claim.taskId);
+      const isReddit = task && !isTwitterTask(task.type) && !isQuoraTask(task.type);
+      if (isReddit) {
+        const elapsedMs = Date.now() - new Date(claim.claimedAt).getTime();
+        const minMs = 3 * 60 * 1000; // 3 minutes threshold
+        if (elapsedMs < minMs) {
+          const minutesAgo = Math.max(1, Math.floor(elapsedMs / 60000));
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`claim:submitforce:${claimId}`)
+              .setLabel("Yes, I Warmed Up (Submit Proof)")
+              .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+              .setCustomId("claim:dismiss")
+              .setLabel("Wait & Browse More")
+              .setStyle(ButtonStyle.Secondary)
+          );
+
+          return interaction.reply({
+            embeds: [
+              makeEmbed(COLORS.WARNING)
+                .setTitle("⏱️ Early Submission Warning")
+                .setDescription(
+                  `You claimed this task **${minutesAgo} minute${minutesAgo === 1 ? "" : "s"} ago**.\n\n` +
+                  `**Did you warm up the post for 5–6 minutes?**\n` +
+                  `Reddit's spam detection algorithm flags and shadow-deletes comments posted immediately without natural browsing.\n\n` +
+                  `• If you already browsed and upvoted naturally, click **Yes, I Warmed Up** below.\n` +
+                  `• Otherwise, please spend 2–3 more minutes reading the thread before submitting!`
+                ),
+            ],
+            components: [row],
+            flags: 64, // ephemeral
+          });
+        }
+      }
+    }
+  }
+
+  // Normal / Forced path — show modal immediately
   const modal = new ModalBuilder()
     .setCustomId(`claim:submitmodal:${claimId}`)
     .setTitle("Submit Proof");

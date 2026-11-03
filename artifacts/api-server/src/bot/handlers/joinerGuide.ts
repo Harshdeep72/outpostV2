@@ -20,6 +20,27 @@ const localWelcomedCache = new Map<string, number>();
 const LOCAL_CACHE_TTL_MS = 60_000; // 1 minute
 
 export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): EmbedBuilder {
+  const isRedditorsHub = guild.id === "1565617335237345310" || guild.name.toLowerCase().includes("redditors hub");
+  const payoutField = isRedditorsHub
+    ? {
+        name: "💳 Payout Methods (UPI & PayPal Only)",
+        value:
+          "We support payouts via **UPI** and **PayPal** only.\n" +
+          "• `/setupi` for UPI\n" +
+          "• `/setpaypal` for PayPal\n" +
+          "Check your balance and payout status anytime with `/wallet`.",
+      }
+    : {
+        name: "💳 Payout Methods (UPI, GCash, USDT & PayPal)",
+        value:
+          "We support payouts via **UPI**, **GCash**, **USDT (BEP-20)**, and **PayPal**.\n" +
+          "• `/setupi` for UPI\n" +
+          "• `/setgcash` for GCash\n" +
+          "• `/setwallet` for USDT (BEP-20)\n" +
+          "• `/setpaypal` for PayPal\n" +
+          "Check your balance and payout status anytime with `/wallet`.",
+      };
+
   return makeEmbed(COLORS.PRIMARY)
     .setTitle(`🚀 Welcome to ${guild.name} — Quick Start Guide`)
     .setDescription(
@@ -46,13 +67,7 @@ export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): Embe
           "Post your comment on Reddit using your verified account, copy your comment link, and click **Submit Proof** in your private channel.\n" +
           "Once verified, rewards go into your pending hold and clear after the hold period.",
       },
-      {
-        name: "💳 Payout Methods (UPI & PayPal Only)",
-        value:
-          "We support payouts via **UPI** and **PayPal** only.\n" +
-          "Set up your payment details with `/setupi` (for UPI) or `/setpaypal` (for PayPal).\n" +
-          "Check your balance and payout status anytime with `/wallet`.",
-      },
+      payoutField,
       {
         name: `🎁 Earn +$${REFERRAL_REWARD_REFERRER} Per Referral (+$${REFERRAL_REWARD_REFERRED} for Your Friend)`,
         value:

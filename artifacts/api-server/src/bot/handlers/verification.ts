@@ -73,18 +73,20 @@ async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: 
         inline: false
       },
       {
-        name: "3️⃣ Act Like a Real Human (Browse & Blend In) 🛡️",
-        value: "• **Surf the subreddit first:** Don't just open the link and comment immediately. Browse other posts, upvote or downvote naturally, and drop a casual comment or two on other threads to look like an authentic Redditor.\n" +
-               "• **You have 1 Full Hour (60 Mins):** There is no need to rush. Take your time to blend in — rushing triggers Reddit's automated spam detection.\n" +
-               "• **Simulate human reading:** Spend at least **60 to 90 seconds** scrolling through the thread before commenting.",
+        name: "3️⃣ Act Like a Real Human (Pre-Engagement) 🛡️",
+        value: "• **Browse for 5 to 6 minutes:** Do not comment immediately. Spend 5 to 6 minutes browsing the subreddit first.\n" +
+               "• **Make 1 to 2 normal comments:** Leave 1 or 2 casual comments on other threads in the sub to build genuine activity.\n" +
+               "• **Upvote and downvote:** Vote on a few posts/comments naturally as you scroll.\n" +
+               "• **Keep a 5 to 6 minute gap:** Wait 5 to 6 minutes between your browsing/comments before posting your assigned task comment.\n" +
+               "• **You have 1 Full Hour (60 Mins):** There is plenty of time — do not rush!",
         inline: false
       },
       {
         name: "4️⃣ Writing Your Comment (Tweak & Never Copy-Paste!) ✍️",
-        value: "• ❌ **NEVER copy-paste directly:** Reddit AI automatically detects and removes identical copy-pasted comments.\n" +
-               "• ✍️ **Type it manually:** Always type out your comment manually.\n" +
-               "• 🔄 **Tweak the wording:** Rephrase slightly, change a few words, or make minor natural grammar/spelling quirks so every comment looks distinct.\n" +
-               "• 🎯 **Keep the core motive & brand intact:** Do not change the underlying motive/point of the comment, and ensure the brand/product name remains exact.",
+        value: "• ❌ **NEVER copy-paste directly:** Reddit AI automatically removes identical copy-pasted comments.\n" +
+               "• ✍️ **Type it manually:** Always type your comment by hand.\n" +
+               "• 🔄 **Change the words a little:** Rephrase slightly, change word choices, or make minor natural grammar variations so each comment looks unique.\n" +
+               "• 🎯 **Keep the main idea & brand name:** Do not change the point of the comment, and make sure the brand name stays exact.",
         inline: false
       },
       {

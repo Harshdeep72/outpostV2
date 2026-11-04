@@ -114,7 +114,7 @@ export const MAX_CONCURRENT_CLAIMS = 1;
 
 export const REFERRAL_REWARD = "1.00";
 export const REFERRAL_REWARD_REFERRER = "1.00";
-export const REFERRAL_REWARD_REFERRED = "0.20";
+export const REFERRAL_REWARD_REFERRED = "0.00";
 
 // Tier 1: 300+ karma & 3+ months (90 days) -> $1.00
 export const REFERRAL_TIER1_REWARD = "1.00";

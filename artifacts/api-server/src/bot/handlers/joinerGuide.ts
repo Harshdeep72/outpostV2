@@ -12,7 +12,15 @@ import { setupGuild } from "../setup.js";
 import { upsertUserSmart } from "../db.js";
 import { pool } from "@workspace/db";
 import { makeEmbed, hasAdminRole, hasModRole } from "../util.js";
-import { COLORS, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED } from "../constants.js";
+import {
+  COLORS,
+  REFERRAL_TIER1_REWARD,
+  REFERRAL_TIER1_MIN_KARMA,
+  REFERRAL_TIER1_MIN_AGE_DAYS,
+  REFERRAL_TIER2_REWARD,
+  REFERRAL_TIER2_MIN_KARMA,
+  REFERRAL_TIER2_MIN_AGE_DAYS,
+} from "../constants.js";
 import { logger } from "../../lib/logger.js";
 
 // Process-local memory set to quickly debounce duplicate gateway events
@@ -69,9 +77,9 @@ export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): Embe
       },
       payoutField,
       {
-        name: `🎁 Earn +$${REFERRAL_REWARD_REFERRER} Per Referral (+$${REFERRAL_REWARD_REFERRED} for Your Friend)`,
+        name: `🎁 Referral Program — Earn Up to +$${REFERRAL_TIER1_REWARD} Per Referral`,
         value:
-          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_REWARD_REFERRER}** and your friend earns **+$${REFERRAL_REWARD_REFERRED}** once they complete a task that clears the 24h live check (Reddit account with 300+ karma & 3+ months old)!`,
+          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_TIER1_REWARD}** (Tier 1: 300+ karma & 3+ mo) or **+$${REFERRAL_TIER2_REWARD}** (Tier 2: 150+ karma & 1+ mo) once they complete a task that clears the 24h live check!`,
       }
     )
     .setFooter({ text: `${guild.name} • Start earning today!` })

@@ -5,7 +5,6 @@ import type { User } from "@workspace/db";
 import {
   REFERRAL_REWARD,
   REFERRAL_REWARD_REFERRER,
-  REFERRAL_REWARD_REFERRED,
   REFERRAL_TIER1_REWARD,
   REFERRAL_TIER1_MIN_KARMA,
   REFERRAL_TIER1_MIN_AGE_DAYS,
@@ -331,19 +330,9 @@ export async function tryCompleteReferral(
   );
   invalidateUser(referrerDiscordId);
 
-  // 2. Credit Referred member (+$0.20)
-  await db.execute(
-    sql`UPDATE users
-        SET total_earned = total_earned + ${REFERRAL_REWARD_REFERRED}::numeric,
-            balance_available = balance_available + ${REFERRAL_REWARD_REFERRED}::numeric
-        WHERE discord_id = ${referredDiscordId}`
-  );
-  invalidateUser(referredDiscordId, referredUserId);
-
   // Lazy import to avoid a circular dep between db <-> earnerRoles.
   import("./earnerRoles.js").then((m) => {
     m.safeSyncEarnerRoles(referrerDiscordId);
-    m.safeSyncEarnerRoles(referredDiscordId);
   }).catch(() => {});
 
   logger.info(
@@ -352,9 +341,8 @@ export async function tryCompleteReferral(
       referredDiscordId,
       tierMatched,
       referrerReward: calculatedReward,
-      referredReward: REFERRAL_REWARD_REFERRED,
     },
-    "Referral completed and credited to both inviter and new member"
+    "Referral completed and credited to inviter"
   );
 
   return {
@@ -362,6 +350,5 @@ export async function tryCompleteReferral(
     referrerDiscordId,
     referredDiscordId,
     referrerReward: calculatedReward,
-    referredReward: REFERRAL_REWARD_REFERRED,
   };
 }

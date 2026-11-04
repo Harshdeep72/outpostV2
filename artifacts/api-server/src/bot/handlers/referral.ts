@@ -11,7 +11,6 @@ import {
   COLORS,
   REFERRAL_REWARD,
   REFERRAL_REWARD_REFERRER,
-  REFERRAL_REWARD_REFERRED,
   REFERRAL_TIER1_REWARD,
   REFERRAL_TIER1_MIN_KARMA,
   REFERRAL_TIER1_MIN_AGE_DAYS,
@@ -67,7 +66,7 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
       `**How it works:**\n` +
       `> 1. Your friend joins and applies your code with \`/referraluse\` or during \`/verify\`\n` +
       `> 2. They complete at least 1 task that clears the **24-hour verification hold** (live check)\n` +
-      `> 3. **You get +$${REFERRAL_TIER1_REWARD} or +$${REFERRAL_TIER2_REWARD}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
+      `> 3. **You get +$${REFERRAL_TIER1_REWARD} or +$${REFERRAL_TIER2_REWARD}** added directly to your available balance!`
     )
     .addFields(
       { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
@@ -147,9 +146,7 @@ export async function handleReferralUseCommand(interaction: ChatInputCommandInte
           `**To qualify for the bonus:**\n` +
           `• Complete at least 1 task that clears the **24-hour verification hold**\n\n` +
           `Once cleared:\n` +
-          `• You will receive a **+$${REFERRAL_REWARD_REFERRED}** welcome bonus\n` +
-          `• Your referrer will receive their tier bonus (**+$${REFERRAL_TIER1_REWARD}** or **+$${REFERRAL_TIER2_REWARD}**)\n` +
-          `Both bonuses are credited directly to available balance.`
+          `• Your referrer will receive their tier bonus (**+$${REFERRAL_TIER1_REWARD}** or **+$${REFERRAL_TIER2_REWARD}**) added directly to their available balance.`
         ),
     ],
   });
@@ -176,13 +173,11 @@ export async function notifyReferralCompletion(
     referrerDiscordId?: string;
     referredDiscordId?: string;
     referrerReward?: string;
-    referredReward?: string;
   }
 ): Promise<void> {
   if (!result.completed || !result.referrerDiscordId || !result.referredDiscordId) return;
 
   const referrerReward = result.referrerReward ?? REFERRAL_REWARD_REFERRER;
-  const referredReward = result.referredReward ?? REFERRAL_REWARD_REFERRED;
 
   let client: any = null;
   let guild: any = null;
@@ -213,23 +208,7 @@ export async function notifyReferralCompletion(
     logger.warn({ err, referrerDiscordId: result.referrerDiscordId }, "Failed to DM referrer on completion");
   }
 
-  // 2. DM Referred Member (new member)
-  try {
-    const referredUser = await client?.users?.fetch(result.referredDiscordId).catch(() => null);
-    if (referredUser) {
-      const dmEmbed = makeEmbed(COLORS.SUCCESS)
-        .setTitle("🎁 Welcome Referral Bonus!")
-        .setDescription(
-          `Congratulations on completing your first approved task and clearing the verification hold!\n\n` +
-          `As a welcome bonus for being invited by a friend, **+$${referredReward}** has been added to your available balance.`
-        );
-      await referredUser.send({ embeds: [dmEmbed] }).catch(() => {});
-    }
-  } catch (err) {
-    logger.warn({ err, referredDiscordId: result.referredDiscordId }, "Failed to DM referred member on completion");
-  }
-
-  // 3. Post to #referral-events channel if available
+  // 2. Post to #referral-events channel if available
   try {
     let eventsChannel: any = null;
     if (guild?.channels?.cache) {
@@ -243,8 +222,7 @@ export async function notifyReferralCompletion(
         .setTitle("🎉 Referral Milestone Completed!")
         .setDescription(
           `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first task that cleared the 24-hour verification hold!\n\n` +
-          `• Inviter earned: **+$${referrerReward}**\n` +
-          `• New member earned: **+$${referredReward}**\n\n` +
+          `• Inviter earned: **+$${referrerReward}**\n\n` +
           `Invite your friends using \`/referral\` to earn bonus cash!`
         )
         .setTimestamp();

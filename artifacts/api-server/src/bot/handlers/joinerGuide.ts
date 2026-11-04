@@ -71,7 +71,7 @@ export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): Embe
       {
         name: `🎁 Earn +$${REFERRAL_REWARD_REFERRER} Per Referral (+$${REFERRAL_REWARD_REFERRED} for Your Friend)`,
         value:
-          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_REWARD_REFERRER}** and your friend earns **+$${REFERRAL_REWARD_REFERRED}** once they complete their first approved task!`,
+          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_REWARD_REFERRER}** and your friend earns **+$${REFERRAL_REWARD_REFERRED}** once they complete a task that clears the 24h live check (Reddit account with 300+ karma & 3+ months old)!`,
       }
     )
     .setFooter({ text: `${guild.name} • Start earning today!` })

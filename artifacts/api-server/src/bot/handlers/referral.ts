@@ -48,11 +48,12 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle("🔗 Your Referral Info")
     .setDescription(
-      `Share your referral code with friends!\n\n` +
+      `Share your referral code with friends to earn bonus cash!\n\n` +
       `**How it works:**\n` +
       `> 1. Your friend joins and applies your code with \`/referraluse\` or during \`/verify\`\n` +
-      `> 2. They complete their first task and get it approved\n` +
-      `> 3. **You get +$${REFERRAL_REWARD_REFERRER}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
+      `> 2. Their Reddit account must have **300+ karma** and be **3+ months old**\n` +
+      `> 3. They complete at least 1 task that clears the **24-hour verification hold**\n` +
+      `> 4. **You get +$${REFERRAL_REWARD_REFERRER}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
     )
     .addFields(
       { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
@@ -126,7 +127,10 @@ export async function handleReferralUseCommand(interaction: ChatInputCommandInte
         .setTitle("✅ Referral Code Applied!")
         .setDescription(
           `Code \`${code}\` applied — referrer: **${referrer.discordUsername}**\n\n` +
-          `Now complete your first task! Once your task is approved:\n` +
+          `**To qualify for the bonus:**\n` +
+          `• Your Reddit account must have **300+ karma** and be **3+ months old**\n` +
+          `• Complete at least 1 task that clears the **24-hour verification hold**\n\n` +
+          `Once cleared:\n` +
           `• You will receive a **+$${REFERRAL_REWARD_REFERRED}** welcome bonus\n` +
           `• Your referrer will receive a **+$${REFERRAL_REWARD_REFERRER}** bonus\n` +
           `Both bonuses are credited directly to available balance.`
@@ -184,7 +188,7 @@ export async function notifyReferralCompletion(
       const dmEmbed = makeEmbed(COLORS.SUCCESS)
         .setTitle("🎉 Referral Bonus Earned!")
         .setDescription(
-          `One of your invited members (<@${result.referredDiscordId}>) just successfully completed their first task!\n\n` +
+          `One of your invited members (<@${result.referredDiscordId}>) completed their first task and cleared the 24-hour verification hold with a qualified Reddit account!\n\n` +
           `**+$${referrerReward}** has been credited to your available balance.`
         );
       await referrerUser.send({ embeds: [dmEmbed] }).catch(() => {});
@@ -200,7 +204,7 @@ export async function notifyReferralCompletion(
       const dmEmbed = makeEmbed(COLORS.SUCCESS)
         .setTitle("🎁 Welcome Referral Bonus!")
         .setDescription(
-          `Congratulations on completing your first approved task!\n\n` +
+          `Congratulations on completing your first approved task and clearing the verification hold!\n\n` +
           `As a welcome bonus for being invited by a friend, **+$${referredReward}** has been added to your available balance.`
         );
       await referredUser.send({ embeds: [dmEmbed] }).catch(() => {});
@@ -222,7 +226,7 @@ export async function notifyReferralCompletion(
       const eventEmbed = makeEmbed(COLORS.SUCCESS)
         .setTitle("🎉 Referral Milestone Completed!")
         .setDescription(
-          `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first approved task!\n\n` +
+          `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first task that cleared the 24-hour verification hold (300+ karma & 3+ months old)!\n\n` +
           `• Inviter earned: **+$${referrerReward}**\n` +
           `• New member earned: **+$${referredReward}**\n\n` +
           `Invite your friends using \`/referral\` to earn bonus cash!`

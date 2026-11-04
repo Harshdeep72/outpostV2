@@ -881,15 +881,18 @@ async function fetchViaRedditOsint(name: string): Promise<RedditFetchResult | nu
           logger.info({ name, karma: innerData.total_karma }, "Reddit profile via redditOSITN (wrapped active)");
           const ageDays = innerData.account_age_days || 0;
           const createdUtc = Math.floor(Date.now() / 1000) - (ageDays * 86400);
+          const totalK = Number(innerData.total_karma ?? (Number(innerData.link_karma || 0) + Number(innerData.comment_karma || 0)));
+          const linkK = Number(innerData.link_karma || 0);
+          const commentK = Number(innerData.comment_karma ?? (totalK > linkK ? totalK - linkK : totalK));
           
           return {
             ok: true,
             profile: {
               name: innerData.username || name,
               createdUtc,
-              linkKarma: innerData.link_karma || 0,
-              commentKarma: innerData.comment_karma || 0,
-              totalKarma: innerData.total_karma || 0,
+              linkKarma: linkK,
+              commentKarma: commentK,
+              totalKarma: totalK,
               iconImg: innerData.icon_img || innerData.avatar_url,
               accountAgeDays: ageDays,
               karmaVerified: true,

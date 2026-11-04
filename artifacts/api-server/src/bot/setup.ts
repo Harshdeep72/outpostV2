@@ -126,7 +126,7 @@ async function postStartHereContent(ch: TextChannel) {
         .addFields(
           { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Saturday!" },
           { name: "🛡️ Account Safety & Anti-Ban FAQ", value: "• **Alts Welcome:** You can link up to 3 Reddit accounts — feel free to use an alt rather than your personal main.\n• **Zero Passwords:** We never ask for Reddit passwords, emails, or sensitive tokens. Verification only checks public profile karma & age.\n• **Anti-Ban Protection:** Our 5–6 min pre-engagement guidelines and cooldowns are specifically engineered to keep your Reddit accounts completely safe." },
-          { name: "🔗 Referral Program", value: `Run \`/referral\` to get your code.\nShare it with friends — earn **+$${REFERRAL_REWARD_REFERRER}** when they complete their first task (they get **+$${REFERRAL_REWARD_REFERRED}** too!).` },
+          { name: "🔗 Referral Program", value: `Run \`/referral\` to get your code.\nShare it with friends — earn **+$${REFERRAL_REWARD_REFERRER}** when their Reddit account (300+ karma & 3+ months old) completes a task that clears the 24hr live check (they get **+$${REFERRAL_REWARD_REFERRED}** too!).` },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
         .setFooter({ text: "Reddit Microtasks • Start earning today" })
@@ -214,8 +214,9 @@ async function postReferralEventsContent(ch: TextChannel) {
           "**How it works:**\n" +
           "1. Run `/referral` to get your unique invite code\n" +
           "2. Share it — your friend applies it during `/verify` or via `/referraluse <code>`\n" +
-          "3. They complete their first task and it gets approved\n" +
-          `4. You get **+$${REFERRAL_REWARD_REFERRER}** and they get **+$${REFERRAL_REWARD_REFERRED}** added directly to available balance!\n\n` +
+          "3. Their Reddit account must have 300+ karma and be 3+ months old\n" +
+          "4. They complete at least 1 task that passes the 24-hour verification hold\n" +
+          `5. You get **+$${REFERRAL_REWARD_REFERRER}** and they get **+$${REFERRAL_REWARD_REFERRED}** added directly to available balance!\n\n` +
           "**No limit** on how many people you can refer.\n" +
           "Anti-abuse protection is active — fair rewards for real referrals only.\n\n" +
           "Bot announcements about referral milestones will appear here."

@@ -7,7 +7,19 @@ import { users, referrals } from "@workspace/db";
 import { getUserByDiscordId, getUserByReferralCode, upsertUser } from "../db.js";
 import { invalidateUser, referralStatsCache } from "../cache.js";
 import { makeEmbed, formatMoney } from "../util.js";
-import { COLORS, REFERRAL_REWARD, REFERRAL_REWARD_REFERRER, REFERRAL_REWARD_REFERRED, CHANNELS } from "../constants.js";
+import {
+  COLORS,
+  REFERRAL_REWARD,
+  REFERRAL_REWARD_REFERRER,
+  REFERRAL_REWARD_REFERRED,
+  REFERRAL_TIER1_REWARD,
+  REFERRAL_TIER1_MIN_KARMA,
+  REFERRAL_TIER1_MIN_AGE_DAYS,
+  REFERRAL_TIER2_REWARD,
+  REFERRAL_TIER2_MIN_KARMA,
+  REFERRAL_TIER2_MIN_AGE_DAYS,
+  CHANNELS,
+} from "../constants.js";
 import { logger } from "../../lib/logger.js";
 
 export async function handleReferralCommand(interaction: ChatInputCommandInteraction) {
@@ -49,11 +61,13 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
     .setTitle("🔗 Your Referral Info")
     .setDescription(
       `Share your referral code with friends to earn bonus cash!\n\n` +
+      `**Reward Tiers:**\n` +
+      `• **Tier 1 (+$${REFERRAL_TIER1_REWARD}):** Friend links a Reddit account with **${REFERRAL_TIER1_MIN_KARMA}+ karma** & **3+ months old**.\n` +
+      `• **Tier 2 (+$${REFERRAL_TIER2_REWARD}):** Friend links a Reddit account with **${REFERRAL_TIER2_MIN_KARMA}+ karma** & **1+ month old**.\n\n` +
       `**How it works:**\n` +
       `> 1. Your friend joins and applies your code with \`/referraluse\` or during \`/verify\`\n` +
-      `> 2. Their Reddit account must have **300+ karma** and be **3+ months old**\n` +
-      `> 3. They complete at least 1 task that clears the **24-hour verification hold**\n` +
-      `> 4. **You get +$${REFERRAL_REWARD_REFERRER}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
+      `> 2. They complete at least 1 task that clears the **24-hour verification hold** (live check)\n` +
+      `> 3. **You get +$${REFERRAL_TIER1_REWARD} or +$${REFERRAL_TIER2_REWARD}** and **they get +$${REFERRAL_REWARD_REFERRED}** added directly to available balance!`
     )
     .addFields(
       { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
@@ -127,12 +141,14 @@ export async function handleReferralUseCommand(interaction: ChatInputCommandInte
         .setTitle("✅ Referral Code Applied!")
         .setDescription(
           `Code \`${code}\` applied — referrer: **${referrer.discordUsername}**\n\n` +
+          `**Reward Tiers:**\n` +
+          `• **Tier 1 (+$${REFERRAL_TIER1_REWARD}):** Reddit account with **${REFERRAL_TIER1_MIN_KARMA}+ karma** & **3+ months old**\n` +
+          `• **Tier 2 (+$${REFERRAL_TIER2_REWARD}):** Reddit account with **${REFERRAL_TIER2_MIN_KARMA}+ karma** & **1+ month old**\n\n` +
           `**To qualify for the bonus:**\n` +
-          `• Your Reddit account must have **300+ karma** and be **3+ months old**\n` +
           `• Complete at least 1 task that clears the **24-hour verification hold**\n\n` +
           `Once cleared:\n` +
           `• You will receive a **+$${REFERRAL_REWARD_REFERRED}** welcome bonus\n` +
-          `• Your referrer will receive a **+$${REFERRAL_REWARD_REFERRER}** bonus\n` +
+          `• Your referrer will receive their tier bonus (**+$${REFERRAL_TIER1_REWARD}** or **+$${REFERRAL_TIER2_REWARD}**)\n` +
           `Both bonuses are credited directly to available balance.`
         ),
     ],
@@ -226,7 +242,7 @@ export async function notifyReferralCompletion(
       const eventEmbed = makeEmbed(COLORS.SUCCESS)
         .setTitle("🎉 Referral Milestone Completed!")
         .setDescription(
-          `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first task that cleared the 24-hour verification hold (300+ karma & 3+ months old)!\n\n` +
+          `<@${result.referrerDiscordId}> referred <@${result.referredDiscordId}>, who just completed their first task that cleared the 24-hour verification hold!\n\n` +
           `• Inviter earned: **+$${referrerReward}**\n` +
           `• New member earned: **+$${referredReward}**\n\n` +
           `Invite your friends using \`/referral\` to earn bonus cash!`

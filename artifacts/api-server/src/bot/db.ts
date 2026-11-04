@@ -6,8 +6,12 @@ import {
   REFERRAL_REWARD,
   REFERRAL_REWARD_REFERRER,
   REFERRAL_REWARD_REFERRED,
-  REFERRAL_MIN_KARMA,
-  REFERRAL_MIN_AGE_DAYS,
+  REFERRAL_TIER1_REWARD,
+  REFERRAL_TIER1_MIN_KARMA,
+  REFERRAL_TIER1_MIN_AGE_DAYS,
+  REFERRAL_TIER2_REWARD,
+  REFERRAL_TIER2_MIN_KARMA,
+  REFERRAL_TIER2_MIN_AGE_DAYS,
   MAX_REFERRAL_COMPLETIONS_PER_DAY,
   MAX_REFERRALS_PER_HOUR,
 } from "./constants.js";
@@ -254,17 +258,29 @@ export async function tryCompleteReferral(
     }
   }
 
-  const isEligible = candidates.some((c) => c.karma >= REFERRAL_MIN_KARMA && c.ageDays >= REFERRAL_MIN_AGE_DAYS);
-  if (!isEligible) {
+  // Evaluate Tier 1 ($1.00) vs Tier 2 ($0.50)
+  let calculatedReward = "0.00";
+  let tierMatched = 0;
+
+  // Check Tier 1: 300+ karma & 90+ days (3 months) -> $1.00
+  if (candidates.some((c) => c.karma >= REFERRAL_TIER1_MIN_KARMA && c.ageDays >= REFERRAL_TIER1_MIN_AGE_DAYS)) {
+    calculatedReward = REFERRAL_TIER1_REWARD;
+    tierMatched = 1;
+  }
+  // Check Tier 2: 150+ karma & 30+ days (1 month) -> $0.50
+  else if (candidates.some((c) => c.karma >= REFERRAL_TIER2_MIN_KARMA && c.ageDays >= REFERRAL_TIER2_MIN_AGE_DAYS)) {
+    calculatedReward = REFERRAL_TIER2_REWARD;
+    tierMatched = 2;
+  }
+
+  if (tierMatched === 0) {
     logger.info(
       {
         referredDiscordId,
         referrerDiscordId,
         candidates,
-        requiredKarma: REFERRAL_MIN_KARMA,
-        requiredDays: REFERRAL_MIN_AGE_DAYS,
       },
-      "tryCompleteReferral: invited user's Reddit account does not meet 300+ karma and 3-month (90d) age requirement"
+      "tryCompleteReferral: invited user does not meet Tier 1 (300k/90d) or Tier 2 (150k/30d) requirements"
     );
     return { completed: false };
   }
@@ -296,7 +312,7 @@ export async function tryCompleteReferral(
     sql`UPDATE referrals
         SET status = 'completed',
             reward_paid = true,
-            reward_amount = ${REFERRAL_REWARD_REFERRER}::numeric,
+            reward_amount = ${calculatedReward}::numeric,
             task_completed_at = ${now}
         WHERE id = ${ref.id} AND reward_paid = false AND status != 'completed'
         RETURNING id`
@@ -305,12 +321,12 @@ export async function tryCompleteReferral(
     return { completed: false };
   }
 
-  // 1. Credit Referrer (+$0.30)
+  // 1. Credit Referrer (+calculatedReward: $1.00 or $0.50)
   await db.execute(
     sql`UPDATE users
-        SET referral_earnings = referral_earnings + ${REFERRAL_REWARD_REFERRER}::numeric,
-            total_earned = total_earned + ${REFERRAL_REWARD_REFERRER}::numeric,
-            balance_available = balance_available + ${REFERRAL_REWARD_REFERRER}::numeric
+        SET referral_earnings = referral_earnings + ${calculatedReward}::numeric,
+            total_earned = total_earned + ${calculatedReward}::numeric,
+            balance_available = balance_available + ${calculatedReward}::numeric
         WHERE discord_id = ${referrerDiscordId}`
   );
   invalidateUser(referrerDiscordId);
@@ -334,7 +350,8 @@ export async function tryCompleteReferral(
     {
       referrerDiscordId,
       referredDiscordId,
-      referrerReward: REFERRAL_REWARD_REFERRER,
+      tierMatched,
+      referrerReward: calculatedReward,
       referredReward: REFERRAL_REWARD_REFERRED,
     },
     "Referral completed and credited to both inviter and new member"
@@ -344,7 +361,7 @@ export async function tryCompleteReferral(
     completed: true,
     referrerDiscordId,
     referredDiscordId,
-    referrerReward: REFERRAL_REWARD_REFERRER,
+    referrerReward: calculatedReward,
     referredReward: REFERRAL_REWARD_REFERRED,
   };
 }

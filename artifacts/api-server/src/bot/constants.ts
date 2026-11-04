@@ -115,7 +115,18 @@ export const MAX_CONCURRENT_CLAIMS = 1;
 export const REFERRAL_REWARD = "1.00";
 export const REFERRAL_REWARD_REFERRER = "1.00";
 export const REFERRAL_REWARD_REFERRED = "0.20";
-export const REFERRAL_MIN_KARMA = 300;
-export const REFERRAL_MIN_AGE_DAYS = 90; // 3 months
+
+// Tier 1: 300+ karma & 3+ months (90 days) -> $1.00
+export const REFERRAL_TIER1_REWARD = "1.00";
+export const REFERRAL_TIER1_MIN_KARMA = 300;
+export const REFERRAL_TIER1_MIN_AGE_DAYS = 90;
+
+// Tier 2: 150+ karma & 1+ month (30 days) -> $0.50
+export const REFERRAL_TIER2_REWARD = "0.50";
+export const REFERRAL_TIER2_MIN_KARMA = 150;
+export const REFERRAL_TIER2_MIN_AGE_DAYS = 30;
+
+export const REFERRAL_MIN_KARMA = 150;
+export const REFERRAL_MIN_AGE_DAYS = 30;
 export const MAX_REFERRAL_COMPLETIONS_PER_DAY = 10;
 export const MAX_REFERRALS_PER_HOUR = 5;

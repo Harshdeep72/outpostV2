@@ -63,10 +63,21 @@ export async function updateServerStats(guild: Guild): Promise<void> {
             },
           ],
         });
-      } else if (ch.name !== item.target) {
-        await ch.setName(item.target).catch((err) =>
-          logger.warn({ err, chId: ch!.id }, "Failed renaming stats channel (rate limit)")
-        );
+      } else {
+        if (ch.type === ChannelType.GuildVoice) {
+          const overwrite = (ch as any).permissionOverwrites?.cache?.get(guild.roles.everyone.id);
+          if (!overwrite || !overwrite.deny.has(PermissionFlagsBits.Connect)) {
+            await (ch as any).permissionOverwrites?.edit?.(guild.roles.everyone.id, {
+              ViewChannel: true,
+              Connect: false,
+            }).catch(() => {});
+          }
+        }
+        if (ch.name !== item.target) {
+          await ch.setName(item.target).catch((err) =>
+            logger.warn({ err, chId: ch!.id }, "Failed renaming stats channel (rate limit)")
+          );
+        }
       }
     }
   } catch (err) {

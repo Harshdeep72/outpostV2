@@ -83,4 +83,95 @@ router.get("/version", (_req: any, res: any) => {
   });
 });
 
+router.get("/admin/fix-submission-170", async (_req: any, res: any) => {
+  try {
+    const { pool } = await import("@workspace/db");
+    const subRes = await pool.query(`
+      SELECT s.*, u.discord_id as user_discord_id, u.balance_available, u.balance_pending
+      FROM submissions s
+      JOIN users u ON s.user_id = u.id
+      WHERE s.id = 170
+    `);
+    const sub = subRes.rows[0];
+    if (!sub) return res.status(404).json({ error: "Submission 170 not found" });
+
+    let applied = false;
+    if (sub.review_status !== "accepted") {
+      const reward = parseFloat(sub.reward);
+      await pool.query("BEGIN");
+
+      // Credit directly to balance_available since >24h hold has already elapsed
+      await pool.query(`
+        UPDATE users
+        SET balance_available = balance_available + $1,
+            total_earned = total_earned + $1,
+            trust_score = LEAST(1000, trust_score + 2),
+            last_task_completed_at = NOW()
+        WHERE discord_id = $2
+      `, [reward, sub.discord_id]);
+
+      await pool.query(`
+        UPDATE submissions
+        SET live_status = 'live',
+            review_status = 'accepted',
+            removal_reason = NULL,
+            review_reason = 'Verified live on Reddit (24h hold completed)',
+            moved_to_available = 1,
+            paid_at = NOW(),
+            last_checked_at = NOW(),
+            live_status_changed_at = NOW()
+        WHERE id = 170
+      `);
+
+      if (sub.claim_id) {
+        await pool.query(`UPDATE claims SET status = 'accepted' WHERE id = $1`, [sub.claim_id]);
+      }
+
+      await pool.query(`
+        INSERT INTO trust_logs (discord_id, delta, reason, related_submission_id, created_at)
+        VALUES ($1, 2, $2, 170, NOW())
+      `, [sub.discord_id, `Auto-resolved after 24h hold: +$${reward.toFixed(2)} credited (submission #170)`]);
+
+      await pool.query("COMMIT");
+      applied = true;
+    }
+
+    const updated = await pool.query(`
+      SELECT s.id, s.task_id, s.discord_id, s.live_status, s.review_status, s.moved_to_available, s.reward,
+             u.balance_available, u.balance_pending, u.total_earned, u.trust_score
+      FROM submissions s
+      JOIN users u ON s.user_id = u.id
+      WHERE s.id = 170
+    `);
+
+    res.json({
+      success: true,
+      applied,
+      submission: updated.rows[0]
+    });
+  } catch (err: any) {
+    try {
+      const { pool } = await import("@workspace/db");
+      await pool.query("ROLLBACK");
+    } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/debug/submission/:id", async (req: any, res: any) => {
+  try {
+    const { pool } = await import("@workspace/db");
+    const subRes = await pool.query(`
+      SELECT s.*, t.title as task_title, t.type as task_type, u.discord_id as user_discord_id, u.reddit_username
+      FROM submissions s
+      JOIN tasks t ON s.task_id = t.id
+      JOIN users u ON s.user_id = u.id
+      WHERE s.id = $1
+    `, [req.params.id]);
+    res.json(subRes.rows[0] ?? { error: "Not found" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

@@ -627,5 +627,70 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
       logger.error({ err }, "Pending processor error (pending_hold branch)");
     }
 
+    // -----------------------------------------------------------------------
+    // Branch 3: pending submissions older than 24h — auto-resolve if still live
+    // Fulfills the promise in the submission review embed:
+    // "Bot auto-decides after 24h if no action (re-checks Reddit; accepts if live, rejects if still removed)"
+    // -----------------------------------------------------------------------
+    try {
+      const pendingRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string; claim_id: string | null }>(
+        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.claim_id
+            FROM submissions s
+            WHERE s.review_status = 'pending'
+              AND s.submitted_at <= NOW() - INTERVAL '24 hours'
+            ORDER BY s.submitted_at ASC
+            LIMIT 10`
+      );
+
+      for (const row of pendingRows.rows) {
+        const subId = parseInt(row.id);
+        const userId = parseInt(row.user_id);
+        const reward = parseFloat(row.reward);
+
+        const liveness = await recheckRedditLiveness(row.proof_link);
+        if (liveness.liveStatus === "live") {
+          const cas = await db.execute<{ id: string }>(
+            sql`UPDATE submissions
+                SET review_status = 'accepted',
+                    live_status = 'live',
+                    moved_to_available = 1,
+                    paid_at = NOW(),
+                    reviewed_at = NOW(),
+                    review_reason = 'Auto-accepted after 24h: verified live on Reddit',
+                    last_checked_at = NOW(),
+                    live_status_changed_at = NOW()
+                WHERE id = ${subId} AND review_status = 'pending'
+                RETURNING id`
+          );
+          if (cas.rows.length > 0) {
+            await db.execute(
+              sql`UPDATE users
+                  SET balance_available = balance_available + ${reward}::numeric,
+                      total_earned = total_earned + ${reward}::numeric,
+                      trust_score = LEAST(1000, trust_score + 2),
+                      last_task_completed_at = NOW()
+                  WHERE id = ${userId}`
+            );
+            if (row.claim_id) {
+              await db.execute(sql`UPDATE claims SET status = 'accepted' WHERE id = ${parseInt(row.claim_id)}`).catch(() => {});
+            }
+            invalidateUser(row.discord_id, userId);
+            logSubmissionEvent(subId, "paid");
+            logger.info({ subId, discordId: row.discord_id }, "Pending submission auto-accepted after 24h (verified live)");
+          }
+        } else if (liveness.liveStatus === "deleted" || liveness.liveStatus === "removed") {
+          await db.execute(
+            sql`UPDATE submissions
+                SET live_status = ${liveness.liveStatus},
+                    last_checked_at = NOW(),
+                    live_status_changed_at = NOW()
+                WHERE id = ${subId} AND review_status = 'pending'`
+          );
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, "Pending processor error (24h pending auto-decide branch)");
+    }
+
   return { ok: true, acceptedProcessed, holdProcessed };
 }

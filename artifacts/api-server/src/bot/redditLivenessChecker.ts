@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { db } from "@workspace/db";
 import { logger } from "../lib/logger.js";
-import { recheckRedditLiveness, parseRedditProofUrl, type LiveStatus } from "./reddit-validator.js";
+import { recheckRedditLiveness, parseRedditProofUrl, type LiveStatus, detectAppUrl, resolveShareLink } from "./reddit-validator.js";
 import { deepCheckComment } from "./deepRedditCommentChecker.js";
 import { setupGuild } from "./setup.js";
 import { logSubmissionEvent } from "../lib/sheetsLogger.js";
@@ -458,9 +458,18 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
     };
   }
 
+  // Resolve Reddit share short-links (e.g. reddit.com/r/sub/s/XXXX) before URL inspection
+  let resolvedProofLink = row.proof_link;
+  if (detectAppUrl(row.proof_link) === "share_link_resolvable") {
+    const resolved = await resolveShareLink(row.proof_link);
+    if (resolved) {
+      resolvedProofLink = resolved;
+    }
+  }
+
   // Detect the "post URL submitted for a comment task" case.
   if (["comment", "thread_reply", "op_reply"].includes(row.task_type)) {
-    const parsedProof = parseRedditProofUrl(row.proof_link);
+    const parsedProof = parseRedditProofUrl(resolvedProofLink);
     if (!parsedProof?.commentId) {
       return {
         ...base, found: true, proofLink: row.proof_link,
@@ -475,7 +484,7 @@ export async function checkSubmissionNow(submissionId: number): Promise<Submissi
 
   // Detect the "comment URL submitted for a post task" case.
   if (row.task_type === "post") {
-    const parsedProof = parseRedditProofUrl(row.proof_link);
+    const parsedProof = parseRedditProofUrl(resolvedProofLink);
     if (parsedProof?.commentId) {
       return {
         ...base, found: true, proofLink: row.proof_link,

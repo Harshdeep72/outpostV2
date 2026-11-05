@@ -205,10 +205,11 @@ export async function tryCompleteReferral(
           AND review_status = 'accepted'
           AND moved_to_available = 1
           AND live_status = 'live'
+          AND (submitted_at <= NOW() - INTERVAL '24 hours' OR paid_at >= submitted_at + INTERVAL '24 hours')
         LIMIT 1`
   );
   if (liveClearedSub.rows.length === 0) {
-    logger.debug({ referredDiscordId }, "tryCompleteReferral: invited user has not yet passed 24hr live check on a task");
+    logger.debug({ referredDiscordId }, "tryCompleteReferral: invited user has not yet completed a task that cleared the 24hr hold and live check");
     return { completed: false };
   }
 

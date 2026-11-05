@@ -916,6 +916,39 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   invalidateUser(row.discord_id);
 
+  // Update the workspace card so it turns green and accepted
+  if (row.claim_id) {
+    (async () => {
+      try {
+        const cRow = await db.execute<{ workspace_message_id: string | null }>(
+          sql`SELECT workspace_message_id FROM claims WHERE id = ${parseInt(row.claim_id)} LIMIT 1`
+        );
+        const wsMsgId = cRow.rows[0]?.workspace_message_id;
+        const uRow = await db.execute<{ workspace_channel_id: string | null }>(
+          sql`SELECT workspace_channel_id FROM users WHERE discord_id = ${row.discord_id} LIMIT 1`
+        );
+        const wsChanId = uRow.rows[0]?.workspace_channel_id;
+        if (wsMsgId && wsChanId) {
+          const ch = await guild.channels.fetch(wsChanId).catch(() => null);
+          if (ch && "messages" in ch) {
+            const original = await (ch as any).messages.fetch(wsMsgId).catch(() => null);
+            if (original) {
+              const acceptEmbed = makeEmbed(COLORS.SUCCESS)
+                .setTitle(`✅ Task #${row.task_id} — Accepted`)
+                .setDescription(
+                  `Your submission for **${row.task_title ?? `Task #${row.task_id}`}** was manually approved!\n\n` +
+                  `**${formatMoney(reward)}** credited to your available balance.`
+                );
+              await original.edit({ embeds: [acceptEmbed], components: [] }).catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, subId: submissionId }, "handleApproveSubmission: could not update workspace card");
+      }
+    })();
+  }
+
   // Best-effort DM to the user.
   try {
     const member = await guild.members.fetch(row.discord_id);

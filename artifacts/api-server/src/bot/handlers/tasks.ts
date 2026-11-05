@@ -2023,6 +2023,31 @@ export async function handleSubAccept(interaction: ButtonInteraction, subId: num
 
   await handleReferralAndLeaderboard(guild, sub.discordId, user.id);
 
+  // Update the workspace claim card so it transitions from "awaiting verification"
+  // to "✅ Task #... — Accepted" in the worker's private channel.
+  (async () => {
+    try {
+      const claimRow = await db.select().from(claims).where(eq(claims.id, sub.claimId)).limit(1);
+      const wsMessageId = claimRow[0]?.workspaceMessageId;
+      const wsChannelId = user?.workspaceChannelId;
+      if (!wsMessageId || !wsChannelId) return;
+      const ch = await guild.channels.fetch(wsChannelId).catch(() => null);
+      if (!ch || !("messages" in ch)) return;
+      const original = await (ch as any).messages.fetch(wsMessageId).catch(() => null);
+      if (original) {
+        const acceptEmbed = makeEmbed(COLORS.SUCCESS)
+          .setTitle(`✅ Task #${sub.taskId} — Accepted`)
+          .setDescription(
+            `Your submission for **${task.title}** was accepted!\n\n` +
+            `**${formatMoney(sub.reward)}** added to pending balance (available <t:${unixAvail}:R>).`
+          );
+        await original.edit({ embeds: [acceptEmbed], components: [] }).catch(() => {});
+      }
+    } catch (err) {
+      logger.warn({ err, subId, claimId: sub.claimId }, "Could not update workspace card on accept");
+    }
+  })();
+
   // Mirror the accept event to the accountant's Google Sheet (per-campaign
   // URL → env fallback → no-op). Fire-and-forget; can never block or break.
   logSubmissionEvent(subId, "accepted");
@@ -2156,7 +2181,7 @@ export async function handleSubReviewReason(
       if (!ch || !("messages" in ch)) return;
       const original = await (ch as any).messages.fetch(wsMessageId).catch(() => null);
       const replyEmbed = makeEmbed(action === "flag" ? COLORS.MUTED : COLORS.DANGER)
-        .setTitle(action === "flag" ? "🚩 Submission Flagged" : "❌ Submission Rejected")
+        .setTitle(action === "flag" ? `🚩 Task #${sub.taskId} — Submission Flagged` : `❌ Task #${sub.taskId} — Submission Rejected`)
         .setDescription(
           `Your submission for **${task?.title ?? `Task #${sub.taskId}`}** was ${action}ed.\n\n` +
           `**Reason:** ${reason}\n\n` +
@@ -2165,7 +2190,10 @@ export async function handleSubReviewReason(
             : `Your account has been flagged for review. Reach out to staff if you think this is a mistake.`)
         );
       if (original) {
-        await original.reply({ embeds: [replyEmbed], allowedMentions: { repliedUser: false } });
+        // Edit original claim message so it no longer sits on "awaiting verification"
+        await original.edit({ embeds: [replyEmbed], components: [] }).catch(() => {});
+        // Also post reply so worker receives notification in channel
+        await original.reply({ embeds: [replyEmbed], allowedMentions: { repliedUser: false } }).catch(() => {});
       } else {
         // Original task card was deleted (channel cleanup, etc) — still
         // post the notice into the workspace channel so the worker has

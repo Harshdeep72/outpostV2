@@ -2075,6 +2075,42 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
           [safeAvailableAt, updated.id]
         );
         req.log.info({ submissionId: updated.id, userId: updated.userId, reward: updated.reward, safeAvailableAt }, "Dashboard: submission accepted, queued for pending release");
+
+        // Notify worker + update workspace claim card
+        (async () => {
+          try {
+            const guild = getPrimaryGuild();
+            if (!guild) return;
+            const [u] = await db.select().from(users).where(eq(users.id, updated.userId)).limit(1);
+            if (!u) return;
+            const [t] = await db.select().from(tasks).where(eq(tasks.id, updated.taskId)).limit(1);
+            const title = t?.title ?? `Task #${updated.taskId}`;
+            const acceptEmbed = makeEmbed(COLORS.SUCCESS)
+              .setTitle(`✅ Task #${updated.taskId} — Accepted`)
+              .setDescription(
+                `Your submission for **${title}** was accepted!\n\n` +
+                `**$${updated.reward}** added to pending balance.`
+              );
+            try {
+              const member = await guild.members.fetch(u.discordId);
+              await member.send({ embeds: [acceptEmbed] }).catch(() => {});
+            } catch { /* user left guild */ }
+            const [c] = await db.select().from(claims).where(eq(claims.id, updated.claimId)).limit(1);
+            const wsMessageId = c?.workspaceMessageId;
+            const wsChannelId = u.workspaceChannelId;
+            if (wsMessageId && wsChannelId) {
+              const ch = await guild.channels.fetch(wsChannelId).catch(() => null);
+              if (ch && "messages" in ch) {
+                const original = await (ch as any).messages.fetch(wsMessageId).catch(() => null);
+                if (original) {
+                  await original.edit({ embeds: [acceptEmbed], components: [] }).catch(() => {});
+                }
+              }
+            }
+          } catch (err) {
+            req.log.warn({ err, subId: updated.id }, "Dashboard accept: worker notify failed");
+          }
+        })();
       }
     }
 
@@ -2139,7 +2175,8 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
             if (ch && "messages" in ch) {
               const original = await (ch as any).messages.fetch(wsMessageId).catch(() => null);
               if (original) {
-                await original.reply({ embeds: [verdictEmbed], allowedMentions: { repliedUser: false } });
+                await original.edit({ embeds: [verdictEmbed], components: [] }).catch(() => {});
+                await original.reply({ embeds: [verdictEmbed], allowedMentions: { repliedUser: false } }).catch(() => {});
               } else {
                 await (ch as any).send({ content: `<@${u.discordId}>`, embeds: [verdictEmbed] });
               }

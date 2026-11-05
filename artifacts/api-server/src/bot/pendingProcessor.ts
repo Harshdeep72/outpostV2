@@ -633,8 +633,8 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
     // "Bot auto-decides after 24h if no action (re-checks Reddit; accepts if live, rejects if still removed)"
     // -----------------------------------------------------------------------
     try {
-      const pendingRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string; claim_id: string | null }>(
-        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.claim_id
+      const pendingRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string; claim_id: string | null; log_message_id: string | null }>(
+        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.claim_id, s.log_message_id
             FROM submissions s
             WHERE s.review_status = 'pending'
               AND s.submitted_at <= NOW() - INTERVAL '24 hours'
@@ -677,6 +677,26 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             invalidateUser(row.discord_id, userId);
             logSubmissionEvent(subId, "paid");
             logger.info({ subId, discordId: row.discord_id }, "Pending submission auto-accepted after 24h (verified live)");
+
+            if (row.log_message_id && client) {
+              try {
+                const guild = getPrimaryGuild();
+                if (guild) {
+                  const { taskLogsChannel } = await setupGuild(guild);
+                  const logMsg = await (taskLogsChannel as TextChannel).messages.fetch(row.log_message_id).catch(() => null);
+                  if (logMsg && logMsg.embeds.length > 0) {
+                    const orig = logMsg.embeds[0];
+                    const newEmbed = EmbedBuilder.from(orig)
+                      .setColor(COLORS.SUCCESS)
+                      .setTitle(`✅ Submission #${subId} Accepted — Auto-Approved (24h)`)
+                      .setFooter({ text: `Submission #${subId} • Auto-accepted after 24h — $${reward.toFixed(2)} transferred to available` });
+                    await logMsg.edit({ embeds: [newEmbed], components: [] });
+                  }
+                }
+              } catch (err) {
+                logger.warn({ err, subId }, "Failed to update Discord log message on 24h auto-accept");
+              }
+            }
           }
         } else if (liveness.liveStatus === "deleted" || liveness.liveStatus === "removed") {
           await db.execute(

@@ -722,6 +722,11 @@ export async function handleTaskClaim(
   // result is consistent. On overflow we roll the slot increment back via
   // throw → drizzle aborts the txn.
   const reservation = await db.transaction(async (tx: any) => {
+    // Acquire a transaction-level advisory lock on this user's Discord ID.
+    // This serializes parallel claim attempts by the same user, preventing
+    // race conditions where rapid double-clicking bypasses MAX_CONCURRENT_CLAIMS.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${discordId}))`);
+
     const updated = await tx.execute(
       sql`UPDATE tasks SET slots_filled = slots_filled + 1
           WHERE id = ${taskId} AND status = 'open' AND slots_filled < max_slots
@@ -997,6 +1002,11 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   const effectiveTimeLimit = Math.max(CLAIM_TIMEOUT_MINUTES, task.timeLimitMinutes || CLAIM_TIMEOUT_MINUTES);
   const expiresAt = new Date(Date.now() + effectiveTimeLimit * 60 * 1000);
   const reservation = await db.transaction(async (tx: any) => {
+    // Acquire a transaction-level advisory lock on this user's Discord ID.
+    // This serializes parallel claim attempts by the same user, preventing
+    // race conditions where rapid double-clicking bypasses MAX_CONCURRENT_CLAIMS.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${discordId}))`);
+
     const updated = await tx.execute(
       sql`UPDATE tasks SET slots_filled = slots_filled + 1
           WHERE id = ${taskId} AND status = 'open' AND slots_filled < max_slots

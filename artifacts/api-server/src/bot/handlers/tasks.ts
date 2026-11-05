@@ -517,26 +517,38 @@ export async function handleTaskClaim(
         }
       } else {
         const now = Date.now();
+        // For single-account users, ensure user.lastTaskCompletedAt is also respected as a safety net
         const available = accountsRes.rows.filter((r) => {
-          if (!r.last_used_at) return true;
-          return now - new Date(r.last_used_at).getTime() >= cooldownMs;
+          let lastUsed = r.last_used_at ? new Date(r.last_used_at).getTime() : 0;
+          if (accountsRes.rows.length === 1 && user.lastTaskCompletedAt) {
+            lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
+          }
+          if (!lastUsed) return true;
+          return now - lastUsed >= cooldownMs;
         });
         if (available.length === 0) {
           // All accounts on cooldown → block; show earliest readyAt AND which
           // specific Reddit account will free up first so the user knows
           // which one to wait for.
           const sorted = accountsRes.rows
-            .map((r) => ({
-              name: r.reddit_username,
-              readyAt: new Date(r.last_used_at!).getTime() + cooldownMs,
-            }))
+            .map((r) => {
+              let lastUsed = r.last_used_at ? new Date(r.last_used_at).getTime() : 0;
+              if (accountsRes.rows.length === 1 && user.lastTaskCompletedAt) {
+                lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
+              }
+              return {
+                name: r.reddit_username,
+                readyAt: lastUsed + cooldownMs,
+              };
+            })
             .sort((a, b) => a.readyAt - b.readyAt);
           const next = sorted[0]!;
           const unixReady = Math.floor(next.readyAt / 1000);
           return interaction.editReply({
             embeds: [makeEmbed(COLORS.WARNING).setDescription(
-              `⏳ All your Reddit accounts (${accountsRes.rows.length}) are on cooldown.\n\n` +
-              `Next to free up: **u/${next.name}** — <t:${unixReady}:R>`
+              accountsRes.rows.length === 1
+                ? `⏳ Your Reddit account (**u/${next.name}**) is on cooldown.\n\nYou can claim again: <t:${unixReady}:R>`
+                : `⏳ All your Reddit accounts (${accountsRes.rows.length}) are on cooldown.\n\nNext to free up: **u/${next.name}** — <t:${unixReady}:R>`
             )],
           });
         }
@@ -1671,9 +1683,14 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     const submitIsReddit = !isTwitterTask(submitTaskType) && !isQuoraTask(submitTaskType);
     if (submitIsReddit) {
       // Prefer the author the validator actually saw on the proof URL; fall
-      // back to the user's primary linked username so a missing validator
+      // back to the user's primary linked username so a missing/unknown validator
       // result still stamps something sensible.
-      const usedAuthor = (validation?.authorFound ?? user.redditUsername ?? "").toString().replace(/^u\//i, "").trim();
+      let usedAuthor = (validation?.authorFound ?? "").toString().replace(/^u\//i, "").trim();
+      if (!usedAuthor || usedAuthor.toLowerCase() === "unknown") {
+        usedAuthor = (user.redditUsername ?? "").replace(/^u\//i, "").trim();
+      }
+
+      let updated = false;
       if (usedAuthor) {
         await db.execute(
           sql`UPDATE submissions SET reddit_username_used = ${usedAuthor} WHERE id = ${sub.id}`
@@ -1685,23 +1702,27 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
                 SET last_used_at = NOW()
                 WHERE discord_id = ${interaction.user.id}
                   AND LOWER(reddit_username) = LOWER(${usedAuthor})`
-        ).catch(() => null);
+        ).catch((err) => { logger.warn({ err }, "Direct reddit_accounts stamp failed"); return null; });
 
-        // Fallback: if no specific account matched (e.g. discrepancy or single account),
-        // stamp the primary account so the account cooldown is strictly enforced.
-        if (!updateRes || (updateRes as any).rowCount === 0) {
-          await db.execute(
-            sql`UPDATE reddit_accounts
-                  SET last_used_at = NOW()
-                  WHERE discord_id = ${interaction.user.id}
-                    AND id = (
-                      SELECT id FROM reddit_accounts
-                       WHERE discord_id = ${interaction.user.id}
-                       ORDER BY is_primary DESC, created_at ASC
-                       LIMIT 1
-                    )`
-          ).catch(() => {});
+        if (updateRes && (updateRes as any).rowCount > 0) {
+          updated = true;
         }
+      }
+
+      // Fallback: if no specific account matched (e.g. discrepancy or single account),
+      // stamp the user's oldest linked account so the account cooldown is strictly enforced.
+      if (!updated) {
+        await db.execute(
+          sql`UPDATE reddit_accounts
+                SET last_used_at = NOW()
+                WHERE discord_id = ${interaction.user.id}
+                  AND id = (
+                    SELECT id FROM reddit_accounts
+                     WHERE discord_id = ${interaction.user.id}
+                     ORDER BY created_at ASC
+                     LIMIT 1
+                  )`
+        ).catch((err) => { logger.warn({ err }, "Fallback reddit_accounts stamp failed"); });
       }
     }
   } catch (err) {

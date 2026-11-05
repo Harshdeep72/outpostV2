@@ -1,11 +1,13 @@
 import {
   type ChatInputCommandInteraction,
+  type TextChannel,
 } from "discord.js";
 import { eq, sql } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { users, referrals } from "@workspace/db";
 import { getUserByDiscordId, getUserByReferralCode, upsertUser } from "../db.js";
 import { invalidateUser, referralStatsCache } from "../cache.js";
+import { registerTrackedInvite } from "../inviteTracker.js";
 import { makeEmbed, formatMoney } from "../util.js";
 import {
   COLORS,
@@ -56,25 +58,81 @@ export async function handleReferralCommand(interaction: ChatInputCommandInterac
   const code = user.referralCode!;
   const earnings = user.referralEarnings ?? "0";
 
+  // Generate or retrieve personal Discord invite link (auto-applies referral on join!)
+  let inviteCode = user.discordInviteCode;
+  const guild = interaction.guild;
+  if (guild) {
+    let inviteValid = false;
+    if (inviteCode) {
+      try {
+        const existingInvites = await guild.invites.fetch().catch(() => null);
+        if (existingInvites?.has(inviteCode)) {
+          inviteValid = true;
+        }
+      } catch {}
+    }
+
+    if (!inviteValid) {
+      const targetChannel = (guild.channels.cache.find(
+        (c) => c.isTextBased() && (c.name === "start-here" || c.name === "welcome" || c.name === "general")
+      ) as TextChannel | undefined) ?? (interaction.channel as TextChannel);
+
+      if (targetChannel && "createInvite" in targetChannel) {
+        try {
+          const newInvite = await targetChannel.createInvite({
+            maxAge: 0,
+            maxUses: 0,
+            unique: true,
+            reason: `Personal referral link for ${interaction.user.username} (${interaction.user.id})`,
+          });
+          inviteCode = newInvite.code;
+          await db.update(users).set({ discordInviteCode: inviteCode }).where(eq(users.discordId, interaction.user.id));
+          await pool.query(
+            `INSERT INTO user_invites (invite_code, discord_id) VALUES ($1, $2)
+             ON CONFLICT (invite_code) DO UPDATE SET discord_id = $2`,
+            [inviteCode, interaction.user.id]
+          ).catch(() => {});
+          registerTrackedInvite(guild.id, newInvite.code, interaction.user.id);
+          user = { ...user, discordInviteCode: inviteCode };
+        } catch (err) {
+          logger.warn({ err, userId: interaction.user.id }, "Failed creating personal invite link");
+        }
+      }
+    }
+  }
+
+  const inviteLink = inviteCode ? `https://discord.gg/${inviteCode}` : null;
+
   const embed = makeEmbed(COLORS.PRIMARY)
-    .setTitle("🔗 Your Referral Info")
+    .setTitle("🔗 Your Referral Info & Invite Link")
     .setDescription(
-      `Share your referral code with friends to earn bonus cash!\n\n` +
+      `Share your personal server invite link with friends to earn bonus cash!\n\n` +
+      `⚡ **Auto-Link Active:** Anyone who joins through your link will have your referral **automatically applied** upon joining — no code typing required!\n\n` +
       `**Reward Tiers:**\n` +
       `• **Tier 1 (+$${REFERRAL_TIER1_REWARD}):** Friend links a Reddit account with **${REFERRAL_TIER1_MIN_KARMA}+ karma** & **3+ months old**.\n` +
       `• **Tier 2 (+$${REFERRAL_TIER2_REWARD}):** Friend links a Reddit account with **${REFERRAL_TIER2_MIN_KARMA}+ karma** & **1+ month old**.\n\n` +
       `**How it works:**\n` +
-      `> 1. Your friend joins and applies your code with \`/referraluse\` or during \`/verify\`\n` +
-      `> 2. They complete at least 1 task that clears the **24-hour verification hold** (live check)\n` +
-      `> 3. **You get +$${REFERRAL_TIER1_REWARD} or +$${REFERRAL_TIER2_REWARD}** added directly to your available balance!`
-    )
-    .addFields(
-      { name: "🎫 Your Referral Code", value: `\`\`\`${code}\`\`\``, inline: false },
-      { name: "📊 Total Referrals", value: String(stats.count), inline: true },
-      { name: "✅ Completed", value: String(stats.completed), inline: true },
-      { name: "⏳ Pending", value: String(stats.pending), inline: true },
-      { name: "💵 Referral Earnings", value: formatMoney(earnings), inline: true },
+      `> 1. Send your **Personal Invite Link** below to your friends\n` +
+      `> 2. When they join, they are automatically linked to your account\n` +
+      `> 3. They complete at least 1 task that clears the **24-hour verification hold** (live check)\n` +
+      `> 4. **You get +$${REFERRAL_TIER1_REWARD} or +$${REFERRAL_TIER2_REWARD}** added directly to your available balance!`
     );
+
+  if (inviteLink) {
+    embed.addFields({
+      name: "🚀 Your Personal Invite Link (Auto-Applies Code)",
+      value: `**${inviteLink}**\n*(Share this link — friends are linked to you instantly when they join!)*`,
+      inline: false,
+    });
+  }
+
+  embed.addFields(
+    { name: "🎫 Referral Code (Manual Backup)", value: `\`\`\`${code}\`\`\``, inline: false },
+    { name: "📊 Total Referrals", value: String(stats.count), inline: true },
+    { name: "✅ Completed", value: String(stats.completed), inline: true },
+    { name: "⏳ Pending", value: String(stats.pending), inline: true },
+    { name: "💵 Referral Earnings", value: formatMoney(earnings), inline: true },
+  );
 
   await interaction.editReply({ embeds: [embed] });
 }

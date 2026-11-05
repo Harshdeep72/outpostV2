@@ -485,6 +485,14 @@ const POST_FIXES: string[] = [
    WHERE s.task_id = t.id
      AND s.review_status = 'pending_hold'
      AND s.available_at > s.submitted_at + INTERVAL '26 hours';`,
+  // Auto-referral tracking via Discord invites
+  `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "discord_invite_code" TEXT;`,
+  `CREATE TABLE IF NOT EXISTS "user_invites" (
+     "invite_code" TEXT PRIMARY KEY,
+     "discord_id"  TEXT NOT NULL,
+     "created_at"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );`,
+  `CREATE INDEX IF NOT EXISTS "user_invites_discord_id_idx" ON "user_invites" ("discord_id");`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

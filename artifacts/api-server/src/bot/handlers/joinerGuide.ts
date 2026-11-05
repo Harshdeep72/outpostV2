@@ -22,6 +22,7 @@ import {
   REFERRAL_TIER2_MIN_AGE_DAYS,
 } from "../constants.js";
 import { logger } from "../../lib/logger.js";
+import { trackMemberJoin, autoApplyReferralOnJoin } from "../inviteTracker.js";
 
 // Process-local memory set to quickly debounce duplicate gateway events
 const localWelcomedCache = new Map<string, number>();
@@ -150,6 +151,20 @@ export async function handleGuildMemberAdd(member: GuildMember) {
     logger.warn({ err, userId: member.id }, "Failed auto-assigning initial roles on join");
   }
 
+  // 0. Automatically track invite & apply referral if joined through a member's link
+  let autoReferredBy: string | undefined;
+  try {
+    const inviteInfo = await trackMemberJoin(member);
+    if (inviteInfo?.referrerDiscordId) {
+      const applied = await autoApplyReferralOnJoin(member, inviteInfo.referrerDiscordId, inviteInfo.inviteCode);
+      if (applied) {
+        autoReferredBy = inviteInfo.referrerDiscordId;
+      }
+    }
+  } catch (invErr) {
+    logger.warn({ err: invErr, userId: member.id }, "Failed tracking joiner invite");
+  }
+
   // Cross-instance / cluster deduplication:
   // Atomically claim the welcome event in PostgreSQL. If another instance or
   // event already welcomed this user in the last 24 hours, rowCount is 0.
@@ -194,8 +209,12 @@ export async function handleGuildMemberAdd(member: GuildMember) {
     ) as TextChannel | undefined) ?? setup.startHereChannel ?? setup.generalChannel;
 
     if (welcomeChannel) {
+      const welcomeContent = autoReferredBy
+        ? `👋 Welcome <@${member.id}> to **${guild.name}**! *(Invited by <@${autoReferredBy}> — referral code linked automatically!)* Check out your quick start guide below:`
+        : `👋 Welcome <@${member.id}> to **${guild.name}**! Check out your quick start guide below:`;
+
       await welcomeChannel.send({
-        content: `👋 Welcome <@${member.id}> to **${guild.name}**! Check out your quick start guide below:`,
+        content: welcomeContent,
         embeds: [embed],
         components: [row],
       });

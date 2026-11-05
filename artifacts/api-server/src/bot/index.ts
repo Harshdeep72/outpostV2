@@ -5,6 +5,7 @@ import {
   Partials,
   ActivityType,
 } from "discord.js";
+import { initInviteTracker, handleInviteCreate, handleInviteDelete } from "./inviteTracker.js";
 import { startDbWarmer } from "@workspace/db";
 import { registerCommands } from "./registerCommands.js";
 import { registerInteractionHandler } from "./interactions.js";
@@ -47,6 +48,7 @@ export async function startBot() {
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildInvites,
     ],
     partials: [Partials.Channel],
   });
@@ -86,6 +88,8 @@ export async function startBot() {
   client.on("shardReconnecting", (id) => logger.info({ id }, "Shard reconnecting"));
   client.on("shardResume", (id, replayed) => logger.info({ id, replayed }, "Shard resumed"));
   client.on("guildMemberAdd", (member) => handleGuildMemberAdd(member));
+  client.on("inviteCreate", (invite) => handleInviteCreate(invite));
+  client.on("inviteDelete", (invite) => handleInviteDelete(invite));
   client.on("messageCreate", (message) => handleAutoModMessage(message));
 
   client.once("ready", async () => {
@@ -147,6 +151,9 @@ export async function startBot() {
       // archive. See submissionRetention.ts for the safety design.
       startSubmissionRetention();
       startServerStatsUpdater(client);
+      initInviteTracker(client).catch((err) =>
+        logger.warn({ err }, "Failed initializing invite tracker")
+      );
 
       setInterval(async () => {
         for (const guild of client.guilds.cache.values()) {

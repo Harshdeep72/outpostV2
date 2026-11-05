@@ -16,6 +16,7 @@ export const users = pgTable("users", {
   totalEarned: numeric("total_earned", { precision: 12, scale: 2 }).notNull().default("0"),
   referralEarnings: numeric("referral_earnings", { precision: 12, scale: 2 }).notNull().default("0"),
   referralCode: text("referral_code").unique(),
+  discordInviteCode: text("discord_invite_code"),
   referredBy: text("referred_by"),
   lastTaskCompletedAt: timestamp("last_task_completed_at", { withTimezone: true }),
   upiId: text("upi_id"),

@@ -493,6 +493,11 @@ const POST_FIXES: string[] = [
      "created_at"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
    );`,
   `CREATE INDEX IF NOT EXISTS "user_invites_discord_id_idx" ON "user_invites" ("discord_id");`,
+  // 24h unverified reminder dedup table
+  `CREATE TABLE IF NOT EXISTS "unverified_reminders" (
+     "discord_id" TEXT PRIMARY KEY,
+     "warned_at"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

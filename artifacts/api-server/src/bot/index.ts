@@ -26,6 +26,7 @@ import { refreshLeaderboard, checkAndRolloverWeek } from "./handlers/leaderboard
 import { runWeeklyPayouts } from "./handlers/weeklyPayouts.js";
 import { startProxyAutoReload, getProxyCount, setPoolDepletedCallback } from "./proxy.js";
 import { startServerStatsUpdater } from "./serverStats.js";
+import { startUnverifiedPruner } from "./unverifiedPruner.js";
 import { startCacheSweeper } from "./cache.js";
 import { setDiscordClient } from "./discord-client.js";
 import { handleGuildMemberAdd } from "./handlers/joinerGuide.js";
@@ -151,6 +152,7 @@ export async function startBot() {
       // archive. See submissionRetention.ts for the safety design.
       startSubmissionRetention();
       startServerStatsUpdater(client);
+      startUnverifiedPruner(client);
       initInviteTracker(client).catch((err) =>
         logger.warn({ err }, "Failed initializing invite tracker")
       );

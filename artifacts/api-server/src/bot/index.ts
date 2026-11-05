@@ -91,6 +91,12 @@ export async function startBot() {
   client.on("guildMemberAdd", (member) => handleGuildMemberAdd(member));
   client.on("inviteCreate", (invite) => handleInviteCreate(invite));
   client.on("inviteDelete", (invite) => handleInviteDelete(invite));
+  client.on("roleCreate", async (role) => {
+    if (role.name.toLowerCase() === "tasker") {
+      logger.warn({ roleId: role.id, guildId: role.guild.id }, "Intercepted and deleting forbidden Tasker role");
+      await role.delete("Tasker role is forbidden per admin request").catch(() => {});
+    }
+  });
   client.on("messageCreate", (message) => handleAutoModMessage(message));
 
   client.once("ready", async () => {

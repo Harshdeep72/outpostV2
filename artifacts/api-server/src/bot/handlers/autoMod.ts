@@ -107,12 +107,12 @@ export function isValidMediaOnly(
 }
 
 function isStaff(message: Message | OmitPartialGroupDMChannel<Message>): boolean {
-  if (message.member) {
+  if (message.member && message.guild) {
     if (
       message.member.permissions.has(PermissionFlagsBits.Administrator) ||
       message.member.permissions.has(PermissionFlagsBits.ManageMessages) ||
-      hasAdminRole(message.member) ||
-      hasModRole(message.member)
+      hasAdminRole(message.member as any, message.guild) ||
+      hasModRole(message.member as any, message.guild)
     ) {
       return true;
     }

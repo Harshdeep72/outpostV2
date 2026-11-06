@@ -126,6 +126,36 @@ export async function handleAutoModMessage(
   if (message.author.bot) return;
   if (isStaff(message)) return;
 
+  // 0. Anti-role-mention & Anti-mass-ping across ALL guild channels:
+  // Non-staff members are strictly forbidden from tagging roles, @everyone/@here, or mass-pinging.
+  const hasRoleMention = message.mentions.roles.size > 0 || /<@&\d+>/.test(message.content);
+  const hasEveryonePing = message.mentions.everyone || /@(everyone|here)\b/i.test(message.content);
+  const hasMassUserPing = message.mentions.users.size >= 4;
+
+  if (hasRoleMention || hasEveryonePing || hasMassUserPing) {
+    try {
+      await message.delete();
+      const reason = hasRoleMention
+        ? "mentioning roles is not allowed"
+        : hasEveryonePing
+        ? "mass pings (@everyone / @here) are not allowed"
+        : "tagging multiple members is not allowed";
+      const warning = await message.channel.send({
+        content: `⚠️ <@${message.author.id}>, ${reason}!`,
+      });
+      setTimeout(() => {
+        warning.delete().catch(() => {});
+      }, 5000).unref?.();
+      logger.info(
+        { author: message.author.tag, channel: message.channelId, content: message.content },
+        "AutoMod deleted role/mass mention"
+      );
+    } catch (err) {
+      logger.warn({ err }, "Failed to auto-moderate role mention");
+    }
+    return;
+  }
+
   const attachments = Array.from(message.attachments.values());
 
   // 1. #chitchat: Only text and GIFs allowed (no image uploads or image links)

@@ -1,4 +1,4 @@
-import { type Client, type Guild } from "discord.js";
+import { type Client, type Guild, PermissionFlagsBits } from "discord.js";
 import { pool } from "@workspace/db";
 import { setupGuild } from "./setup.js";
 import { updateServerStats } from "./serverStats.js";
@@ -22,11 +22,16 @@ export async function processUnverifiedLifecycle(guild: Guild): Promise<{ warned
     for (const member of guild.members.cache.values()) {
       if (member.user.bot) continue;
 
-      // Never touch staff or server owner
+      // Never touch staff, server owner, bots, or any member the bot cannot kick (role hierarchy)
       if (
+        !member.manageable ||
+        member.id === guild.ownerId ||
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+        member.permissions.has(PermissionFlagsBits.KickMembers) ||
         (setup.adminRole && member.roles.cache.has(setup.adminRole.id)) ||
         (setup.modRole && member.roles.cache.has(setup.modRole.id)) ||
-        member.id === guild.ownerId
+        member.roles.cache.some((r) => /^(admin|moderator|mod|staff|owner)$/i.test(r.name))
       ) {
         continue;
       }

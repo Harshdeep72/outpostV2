@@ -50,8 +50,8 @@ export function nextPayoutDate(now: Date = new Date()): Date {
 }
 
 export function hasModRole(member: GuildMember, guild: Guild): boolean {
-  const modRole = guild.roles.cache.find((r) => r.name === ROLES.MOD);
-  const adminRole = guild.roles.cache.find((r) => r.name === ROLES.ADMIN);
+  const modRole = guild.roles.cache.find((r) => r.name === ROLES.MOD || r.name.toLowerCase() === "moderator");
+  const adminRole = guild.roles.cache.find((r) => r.name === ROLES.ADMIN || r.name.toLowerCase() === "administrator");
   return !!(
     (modRole && member.roles.cache.has(modRole.id)) ||
     (adminRole && member.roles.cache.has(adminRole.id)) ||
@@ -60,7 +60,7 @@ export function hasModRole(member: GuildMember, guild: Guild): boolean {
 }
 
 export function hasAdminRole(member: GuildMember, guild: Guild): boolean {
-  const adminRole = guild.roles.cache.find((r) => r.name === ROLES.ADMIN);
+  const adminRole = guild.roles.cache.find((r) => r.name === ROLES.ADMIN || r.name.toLowerCase() === "administrator");
   return !!(
     (adminRole && member.roles.cache.has(adminRole.id)) ||
     member.permissions.has("Administrator")

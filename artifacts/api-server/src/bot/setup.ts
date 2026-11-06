@@ -50,7 +50,13 @@ export interface GuildSetup {
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
 
 async function ensureRole(guild: Guild, name: string, color: number, hoist = false): Promise<Role> {
-  let role = guild.roles.cache.find((r) => r.name === name);
+  let role = guild.roles.cache.find((r) => r.name.toLowerCase() === name.toLowerCase());
+  if (!role && name.toLowerCase() === "mod") {
+    role = guild.roles.cache.find((r) => r.name.toLowerCase() === "moderator");
+  }
+  if (!role && name.toLowerCase() === "admin") {
+    role = guild.roles.cache.find((r) => r.name.toLowerCase() === "administrator");
+  }
   if (!role) {
     role = await guild.roles.create({ name, color, hoist, reason: "Reddit Microtasks setup" });
     // After creating a role, try to position it just below the bot's highest

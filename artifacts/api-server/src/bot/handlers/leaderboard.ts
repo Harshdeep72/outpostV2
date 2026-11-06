@@ -86,42 +86,48 @@ function fmtWeekRange(weekStart: Date): string {
 }
 
 /**
- * Compute weekly leaderboard data — both the embed and the card payload —
- * from the same query results. Weekly only (per user request: "I want only
- * this week leaderboard users on leaderboard").
+ * Compute leaderboard data — both the embed and the card payload —
+ * from the current payout cycle (since last payment release).
  */
 async function computeLeaderboardSnapshot(guildId: string): Promise<{
   embed: EmbedBuilder;
   cardData: NonNullable<ReturnType<typeof leaderboardSnapshotCache.get>>["cardData"];
 }> {
-  void guildId;
-  const weekStart = getISOWeekStart();
+  const config = await getOrCreateConfig(guildId);
+  const cycleStart = config?.lastWeeklyPayoutAt ? new Date(config.lastWeeklyPayoutAt) : new Date(0);
 
-  // Three parallel queries:
-  //  - weekTop: top 10 earners THIS week (their actual week total)
-  //  - allTimeTop: top 20 earners ALL TIME (used to backfill if fewer than 10
-  //    people earned this week — they appear with $0.00 so the board never
-  //    looks empty at the start of the week)
-  //  - weekTotals: footer summary (total earners, total paid this week)
-  // Top-30 (3 pages × 10) earners this week, plus their accept rate
-  // (accepted / total non-pending submissions × 100). Pending submissions
-  // don't count against the rate.
-  const [weekTop, allTimeTop, weekTotals] = await Promise.all([
+  // Parallel queries:
+  //  - cycleTop: top 30 earners this payout cycle (incorporating accepted tasks and available balance)
+  //  - allTimeTop: top 30 earners ALL TIME (used to backfill if fewer than 10
+  //    people earned this cycle — they appear with $0.00 so the board never
+  //    looks empty at the start of a cycle)
+  //  - cycleTotals: footer summary (total earners, total earned this cycle)
+  const [cycleTop, allTimeTop, cycleTotals] = await Promise.all([
     db.execute<{ discord_id: string; discord_username: string; total: string; accept_rate: string | null }>(
-      sql`SELECT s.discord_id, u.discord_username,
-                 SUM(CASE WHEN s.review_status = 'accepted' THEN s.reward ELSE 0 END)::text as total,
+      sql`SELECT u.discord_id, u.discord_username,
+                 GREATEST(
+                   COALESCE(SUM(CASE WHEN s.review_status = 'accepted' AND s.submitted_at >= ${cycleStart} THEN s.reward ELSE 0 END), 0),
+                   u.balance_available::numeric
+                 )::text as total,
                  CASE
-                   WHEN COUNT(*) FILTER (WHERE s.review_status IN ('accepted','rejected')) = 0 THEN NULL
+                   WHEN COUNT(s.id) FILTER (WHERE s.review_status IN ('accepted','rejected') AND s.submitted_at >= ${cycleStart}) = 0 THEN NULL
                    ELSE ROUND(
-                     100.0 * COUNT(*) FILTER (WHERE s.review_status = 'accepted')::numeric
-                     / COUNT(*) FILTER (WHERE s.review_status IN ('accepted','rejected'))
+                     100.0 * COUNT(s.id) FILTER (WHERE s.review_status = 'accepted' AND s.submitted_at >= ${cycleStart})::numeric
+                     / COUNT(s.id) FILTER (WHERE s.review_status IN ('accepted','rejected') AND s.submitted_at >= ${cycleStart})
                    )::text
                  END as accept_rate
-          FROM submissions s JOIN users u ON u.discord_id = s.discord_id
-          WHERE s.submitted_at >= ${weekStart}
-          GROUP BY s.discord_id, u.discord_username
-          HAVING SUM(CASE WHEN s.review_status = 'accepted' THEN s.reward ELSE 0 END) > 0
-          ORDER BY SUM(CASE WHEN s.review_status = 'accepted' THEN s.reward ELSE 0 END) DESC
+          FROM users u
+          LEFT JOIN submissions s ON s.discord_id = u.discord_id
+          WHERE u.verified = true
+          GROUP BY u.discord_id, u.discord_username, u.balance_available
+          HAVING GREATEST(
+            COALESCE(SUM(CASE WHEN s.review_status = 'accepted' AND s.submitted_at >= ${cycleStart} THEN s.reward ELSE 0 END), 0),
+            u.balance_available::numeric
+          ) > 0
+          ORDER BY GREATEST(
+            COALESCE(SUM(CASE WHEN s.review_status = 'accepted' AND s.submitted_at >= ${cycleStart} THEN s.reward ELSE 0 END), 0),
+            u.balance_available::numeric
+          ) DESC
           LIMIT 30`
     ),
     db.execute<{ discord_id: string; discord_username: string; total: string }>(
@@ -131,19 +137,34 @@ async function computeLeaderboardSnapshot(guildId: string): Promise<{
           ORDER BY total_earned DESC LIMIT 30`
     ),
     db.execute<{ earners: string; total: string }>(
-      sql`SELECT COUNT(DISTINCT s.discord_id)::text as earners, COALESCE(SUM(s.reward), 0)::text as total
-          FROM submissions s
-          WHERE s.review_status = 'accepted' AND s.submitted_at >= ${weekStart}`
+      sql`SELECT COUNT(DISTINCT u.discord_id)::text as earners,
+                 COALESCE(SUM(
+                   GREATEST(
+                     COALESCE(s.task_sum, 0),
+                     u.balance_available::numeric
+                   )
+                 ), 0)::text as total
+          FROM users u
+          LEFT JOIN (
+            SELECT discord_id, SUM(reward) as task_sum
+            FROM submissions
+            WHERE review_status = 'accepted' AND submitted_at >= ${cycleStart}
+            GROUP BY discord_id
+          ) s ON s.discord_id = u.discord_id
+          WHERE u.verified = true
+            AND GREATEST(COALESCE(s.task_sum, 0), u.balance_available::numeric) > 0`
     ),
   ]);
 
-  const weekRangeLabel = fmtWeekRange(weekStart);
-  const totals = weekTotals.rows[0] ?? { earners: "0", total: "0" };
+  const cycleRangeLabel = config?.lastWeeklyPayoutAt
+    ? fmtWeekRange(new Date(config.lastWeeklyPayoutAt))
+    : "Current Payout Cycle";
+  const totals = cycleTotals.rows[0] ?? { earners: "0", total: "0" };
 
-  // Build the merged top-30 list: weekly earners first (in order), then
+  // Build the merged top-30 list: cycle earners first (in order), then
   // backfill with all-time earners (showing $0.00) until we hit 30.
   type Row = { discordId: string; username: string; amount: string; isZero: boolean; acceptRate?: string };
-  const merged: Row[] = weekTop.rows.map((r: { discord_id: string; discord_username: string; total: string; accept_rate: string | null }) => ({
+  const merged: Row[] = cycleTop.rows.map((r: { discord_id: string; discord_username: string; total: string; accept_rate: string | null }) => ({
     discordId: r.discord_id,
     username: r.discord_username,
     amount: formatMoney(r.total),
@@ -169,7 +190,7 @@ async function computeLeaderboardSnapshot(guildId: string): Promise<{
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle("🏆 Reddit Microtasks Leaderboard")
     .addFields({
-      name: `🔥 This Week · ${weekRangeLabel}`,
+      name: `🔥 ${cycleRangeLabel}`,
       value:
         top10.length === 0
           ? "_No earners on the board yet — be the first!_"
@@ -179,7 +200,7 @@ async function computeLeaderboardSnapshot(guildId: string): Promise<{
     });
 
   embed.setFooter({
-    text: `${totals.earners} earner${totals.earners === "1" ? "" : "s"} this week · ${formatMoney(totals.total)} paid · updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+    text: `${totals.earners} earner${totals.earners === "1" ? "" : "s"} this cycle · ${formatMoney(totals.total)} earned · updated <t:${Math.floor(Date.now() / 1000)}:R>`,
   });
 
   // Tier purely from rank: #1 Gold, #2 Silver, #3 Bronze, others Verified.
@@ -198,7 +219,7 @@ async function computeLeaderboardSnapshot(guildId: string): Promise<{
   }));
 
   const cardData = {
-    weekRangeLabel,
+    weekRangeLabel: cycleRangeLabel,
     rows,
     lastWinnerLabel: null,
     totalEarners: parseInt(totals.earners) || 0,

@@ -29,60 +29,23 @@ const localWelcomedCache = new Map<string, number>();
 const LOCAL_CACHE_TTL_MS = 60_000; // 1 minute
 
 export function buildJoinerGuideEmbed(guild: Guild, _member?: GuildMember): EmbedBuilder {
-  const isRedditorsHub = guild.id === "1565617335237345310" || guild.name.toLowerCase().includes("redditors hub");
-  const payoutField = isRedditorsHub
-    ? {
-        name: "💳 Payout Methods (UPI & PayPal Only)",
-        value:
-          "We support payouts via **UPI** and **PayPal** only.\n" +
-          "• `/setupi` for UPI\n" +
-          "• `/setpaypal` for PayPal\n" +
-          "Check your balance and payout status anytime with `/wallet`.",
-      }
-    : {
-        name: "💳 Payout Methods (UPI, GCash, USDT & PayPal)",
-        value:
-          "We support payouts via **UPI**, **GCash**, **USDT (BEP-20)**, and **PayPal**.\n" +
-          "• `/setupi` for UPI\n" +
-          "• `/setgcash` for GCash\n" +
-          "• `/setwallet` for USDT (BEP-20)\n" +
-          "• `/setpaypal` for PayPal\n" +
-          "Check your balance and payout status anytime with `/wallet`.",
-      };
+  const description = [
+    "**What this server is:**",
+    "We connect Reddit users with quick, paid community marketing microtasks. We provide active Reddit threads and brief instructions—you leave a natural, relevant comment from your Reddit account, submit the link, and earn daily cash.",
+    "",
+    "💵 **Reward:** $1.00 per verified live comment",
+    "💳 **Payout Options:** UPI, PayPal, GCash, or Crypto (USDT)",
+    "",
+    "🚀 **How to start earning right now:**",
+    "",
+    "1️⃣ **Link your Reddit:** Go to <#1565661337420308510> and click **Verify Me** to unlock tasks and your personal workspace channel.",
+    "2️⃣ **Set your payout details:** Run `/setupi`, `/setpaypal`, `/setgcash`, or `/setwallet`.",
+    "3️⃣ **Claim & Earn:** Check <#1565661343737192531>, click **Claim**, post your comment following the prompt, and submit your link!"
+  ].join("\n");
 
   return makeEmbed(COLORS.PRIMARY)
-    .setTitle(`🚀 Welcome to ${guild.name} — Quick Start Guide`)
-    .setDescription(
-      `Earn real money by completing simple Reddit tasks (comments and posts)!\n` +
-      `Follow these **3 simple steps** to get started and receive your first payout:`
-    )
-    .addFields(
-      {
-        name: "1️⃣ Step 1: Link & Verify Your Reddit Account",
-        value:
-          "Click the **✅ Verify Reddit Account** button below (or run `/verify`).\n" +
-          "Enter your Reddit username or profile link. Once approved, you get the **Verified Earner** role.",
-      },
-      {
-        name: "2️⃣ Step 2: Claim Tasks in #tasks",
-        value:
-          "Watch the `#tasks` channel for new task drops.\n" +
-          "When an open task appears, click **Claim Task**.\n" +
-          "A private workspace ticket channel (`#workspace-username`) will open for you with the exact Reddit link, post script, and timer.",
-      },
-      {
-        name: "3️⃣ Step 3: Complete & Submit Proof",
-        value:
-          "Post your comment on Reddit using your verified account, copy your comment link, and click **Submit Proof** in your private channel.\n" +
-          "Once verified, rewards go into your pending hold and clear after the hold period.",
-      },
-      payoutField,
-      {
-        name: `🎁 Referral Program — Earn Up to +$${REFERRAL_TIER1_REWARD} Per Referral`,
-        value:
-          `Run \`/referral\` to get your personal invite code. Share it with friends — you earn **+$${REFERRAL_TIER1_REWARD}** (Tier 1: 300+ karma & 3+ mo) or **+$${REFERRAL_TIER2_REWARD}** (Tier 2: 150+ karma & 1+ mo) once they complete a task that clears the 24h live check!`,
-      }
-    )
+    .setTitle("👋 Welcome to Reddit Microtasks!")
+    .setDescription(description)
     .setFooter({ text: `${guild.name} • Start earning today!` })
     .setTimestamp();
 }

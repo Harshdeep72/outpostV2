@@ -125,6 +125,7 @@ export async function handleAutoModMessage(
 ): Promise<void> {
   if (message.author.bot) return;
   if (isStaff(message)) return;
+  if (!message.inGuild() || !("send" in message.channel)) return;
 
   // 0. Anti-role-mention & Anti-mass-ping across ALL guild channels:
   // Non-staff members are strictly forbidden from tagging roles, @everyone/@here, or mass-pinging.

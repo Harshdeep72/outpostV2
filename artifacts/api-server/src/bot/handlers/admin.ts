@@ -821,6 +821,8 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   const rows = await db.execute<{
     id: string;
+    task_id: string;
+    task_title: string | null;
     user_id: string;
     discord_id: string;
     reward: string;
@@ -831,6 +833,8 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
     claim_id: string | null;
   }>(
     sql`SELECT s.id::text            AS id,
+               s.task_id::text       AS task_id,
+               t.title               AS task_title,
                s.user_id::text       AS user_id,
                s.discord_id          AS discord_id,
                s.reward::text        AS reward,
@@ -840,6 +844,7 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
                s.moved_to_available  AS moved_to_available,
                s.claim_id::text      AS claim_id
         FROM submissions s
+        LEFT JOIN tasks t ON t.id = s.task_id
         WHERE s.id = ${submissionId}
         LIMIT 1`
   );
@@ -918,10 +923,11 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
 
   // Update the workspace card so it turns green and accepted
   if (row.claim_id) {
+    const claimIdStr = row.claim_id;
     (async () => {
       try {
         const cRow = await db.execute<{ workspace_message_id: string | null }>(
-          sql`SELECT workspace_message_id FROM claims WHERE id = ${parseInt(row.claim_id)} LIMIT 1`
+          sql`SELECT workspace_message_id FROM claims WHERE id = ${parseInt(claimIdStr)} LIMIT 1`
         );
         const wsMsgId = cRow.rows[0]?.workspace_message_id;
         const uRow = await db.execute<{ workspace_channel_id: string | null }>(

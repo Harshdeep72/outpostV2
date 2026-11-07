@@ -1005,7 +1005,7 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
     // Acquire a transaction-level advisory lock on this user's Discord ID.
     // This serializes parallel claim attempts by the same user, preventing
     // race conditions where rapid double-clicking bypasses MAX_CONCURRENT_CLAIMS.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${discordId}))`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${targetUser.id}))`);
 
     const updated = await tx.execute(
       sql`UPDATE tasks SET slots_filled = slots_filled + 1
@@ -2324,7 +2324,7 @@ export async function handleSubEditModal(interaction: ModalSubmitInteraction, su
   try {
     const guild = interaction.guild!;
     const { taskLogsChannel } = await setupGuild(guild);
-    const logMsg = await taskLogsChannel.messages.fetch(sub.logMessageId).catch(() => null);
+    const logMsg = sub.logMessageId ? await taskLogsChannel.messages.fetch(sub.logMessageId).catch(() => null) : null;
     if (logMsg) {
       const originalEmbed = logMsg.embeds[0];
       if (originalEmbed) {

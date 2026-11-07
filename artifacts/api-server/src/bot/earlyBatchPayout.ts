@@ -7,6 +7,8 @@ import { setupGuild } from "./setup.js";
 import { makeEmbed } from "./util.js";
 import { COLORS } from "./constants.js";
 import { logger } from "../lib/logger.js";
+import { tryCompleteReferral } from "./db.js";
+import { notifyReferralCompletion } from "./handlers/referral.js";
 
 export interface BatchItemResult {
   id: string;
@@ -135,6 +137,16 @@ export async function auditAndApproveBatchEarly(): Promise<{
            WHERE id = ${userId}
         `);
         invalidateUser(sub.discord_id, userId);
+
+        try {
+          const ref = await tryCompleteReferral(sub.discord_id, userId);
+          if (ref.completed) {
+            const guild = getPrimaryGuild();
+            if (guild) await notifyReferralCompletion(guild, ref);
+          }
+        } catch (err) {
+          logger.warn({ err, subId }, "Early batch payout: referral completion failed (non-fatal)");
+        }
       }
 
       alreadyAcceptedCount++;
@@ -181,6 +193,17 @@ export async function auditAndApproveBatchEarly(): Promise<{
       `);
 
       invalidateUser(sub.discord_id, userId);
+
+      try {
+        const ref = await tryCompleteReferral(sub.discord_id, userId);
+        if (ref.completed) {
+          const guild = getPrimaryGuild();
+          if (guild) await notifyReferralCompletion(guild, ref);
+        }
+      } catch (err) {
+        logger.warn({ err, subId }, "Early batch payout: referral completion failed (non-fatal)");
+      }
+
       liveApprovedCount++;
       totalPayoutAmount += rewardNum;
 

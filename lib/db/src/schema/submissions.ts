@@ -28,6 +28,7 @@ export const submissions = pgTable("submissions", {
   // Which source successfully verified the proof comment: 'oauth', 'json_proxy',
   // 'html', 'rss', or 'manual'. NULL for legacy rows or non-Reddit proofs.
   proofVerifiedVia: text("proof_verified_via"),
+  redditUsernameUsed: text("reddit_username_used"),
 });
 
 export type Submission = typeof submissions.$inferSelect;

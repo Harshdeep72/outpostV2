@@ -198,18 +198,17 @@ export async function tryCompleteReferral(
 
   const referrerDiscordId = ref.referrerDiscordId;
 
-  // 1. Task verification requirement: Invited user must have at least 1 task that passed the 24hr live check
+  // 1. Task verification requirement: Invited user must have at least 1 task that was accepted, confirmed live, and moved to available balance
   const liveClearedSub = await db.execute<{ id: number }>(
     sql`SELECT id FROM submissions
         WHERE discord_id = ${referredDiscordId}
           AND review_status = 'accepted'
           AND moved_to_available = 1
           AND live_status = 'live'
-          AND (submitted_at <= NOW() - INTERVAL '24 hours' OR paid_at >= submitted_at + INTERVAL '24 hours')
         LIMIT 1`
   );
   if (liveClearedSub.rows.length === 0) {
-    logger.debug({ referredDiscordId }, "tryCompleteReferral: invited user has not yet completed a task that cleared the 24hr hold and live check");
+    logger.debug({ referredDiscordId }, "tryCompleteReferral: invited user has not yet completed a task that cleared verification and live check");
     return { completed: false };
   }
 
@@ -232,9 +231,9 @@ export async function tryCompleteReferral(
     });
   }
 
-  // If stored karma is below threshold, perform live check to refresh fresh karma from Reddit
+  // If stored karma is below Tier 1 threshold, perform live check to refresh fresh karma from Reddit
   for (const c of candidates) {
-    if (c.karma < REFERRAL_MIN_KARMA && c.username) {
+    if (c.karma < REFERRAL_TIER1_MIN_KARMA && c.username) {
       try {
         const { fetchRedditProfile } = await import("./reddit.js");
         const fresh = await fetchRedditProfile(c.username);

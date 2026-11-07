@@ -230,3 +230,6 @@ def main():
         "error": f"All attempts failed. Last error: {last_err}",
         "via": "proxy" if (use_proxy and proxies) else "direct"
     }))
+
+if __name__ == "__main__":
+    main()

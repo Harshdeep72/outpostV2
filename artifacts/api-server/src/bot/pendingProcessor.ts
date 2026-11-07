@@ -712,5 +712,54 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
       logger.error({ err }, "Pending processor error (24h pending auto-decide branch)");
     }
 
+    // -----------------------------------------------------------------------
+    // Branch 4: Automated Referral Reconciliation Sweep
+    // Catches any referrals where the referred user completed an accepted &
+    // live task that moved to available, but referral completion wasn't
+    // triggered or succeeded at event-time (e.g. reddit rate limit, manual
+    // script approval, post-approval reddit verification, etc.)
+    // -----------------------------------------------------------------------
+    try {
+      const pendingReferralRows = await db.execute<{
+        referred_discord_id: string;
+        referred_user_id: number;
+      }>(sql`
+        SELECT r.referred_discord_id, u.id AS referred_user_id
+          FROM referrals r
+          JOIN users u ON u.discord_id = r.referred_discord_id
+         WHERE r.status != 'completed'
+           AND r.reward_paid = false
+           AND EXISTS (
+             SELECT 1 FROM submissions s
+              WHERE s.discord_id = r.referred_discord_id
+                AND s.review_status = 'accepted'
+                AND s.moved_to_available = 1
+                AND s.live_status = 'live'
+           )
+         LIMIT 25
+      `);
+
+      for (const row of pendingReferralRows.rows) {
+        try {
+          const ref = await tryCompleteReferral(row.referred_discord_id, Number(row.referred_user_id));
+          if (ref.completed) {
+            logger.info(
+              {
+                referrerDiscordId: ref.referrerDiscordId,
+                referredDiscordId: ref.referredDiscordId,
+                reward: ref.referrerReward,
+              },
+              "Reconciliation sweeper: automatically completed referral"
+            );
+            await notifyReferralCompletion(client, ref);
+          }
+        } catch (subErr) {
+          logger.warn({ subErr, referredDiscordId: row.referred_discord_id }, "Reconciliation sweeper: tryCompleteReferral failed");
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, "Pending processor error (referral reconciliation branch)");
+    }
+
   return { ok: true, acceptedProcessed, holdProcessed };
 }

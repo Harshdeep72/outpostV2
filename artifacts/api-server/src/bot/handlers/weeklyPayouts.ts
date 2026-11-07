@@ -116,6 +116,9 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
     } else if (user.gcashNumber) {
       method = "GCash";
       destination = user.gcashNumber;
+    } else if (user.paypalEmail) {
+      method = "PayPal";
+      destination = user.paypalEmail;
     } else if (wallets["GCASH"]) {
       const gw = extractWallet(wallets["GCASH"]);
       if (gw) { method = "GCash"; destination = gw.address; }
@@ -135,7 +138,7 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
           embeds: [
             makeEmbed(COLORS.WARNING)
               .setTitle("⚠️ No Payment Method")
-              .setDescription(`You have **${formatMoney(user.balanceAvailable)}** ready to pay out but no payment method saved.\n\n**Supported payment methods:**\n• \`/setupi\` for UPI\n• \`/setgcash\` for GCash\n• \`/setwallet\` for USDT (BEP-20).`),
+              .setDescription(`You have **${formatMoney(user.balanceAvailable)}** ready to pay out but no payment method saved.\n\n**Supported payment methods:**\n• \`/setupi\` for UPI\n• \`/setpaypal\` for PayPal\n• \`/setgcash\` for GCash\n• \`/setwallet\` for USDT (BEP-20).`),
           ],
         });
       } catch {
@@ -275,7 +278,7 @@ export async function runWeeklyPayouts(guild: Guild, force = false): Promise<{ p
   const totalAmount = eligible
     .filter((u: any) => {
       const wallets = (u.cryptoWallets as Record<string, string>) ?? {};
-      return u.upiId || u.gcashNumber || wallets["GCASH"] || wallets["USDT"];
+      return u.upiId || u.gcashNumber || u.paypalEmail || wallets["GCASH"] || wallets["USDT"];
     })
     .reduce((sum: number, u: any) => sum + parseFloat(String(u.balanceAvailable)), 0);
 

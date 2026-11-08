@@ -12,6 +12,8 @@ export const CHITCHAT_CHANNEL_ID = "1565314111372394583";
 export const MEDIA_CHANNEL_ID = "1567226854778208318";
 // #tasks channel ID where messages must be posted by staff/bot only
 export const TASKS_CHANNEL_ID = "1565661343737192531";
+// #payment-proof channel ID where messages must be payment screenshots/proofs only
+export const PAYMENT_PROOF_CHANNEL_ID = "1565798973690876044";
 
 /**
  * Checks whether content or attachments contain non-GIF images or file uploads
@@ -213,6 +215,28 @@ export async function handleAutoModMessage(
       );
     } catch (err) {
       logger.warn({ err }, "Failed to auto-moderate tasks channel message");
+    }
+    return;
+  }
+
+  // 4. #payment-proof: Strictly payment screenshots / proofs only. Pure text chatting is disallowed.
+  if (message.channelId === PAYMENT_PROOF_CHANNEL_ID) {
+    if (!isValidMediaOnly(message.content, attachments)) {
+      try {
+        await message.delete();
+        const warning = await message.channel.send({
+          content: `⚠️ <@${message.author.id}>, <#${PAYMENT_PROOF_CHANNEL_ID}> is strictly for payment screenshots/proofs only. Please chat and discuss in <#${CHITCHAT_CHANNEL_ID}>!`,
+        });
+        setTimeout(() => {
+          warning.delete().catch(() => {});
+        }, 6000).unref?.();
+        logger.info(
+          { author: message.author.tag, channel: message.channelId },
+          "AutoMod removed non-media chat message from #payment-proof"
+        );
+      } catch (err) {
+        logger.warn({ err }, "Failed to auto-moderate payment-proof channel message");
+      }
     }
     return;
   }

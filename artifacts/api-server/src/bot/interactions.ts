@@ -13,7 +13,7 @@ import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, hand
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
 import { handleWdApprove, handleWdCreatorPay, handleWdReject, handleWdRejectReason } from "./handlers/withdrawals.js";
-import { handleBulkTaskCommand, handleBulkTaskCsvModal } from "./handlers/bulktask.js";
+import { handleBulkTaskCommand, handleBulkTaskCsvModal, handleListScheduledCommand, handleCancelScheduledCommand } from "./handlers/bulktask.js";
 import { handleReferralCommand, handleReferralUseCommand } from "./handlers/referral.js";
 import { handleProfileCommand } from "./handlers/profile.js";
 import { handleDigestCommand } from "./handlers/digest.js";
@@ -58,6 +58,9 @@ export function registerInteractionHandler(client: Client) {
         if (name === "setup") return await timed(name, () => handleSetupCommand(interaction));
         if (name === "createtask") return await timed(name, () => handleCreateTaskCommand(interaction));
         if (name === "bulktask") return await timed(name, () => handleBulkTaskCommand(interaction));
+        if (name === "scheduletask") return await timed(name, () => handleBulkTaskCommand(interaction));
+        if (name === "scheduledtasks") return await timed(name, () => handleListScheduledCommand(interaction));
+        if (name === "cancelscheduled") return await timed(name, () => handleCancelScheduledCommand(interaction));
         if (name === "canceltask") return await timed(name, () => handleCancelTaskCommand(interaction));
         if (name === "cancelcampaign") return await timed(name, () => handleCancelCampaignCommand(interaction));
         if (name === "campaignstatus") return await timed(name, () => handleCampaignStatusCommand(interaction));

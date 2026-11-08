@@ -1032,6 +1032,8 @@ export interface CreateBulkResult {
   scheduled: number;
   intervalMinutes: number;
   errors: string[];
+  scheduledStartAt?: Date | null;
+  formattedIst?: string | null;
 }
 
 export async function createBulkTasksFromCsv(args: {
@@ -1051,6 +1053,8 @@ export async function createBulkTasksFromCsv(args: {
   /** Opt-in to the repeating unclaimed-notifier scheduler for every task in
    *  this campaign. Default true at the route layer for bulk creates. */
   notifyUnclaimed?: boolean;
+  scheduledStartAt?: Date | null;
+  formattedIst?: string | null;
 }): Promise<CreateBulkResult> {
   const rows = parseTaskCsv(args.csv);
   // Allow fractional minutes so sub-minute drip intervals work (e.g. 0.5 = 30s).
@@ -1162,9 +1166,11 @@ export async function createBulkTasksFromCsv(args: {
     return { campaignId: campaign.id, rowsFound: rows.length, created, scheduled: 0, intervalMinutes: 0, errors };
   }
 
-  if (intervalMinutes > 0) {
+  const isScheduled = !!(args.scheduledStartAt && args.scheduledStartAt.getTime() > Date.now());
+  const scheduledStartMs = isScheduled ? args.scheduledStartAt!.getTime() : Date.now();
+
+  if (intervalMinutes > 0 || isScheduled) {
     const intervalMs = intervalMinutes * 60_000;
-    const now = Date.now();
     let scheduled = 0;
 
     for (let i = 0; i < rows.length; i++) {
@@ -1187,7 +1193,7 @@ export async function createBulkTasksFromCsv(args: {
 
       if (args.notifyUnclaimed) norm.task.enableUnclaimedNotify = true;
       norm.task.campaignId = campaign.id;
-      const scheduledAt = new Date(now + i * intervalMs);
+      const scheduledAt = new Date(scheduledStartMs + i * intervalMs);
       await db.insert(campaignQueue).values({
         campaignId: campaign.id,
         guildId: args.guild.id,
@@ -1197,6 +1203,12 @@ export async function createBulkTasksFromCsv(args: {
       scheduled++;
     }
 
+    if (scheduled > 0) {
+      await db.execute(
+        sql`UPDATE campaigns SET total_tasks = ${scheduled} WHERE id = ${campaign.id}`
+      ).catch(() => {});
+    }
+
     return {
       campaignId: campaign.id,
       rowsFound: rows.length,
@@ -1204,6 +1216,8 @@ export async function createBulkTasksFromCsv(args: {
       scheduled,
       intervalMinutes,
       errors,
+      scheduledStartAt: args.scheduledStartAt ?? null,
+      formattedIst: args.formattedIst ?? null,
     };
   }
 

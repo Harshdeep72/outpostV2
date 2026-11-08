@@ -79,6 +79,11 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setDescription("Public Google Sheets URL (omit to paste CSV manually)")
         .setRequired(false)
     )
+    .addStringOption((o) =>
+      o.setName("schedule_time_ist")
+        .setDescription("Schedule drop time in IST (e.g. 19:30, 7:30 PM, tomorrow 14:00, in 2h)")
+        .setRequired(false)
+    )
     .addIntegerOption((o) =>
       o.setName("interval_minutes")
         .setDescription("Drip-feed: minutes between each task drop (0 = post all at once, default 0, max 1440)")
@@ -88,6 +93,50 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("max_claims_per_user")
         .setDescription("Max tasks a user can claim in this campaign (0 = unlimited, default 3 scaled by linked accounts)")
         .setMinValue(0).setMaxValue(100).setRequired(false)
+    );
+
+  const scheduletask = new SlashCommandBuilder()
+    .setName("scheduletask")
+    .setDescription("Schedule a task campaign to drop at a specific time in IST (UTC+05:30)")
+    .addStringOption((o) =>
+      o.setName("time_ist")
+        .setDescription("Schedule drop time in IST (e.g. 19:30, 7:30 PM, tomorrow 14:00, in 2h)")
+        .setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("sheets_url")
+        .setDescription("Public Google Sheets URL (omit to paste CSV manually)")
+        .setRequired(false)
+    )
+    .addIntegerOption((o) =>
+      o.setName("interval_minutes")
+        .setDescription("Drip-feed: minutes between each task drop (0 = post all at scheduled time, max 1440)")
+        .setMinValue(0).setMaxValue(1440).setRequired(false)
+    )
+    .addIntegerOption((o) =>
+      o.setName("max_claims_per_user")
+        .setDescription("Max tasks a user can claim in this campaign (0 = unlimited, default 3 scaled by linked accounts)")
+        .setMinValue(0).setMaxValue(100).setRequired(false)
+    );
+
+  const scheduledtasks = new SlashCommandBuilder()
+    .setName("scheduledtasks")
+    .setDescription("View all pending scheduled campaign drops in the queue (mod/admin only)");
+
+  const cancelscheduled = new SlashCommandBuilder()
+    .setName("cancelscheduled")
+    .setDescription("Cancel a pending scheduled campaign drop before it posts (mod/admin only)")
+    .addIntegerOption((o) =>
+      o.setName("campaign_id")
+        .setDescription("Campaign ID to cancel (found via /scheduledtasks)")
+        .setRequired(true)
+        .setMinValue(1)
+    )
+    .addStringOption((o) =>
+      o.setName("reason")
+        .setDescription("Reason for cancellation (optional)")
+        .setRequired(false)
+        .setMaxLength(300)
     );
 
   const referral = new SlashCommandBuilder()
@@ -506,7 +555,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDMPermission(false);
 
   return [
-    verify, setup, createtask, bulktask, referral, referralUse,
+    verify, setup, createtask, bulktask, scheduletask, scheduledtasks, cancelscheduled, referral, referralUse,
     setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
     addmod, removemod, addadmin, flag, unflag,
     disableclaim, enableclaim, blockclaim, unblockclaim,

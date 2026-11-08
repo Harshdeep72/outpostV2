@@ -5,8 +5,8 @@ import { campaignQueue, campaigns } from "@workspace/db";
 import { logger } from "../lib/logger.js";
 import { createTaskAndPost, type NormalizedTask } from "./task-creation.js";
 
-const TICK_MS = 30_000;
-const BATCH_LIMIT = 5;
+const TICK_MS = 15_000;
+const BATCH_LIMIT = 20;
 const MAX_ATTEMPTS = 3;
 
 let started = false;
@@ -59,6 +59,8 @@ async function tick(client: Client): Promise<void> {
         sql`UPDATE campaigns SET tasks_created = tasks_created + 1 WHERE id = ${row.campaignId}`,
       );
       logger.info({ queueId: row.id, taskId: task.id, campaignId: row.campaignId }, "Drip queue: task posted");
+      // Add brief delay to prevent Discord card-burst rate limiting during batch drops
+      await new Promise((r) => setTimeout(r, 1000));
     } catch (err: any) {
       const attempts = (row.attempts ?? 0) + 1;
       const next = attempts >= MAX_ATTEMPTS ? "failed" : "pending";

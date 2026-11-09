@@ -416,8 +416,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                 SET balance_pending   = GREATEST(0, balance_pending - ${row.reward}::numeric),
                     balance_available = balance_available + ${row.reward}::numeric,
                     total_earned      = total_earned + ${row.reward}::numeric,
-                    trust_score       = LEAST(1000, trust_score + 2),
-                    last_task_completed_at = NOW()
+                    trust_score       = LEAST(1000, trust_score + 2)
                 WHERE id = ${userId}`
           );
           invalidateUser(row.discord_id, userId);
@@ -539,8 +538,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
                   SET balance_pending   = GREATEST(0, balance_pending - ${row.reward}::numeric),
                       balance_available = balance_available + ${row.reward}::numeric,
                       total_earned      = total_earned + ${row.reward}::numeric,
-                      trust_score       = LEAST(1000, trust_score + 2),
-                      last_task_completed_at = NOW()
+                      trust_score       = LEAST(1000, trust_score + 2)
                   WHERE id = ${userId}`
             );
             invalidateUser(row.discord_id, userId);
@@ -667,8 +665,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
               sql`UPDATE users
                   SET balance_available = balance_available + ${reward}::numeric,
                       total_earned = total_earned + ${reward}::numeric,
-                      trust_score = LEAST(1000, trust_score + 2),
-                      last_task_completed_at = NOW()
+                      trust_score = LEAST(1000, trust_score + 2)
                   WHERE id = ${userId}`
             );
             if (row.claim_id) {

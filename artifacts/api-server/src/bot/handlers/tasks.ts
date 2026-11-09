@@ -2001,7 +2001,7 @@ export async function handleSubAccept(interaction: ButtonInteraction, subId: num
 
   await db.execute(
     // total_earned ("Lifetime Earnings") is credited only when pending → available.
-    sql`UPDATE users SET balance_pending = balance_pending + ${sub.reward}::numeric, last_task_completed_at = NOW() WHERE id = ${user.id}`
+    sql`UPDATE users SET balance_pending = balance_pending + ${sub.reward}::numeric WHERE id = ${user.id}`
   );
   await db.execute(sql`UPDATE users SET trust_score = GREATEST(0, trust_score + 2) WHERE id = ${user.id}`);
   await db.insert(trustLogs).values({ userId: user.id, discordId: sub.discordId, delta: 2, reason: "submission accepted", relatedSubmissionId: subId }).catch(() => {});

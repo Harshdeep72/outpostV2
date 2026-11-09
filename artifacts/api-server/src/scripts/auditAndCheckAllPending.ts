@@ -138,8 +138,7 @@ async function main() {
              SET balance_pending   = GREATEST(0, balance_pending - ${row.reward}::numeric),
                  balance_available = balance_available + ${row.reward}::numeric,
                  total_earned      = total_earned + ${row.reward}::numeric,
-                 trust_score       = LEAST(1000, trust_score + 2),
-                 last_task_completed_at = NOW()
+                 trust_score       = LEAST(1000, trust_score + 2)
            WHERE id = ${parseInt(row.user_id)}
         `);
         invalidateUser(row.discord_id, parseInt(row.user_id));

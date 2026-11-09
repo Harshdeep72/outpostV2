@@ -172,8 +172,7 @@ async function autoAccept(client: Client, row: PendingRow): Promise<boolean> {
     sql`UPDATE claims SET status = 'accepted' WHERE id = ${parseInt(row.claim_id)}`,
   );
   await db.execute(
-    sql`UPDATE users SET balance_pending = balance_pending + ${row.reward}::numeric,
-                          last_task_completed_at = NOW()
+    sql`UPDATE users SET balance_pending = balance_pending + ${row.reward}::numeric
           WHERE id = ${parseInt(row.user_id)}`,
   );
   await db.execute(

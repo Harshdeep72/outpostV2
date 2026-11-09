@@ -875,8 +875,7 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
       sql`UPDATE users
           SET balance_available = balance_available + ${reward}::numeric,
               total_earned      = total_earned      + ${reward}::numeric,
-              trust_score       = LEAST(1000, trust_score + 0.05),
-              last_task_completed_at = NOW()
+              trust_score       = LEAST(1000, trust_score + 0.05)
           WHERE discord_id = ${row.discord_id}`
     );
   } else {
@@ -885,8 +884,7 @@ export async function handleApproveSubmission(interaction: ChatInputCommandInter
           SET balance_pending   = GREATEST(0, balance_pending - ${reward}::numeric),
               balance_available = balance_available + ${reward}::numeric,
               total_earned      = total_earned      + ${reward}::numeric,
-              trust_score       = LEAST(1000, trust_score + 2),
-              last_task_completed_at = NOW()
+              trust_score       = LEAST(1000, trust_score + 2)
           WHERE discord_id = ${row.discord_id}`
     );
   }

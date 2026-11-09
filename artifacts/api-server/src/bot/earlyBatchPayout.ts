@@ -187,8 +187,7 @@ export async function auditAndApproveBatchEarly(): Promise<{
            SET balance_pending   = GREATEST(0, balance_pending - ${sub.reward}::numeric),
                balance_available = balance_available + ${sub.reward}::numeric,
                total_earned      = total_earned + ${sub.reward}::numeric,
-               trust_score       = LEAST(1000, trust_score + 2),
-               last_task_completed_at = NOW()
+               trust_score       = LEAST(1000, trust_score + 2)
          WHERE id = ${userId}
       `);
 

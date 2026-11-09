@@ -875,14 +875,19 @@ export async function handleTaskClaim(
       pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
-    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — please type it manually in your own words (keep the brand name)";
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — keep the brand name front & center, type naturally in your own words";
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
   if (!twitterTask && !quoraTask) {
     wsFields.push({
-      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
-      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      name: "⏱️ How to Spend Your 1-Hour Window (Keep Comments Live)",
+      value:
+        "⚠️ **Brand Rule:** The brand is what clients pay for — **never remove or divert away from the brand**!\n" +
+        "• **Min 0–10 (Find Hook):** Read OP's post. Connect OP's exact problem directly to the brand.\n" +
+        "• **Min 10–25 (Personal Experience):** Frame the brand as real user experience (e.g. *\"I ran into this exact same problem, tried [Brand] and it handled X...\"*). Never sound salesy!\n" +
+        "• **Min 25–40 (Incognito Check):** Post comment, open link in Private/Incognito tab (logged out) to verify it stays visible.\n" +
+        "• **Min 40–50 (Submit):** Copy permalink & click Submit Proof with time to spare!",
       inline: false,
     });
   }
@@ -936,14 +941,19 @@ export async function handleTaskClaim(
       pushContentFields(ephFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
-    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — paste this exactly as your reply";
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — keep the brand name front & center, type naturally in your own words";
     pushContentFields(ephFields, label, task.prewrittenComment, fence);
   }
 
   if (!twitterTask && !quoraTask) {
     ephFields.push({
-      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
-      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      name: "⏱️ How to Spend Your 1-Hour Window (Keep Comments Live)",
+      value:
+        "⚠️ **Brand Rule:** The brand is what clients pay for — **never remove or divert away from the brand**!\n" +
+        "• **Min 0–10 (Find Hook):** Read OP's post. Connect OP's exact problem directly to the brand.\n" +
+        "• **Min 10–25 (Personal Experience):** Frame the brand as real user experience (e.g. *\"I ran into this exact same problem, tried [Brand] and it handled X...\"*). Never sound salesy!\n" +
+        "• **Min 25–40 (Incognito Check):** Post comment, open link in Private/Incognito tab (logged out) to verify it stays visible.\n" +
+        "• **Min 40–50 (Submit):** Copy permalink & click Submit Proof with time to spare!",
       inline: false,
     });
   }
@@ -1092,14 +1102,19 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
       pushContentFields(wsFields, "📄 Post Body — paste this as the Reddit post body", task.prewrittenComment, fence);
     }
   } else if (task.prewrittenComment) {
-    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — please type it manually in your own words (keep the brand name)";
+    const label = (twitterTask || quoraTask) ? `📜 ${platform} Script — paste this exactly` : "💬 Comment Text — keep the brand name front & center, type naturally in your own words";
     pushContentFields(wsFields, label, task.prewrittenComment, fence);
   }
 
   if (!twitterTask && !quoraTask) {
     wsFields.push({
-      name: "⏱️ Reddit Safety Rule (5–6 Min Warmup)",
-      value: "Before posting your comment, browse the thread and upvote 1–2 other replies. Submissions posted too quickly risk being filtered by Reddit and cannot be verified for payout.",
+      name: "⏱️ How to Spend Your 1-Hour Window (Keep Comments Live)",
+      value:
+        "⚠️ **Brand Rule:** The brand is what clients pay for — **never remove or divert away from the brand**!\n" +
+        "• **Min 0–10 (Find Hook):** Read OP's post. Connect OP's exact problem directly to the brand.\n" +
+        "• **Min 10–25 (Personal Experience):** Frame the brand as real user experience (e.g. *\"I ran into this exact same problem, tried [Brand] and it handled X...\"*). Never sound salesy!\n" +
+        "• **Min 25–40 (Incognito Check):** Post comment, open link in Private/Incognito tab (logged out) to verify it stays visible.\n" +
+        "• **Min 40–50 (Submit):** Copy permalink & click Submit Proof with time to spare!",
       inline: false,
     });
   }

@@ -47,11 +47,9 @@ async function tick(client: Client): Promise<void> {
 
     const norm = row.payload as unknown as NormalizedTask;
     try {
-      // Drip-feed: each task IS its own announcement (spaced apart from the
-      // others), so it gets a real @here @everyone ping. We skip the per-task
-      // 5-min reminder because the next drip drop arrives on the same cadence
-      // and would stack on top of the reminder.
-      const task = await createTaskAndPost(norm, guild, { silent: false, skipReminder: true });
+      // Scheduled & queued tasks post silently (no @here/@everyone on individual cards)
+      // to avoid mass-pinging server members on batch or queued drops.
+      const task = await createTaskAndPost(norm, guild, { silent: true, skipReminder: true });
       await db.update(campaignQueue)
         .set({ status: "posted", postedTaskId: task.id, lastError: null })
         .where(eq(campaignQueue.id, row.id));

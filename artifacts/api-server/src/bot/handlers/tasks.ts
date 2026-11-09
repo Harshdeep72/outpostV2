@@ -2205,10 +2205,8 @@ export async function handleSubReviewReason(
             : `Your account has been flagged for review. Reach out to staff if you think this is a mistake.`)
         );
       if (original) {
-        // Edit original claim message so it no longer sits on "awaiting verification"
+        // Edit original claim message so it cleanly shows the rejection/flag verdict
         await original.edit({ embeds: [replyEmbed], components: [] }).catch(() => {});
-        // Also post reply so worker receives notification in channel
-        await original.reply({ embeds: [replyEmbed], allowedMentions: { repliedUser: false } }).catch(() => {});
       } else {
         // Original task card was deleted (channel cleanup, etc) — still
         // post the notice into the workspace channel so the worker has

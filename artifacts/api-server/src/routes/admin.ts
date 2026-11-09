@@ -2175,8 +2175,8 @@ router.patch("/submissions/:id", requireAdminRole, async (req, res) => {
             if (ch && "messages" in ch) {
               const original = await (ch as any).messages.fetch(wsMessageId).catch(() => null);
               if (original) {
+                // Edit original claim message so it cleanly shows the rejection/flag verdict
                 await original.edit({ embeds: [verdictEmbed], components: [] }).catch(() => {});
-                await original.reply({ embeds: [verdictEmbed], allowedMentions: { repliedUser: false } }).catch(() => {});
               } else {
                 await (ch as any).send({ content: `<@${u.discordId}>`, embeds: [verdictEmbed] });
               }

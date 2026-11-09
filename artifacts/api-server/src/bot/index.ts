@@ -97,6 +97,13 @@ export async function startBot() {
       await role.delete("Tasker role is forbidden per admin request").catch(() => {});
     }
   });
+  client.on("guildMemberUpdate", async (_oldMember, newMember) => {
+    const tasker = newMember.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
+    if (tasker) {
+      logger.warn({ userId: newMember.id, roleId: tasker.id }, "Stripping forbidden Tasker role from member");
+      await newMember.roles.remove(tasker, "Tasker role forbidden").catch(() => {});
+    }
+  });
   client.on("messageCreate", (message) => handleAutoModMessage(message));
 
   client.once("ready", async () => {
@@ -144,6 +151,10 @@ export async function startBot() {
         ensureEarnerRoles(guild).catch((err) =>
           logger.warn({ err, guildId: guild.id }, "ensureEarnerRoles failed on boot")
         );
+        const forbiddenTaskerRole = guild.roles.cache.find((r) => r.name.toLowerCase() === "tasker");
+        if (forbiddenTaskerRole) {
+          forbiddenTaskerRole.delete("Tasker role is forbidden per admin request").catch(() => {});
+        }
       }
       startRedditLivenessChecker(client);
       // Re-checks pending manual-review submissions after 24h: if the Reddit

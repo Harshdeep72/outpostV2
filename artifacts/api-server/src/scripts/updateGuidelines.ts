@@ -254,7 +254,7 @@ async function main() {
   // 5. Post Announcement in #announcements (1565314111372394580)
   console.log("Posting announcement in #announcements...");
   const announceChannel = await client.channels.fetch("1565314111372394580");
-  if (announceChannel && announceChannel.isTextBased()) {
+  if (announceChannel && announceChannel.isTextBased() && "send" in announceChannel) {
     const announceEmbed = new EmbedBuilder()
       .setTitle("📢 UPDATED GUIDELINES: How to Spend Your 1-Hour Task Window & Keep Comments Live!")
       .setDescription(

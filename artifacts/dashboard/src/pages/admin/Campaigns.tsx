@@ -55,10 +55,26 @@ export default function Campaigns() {
 
   const cancelMutation = useMutation({
     mutationFn: (vars: { id: number; reason: string }) =>
-      post<{ ok: boolean; tasksClosed: number; releasedClaims: number }>(`/admin/campaigns/${vars.id}/cancel`, { reason: vars.reason }),
+      post<{
+        ok: boolean;
+        tasksClosed: number;
+        releasedClaims: number;
+        preservedSubmittedTasks?: number;
+        queueCancelled?: number;
+      }>(`/admin/campaigns/${vars.id}/cancel`, { reason: vars.reason }),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["admin-campaigns"] });
-      setCancelMsg({ kind: "ok", text: `Campaign cancelled. ${result.tasksClosed} task(s) closed, ${result.releasedClaims} claim(s) released.` });
+      const parts = [
+        `${result.tasksClosed} task(s) closed`,
+        `${result.releasedClaims} claim(s) released`,
+      ];
+      if (result.queueCancelled) {
+        parts.push(`${result.queueCancelled} queued drop(s) cancelled`);
+      }
+      if (result.preservedSubmittedTasks) {
+        parts.push(`${result.preservedSubmittedTasks} submitted task(s) preserved`);
+      }
+      setCancelMsg({ kind: "ok", text: `Campaign cancelled. ${parts.join(", ")}.` });
       setConfirmId(null);
       setCancelReason("");
     },

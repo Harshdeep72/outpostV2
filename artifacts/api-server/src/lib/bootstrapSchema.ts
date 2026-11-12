@@ -498,6 +498,21 @@ const POST_FIXES: string[] = [
      "discord_id" TEXT PRIMARY KEY,
      "warned_at"  TIMESTAMPTZ NOT NULL DEFAULT NOW()
    );`,
+  // Durable admin action audit trail (cancels, restores, etc.)
+  `CREATE TABLE IF NOT EXISTS "audit_logs" (
+     "id"               SERIAL PRIMARY KEY,
+     "action"           TEXT NOT NULL,
+     "entity_type"      TEXT NOT NULL,
+     "entity_id"        INTEGER NOT NULL,
+     "actor_discord_id" TEXT,
+     "actor_username"   TEXT NOT NULL,
+     "source"           TEXT NOT NULL DEFAULT 'discord',
+     "reason"           TEXT,
+     "metadata"         JSONB NOT NULL DEFAULT '{}',
+     "created_at"       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+   );`,
+  `CREATE INDEX IF NOT EXISTS "audit_logs_entity_idx"
+     ON "audit_logs" ("entity_type", "entity_id", "created_at" DESC);`,
 ];
 
 export async function bootstrapSchema(): Promise<void> {

@@ -10,3 +10,4 @@ export * from "./referrals";
 export * from "./campaigns";
 export * from "./redditAccounts";
 export * from "./userInvites";
+export * from "./auditLogs";

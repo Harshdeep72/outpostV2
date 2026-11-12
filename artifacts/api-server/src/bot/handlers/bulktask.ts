@@ -14,6 +14,7 @@ import { createBulkTasksFromCsv, parseTaskCsv, type CreateBulkResult } from "../
 import { runCampaignLivenessCheck } from "../redditLivenessChecker.js";
 import { db, campaigns, campaignQueue } from "@workspace/db";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { recordAuditLog } from "./canceltask.js";
 
 function extractSheetId(url: string): { sheetId: string; gid: string } | null {
   try {
@@ -647,6 +648,27 @@ export async function handleCancelScheduledCommand(interaction: ChatInputCommand
   );
 
   logger.info({ campaignId, cancelledCount, reason, actor: interaction.user.id }, "Scheduled campaign cancelled");
+
+  await recordAuditLog({
+    action: "campaign.cancel_scheduled",
+    entityType: "campaign",
+    entityId: campaignId,
+    actorDiscordId: interaction.user.id,
+    actorUsername: interaction.user.username,
+    source: "discord",
+    reason,
+    metadata: { cancelledCount, title: campaign.title },
+    guild,
+    logEmbed: makeEmbed(COLORS.DANGER)
+      .setTitle(`🚫 Scheduled Campaign #${campaignId} Cancelled`)
+      .setDescription(
+        `**Title:** ${campaign.title}\n` +
+        `**Cancelled By:** <@${interaction.user.id}> (${interaction.user.username}) via **discord**\n` +
+        `**Reason:** ${reason}\n` +
+        `**Pending Drops Cancelled:** ${cancelledCount}`
+      )
+      .setTimestamp(),
+  });
 
   return interaction.editReply({
     embeds: [

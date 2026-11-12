@@ -14,6 +14,23 @@ import { invalidateUser } from "../bot/cache.js";
 import { getCooldownConfig, setCooldownConfig, getAutoBumpConfig, setAutoBumpConfig, getMaxRedditAccounts, setMaxRedditAccounts, getProxies, setProxies } from "../lib/settings.js";
 import { reloadProxiesNow, getProxyMetrics } from "../bot/proxy.js";
 import { validateRedditProof, recheckRedditLiveness, parseRedditProofUrl, detectAppUrl, resolveShareLink } from "../bot/reddit-validator.js";
+import { cancelTaskById, cancelCampaignById } from "../bot/handlers/canceltask.js";
+
+async function resolveSessionActor(req: any): Promise<{ actorDiscordId: string | null; actorUsername: string }> {
+  const sessionUser = req?.session?.adminUser as { id?: number; username?: string } | undefined;
+  const actorUsername = sessionUser?.username ?? "dashboard-admin";
+  let actorDiscordId: string | null = null;
+  if (sessionUser?.id) {
+    try {
+      const r = await pool.query<{ discord_id: string | null }>(
+        `SELECT discord_id FROM admin_users WHERE id = $1`,
+        [sessionUser.id]
+      );
+      actorDiscordId = r.rows[0]?.discord_id ?? null;
+    } catch { /* keep null fallback */ }
+  }
+  return { actorDiscordId, actorUsername };
+}
 
 const router = Router();
 
@@ -1269,98 +1286,35 @@ router.post("/tasks/:id/cancel", requireAdminRole, async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  const reason = ((req.body as any)?.reason ?? "Cancelled via dashboard").trim();
+  const reason = String((req.body as any)?.reason ?? "").trim() || "Cancelled via dashboard";
 
   try {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
-    if (!task) {
-      res.status(404).json({ error: "Task not found" });
+    const { actorDiscordId, actorUsername } = await resolveSessionActor(req);
+    const result = await cancelTaskById({
+      taskId: id,
+      reason,
+      actorDiscordId,
+      actorUsername,
+      source: "dashboard",
+      guild: getPrimaryGuild(),
+    });
+
+    if (!result.ok) {
+      res.status(result.code === "not_found" ? 404 : 400).json({ error: result.message, code: result.code });
       return;
     }
-    if (task.status === "closed") {
-      res.status(400).json({ error: "Task is already closed" });
-      return;
-    }
-
-    await db.update(tasks).set({ status: "closed" }).where(eq(tasks.id, id));
-
-    const expiredClaims = await db.execute<{ id: number; discord_id: string; workspace_message_id: string | null }>(
-      sql`UPDATE claims SET status = 'expired' WHERE task_id = ${id} AND status = 'claimed' RETURNING id, discord_id, workspace_message_id`
-    );
-
-    try {
-      const guild = getPrimaryGuild();
-      if (guild) {
-        // DM affected claimers and lock their workspace embeds
-        for (const c of expiredClaims.rows) {
-          const u = await guild.client.users.fetch(c.discord_id).catch(() => null);
-          if (u) {
-            await u.send({
-              embeds: [
-                makeEmbed(COLORS.WARNING)
-                  .setTitle("⚠️ Task Cancelled")
-                  .setDescription(`**Task #${id}** was cancelled by an admin. Your claim has been released.\n\n**Reason:** ${reason}`)
-              ],
-            }).catch(() => {});
-          }
-
-          // Remove Submit Proof button from the user's workspace embed
-          if (c.workspace_message_id) {
-            try {
-              const userRow = await db.execute<{ workspace_channel_id: string | null }>(
-                sql`SELECT workspace_channel_id FROM users WHERE discord_id = ${c.discord_id} LIMIT 1`
-              );
-              const wsChannelId = userRow.rows[0]?.workspace_channel_id;
-              if (wsChannelId) {
-                const ch = await guild.channels.fetch(wsChannelId).catch(() => null);
-                if (ch && "messages" in ch) {
-                  const wsMsg = await (ch as any).messages.fetch(c.workspace_message_id).catch(() => null);
-                  if (wsMsg) {
-                    await wsMsg.edit({
-                      embeds: [
-                        makeEmbed(COLORS.MUTED)
-                          .setTitle(`❌ Task #${id} — CANCELLED`)
-                          .setDescription(`This task was cancelled by an admin.\n\n**Reason:** ${reason}`)
-                      ],
-                      components: [],
-                    });
-                  }
-                }
-              }
-            } catch (err) {
-              logger.warn({ err, claimId: c.id }, "Could not lock workspace embed on dashboard task cancel");
-            }
-          }
-        }
-
-        // Edit the public task message in #tasks to remove the Claim button
-        if (task.channelMessageId) {
-          try {
-            const { tasksChannel } = await setupGuild(guild);
-            const msg = await tasksChannel.messages.fetch(task.channelMessageId).catch(() => null);
-            if (msg) {
-              await msg.edit({
-                embeds: [
-                  makeEmbed(COLORS.MUTED)
-                    .setTitle(`❌ Task #${id} — CANCELLED`)
-                    .setDescription(`This task was cancelled.\n\n**Reason:** ${reason}`)
-                ],
-                components: [],
-              });
-            }
-          } catch (err) {
-            logger.warn({ err, taskId: id }, "Could not edit task message on dashboard cancel");
-          }
-        }
-      }
-    } catch { /* Discord edits best-effort */ }
 
     req.log.info(
-      { taskId: id, claimsReleased: expiredClaims.rows.length, actor: (req as any).session?.adminUser?.username },
+      { taskId: id, claimsReleased: result.claimsReleased, preservedPartialSubs: result.preservedPartialSubs, actor: actorUsername },
       "Dashboard: task cancelled"
     );
 
-    res.json({ ok: true, taskId: id, claimsReleased: expiredClaims.rows.length });
+    res.json({
+      ok: true,
+      taskId: id,
+      claimsReleased: result.claimsReleased,
+      preservedPartialSubs: result.preservedPartialSubs,
+    });
   } catch (err) {
     req.log.error({ err }, "Cancel task error");
     res.status(500).json({ error: "Internal server error" });
@@ -1702,116 +1656,44 @@ router.post("/campaigns/:id/cancel", requireAdminRole, async (req, res) => {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
-  const reason = ((req.body as any)?.reason ?? "Cancelled via dashboard").trim();
+  const reason = String((req.body as any)?.reason ?? "").trim() || "Cancelled via dashboard";
 
   try {
-    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
-    if (!campaign) {
-      res.status(404).json({ error: "Campaign not found" });
+    const { actorDiscordId, actorUsername } = await resolveSessionActor(req);
+    const result = await cancelCampaignById({
+      campaignId: id,
+      reason,
+      actorDiscordId,
+      actorUsername,
+      source: "dashboard",
+      guild: getPrimaryGuild(),
+    });
+
+    if (!result.ok) {
+      res.status(result.code === "not_found" ? 404 : 400).json({ error: result.message, code: result.code });
       return;
     }
-    if (campaign.status === "cancelled") {
-      res.status(400).json({ error: "Campaign is already cancelled" });
-      return;
-    }
-
-    await db.execute(sql`UPDATE campaigns SET status = 'cancelled' WHERE id = ${id}`);
-
-    // BUG FIX: the prior filter — creator_discord_id + created_at>=campaign
-    // start — would close EVERY open task that creator started after the
-    // campaign began, including tasks belonging to other campaigns or
-    // standalone /task posts. Filter strictly by campaign_id so cancelling
-    // one campaign only touches its own tasks.
-    const openTasks = await db.execute<{ id: number; title: string; channel_message_id: string | null }>(
-      sql`UPDATE tasks SET status = 'closed'
-          WHERE campaign_id = ${id}
-            AND status = 'open'
-          RETURNING id, title, channel_message_id`
-    );
-
-    let releasedClaims = 0;
-    try {
-      const guild = getPrimaryGuild();
-      for (const t of openTasks.rows) {
-        const expired = await db.execute<{ id: number; discord_id: string; workspace_message_id: string | null }>(
-          sql`UPDATE claims SET status = 'expired' WHERE task_id = ${t.id} AND status = 'claimed' RETURNING id, discord_id, workspace_message_id`
-        );
-        releasedClaims += expired.rows.length;
-        if (guild) {
-          for (const c of expired.rows) {
-            const u = await guild.client.users.fetch(c.discord_id).catch(() => null);
-            if (u) {
-              await u.send({
-                embeds: [
-                  makeEmbed(COLORS.WARNING)
-                    .setTitle("⚠️ Campaign Cancelled")
-                    .setDescription(`Campaign **"${campaign.title}"** was cancelled. **Task #${t.id}** has been closed and your claim released.\n\n**Reason:** ${reason}`)
-                ],
-              }).catch(() => {});
-            }
-
-            // Remove Submit Proof button from the user's workspace embed
-            if (c.workspace_message_id) {
-              try {
-                const userRow = await db.execute<{ workspace_channel_id: string | null }>(
-                  sql`SELECT workspace_channel_id FROM users WHERE discord_id = ${c.discord_id} LIMIT 1`
-                );
-                const wsChannelId = userRow.rows[0]?.workspace_channel_id;
-                if (wsChannelId) {
-                  const ch = await guild.channels.fetch(wsChannelId).catch(() => null);
-                  if (ch && "messages" in ch) {
-                    const wsMsg = await (ch as any).messages.fetch(c.workspace_message_id).catch(() => null);
-                    if (wsMsg) {
-                      await wsMsg.edit({
-                        embeds: [
-                          makeEmbed(COLORS.MUTED)
-                            .setTitle(`❌ Task #${t.id} — CAMPAIGN CANCELLED`)
-                            .setDescription(`Campaign **"${campaign.title}"** was cancelled.\n\n**Reason:** ${reason}`)
-                        ],
-                        components: [],
-                      });
-                    }
-                  }
-                }
-              } catch (err) {
-                logger.warn({ err, claimId: c.id }, "Could not lock workspace embed on dashboard campaign cancel");
-              }
-            }
-          }
-
-          // Edit the public task message in #tasks to remove the Claim button
-          if (t.channel_message_id) {
-            try {
-              const { tasksChannel } = await setupGuild(guild);
-              const msg = await tasksChannel.messages.fetch(t.channel_message_id).catch(() => null);
-              if (msg) {
-                await msg.edit({
-                  embeds: [
-                    makeEmbed(COLORS.MUTED)
-                      .setTitle(`❌ Task #${t.id} — CAMPAIGN CANCELLED`)
-                      .setDescription(`This task was part of campaign **"${campaign.title}"** which was cancelled.\n\n**Reason:** ${reason}`)
-                  ],
-                  components: [],
-                });
-              }
-            } catch (err) {
-              logger.warn({ err, taskId: t.id }, "Could not edit task message on dashboard campaign cancel");
-            }
-          }
-        }
-      }
-    } catch { /* Discord edits best-effort */ }
-
-    await db.execute(
-      sql`UPDATE campaign_queue SET status = 'cancelled' WHERE campaign_id = ${id} AND status = 'pending'`
-    );
 
     req.log.info(
-      { campaignId: id, tasksClosed: openTasks.rows.length, releasedClaims, actor: (req as any).session?.adminUser?.username },
+      {
+        campaignId: id,
+        tasksClosed: result.tasksClosed,
+        preservedSubmittedTasks: result.preservedSubmittedTasks,
+        releasedClaims: result.releasedClaims,
+        queueCancelled: result.queueCancelled,
+        actor: actorUsername,
+      },
       "Dashboard: campaign cancelled"
     );
 
-    res.json({ ok: true, campaignId: id, tasksClosed: openTasks.rows.length, releasedClaims });
+    res.json({
+      ok: true,
+      campaignId: id,
+      tasksClosed: result.tasksClosed,
+      releasedClaims: result.releasedClaims,
+      preservedSubmittedTasks: result.preservedSubmittedTasks,
+      queueCancelled: result.queueCancelled,
+    });
   } catch (err) {
     req.log.error({ err }, "Cancel campaign error");
     res.status(500).json({ error: "Internal server error" });

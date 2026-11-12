@@ -24,7 +24,7 @@ import { handlePingCommand } from "./handlers/ping.js";
 import { handleStatsCommand } from "./handlers/stats.js";
 import { handleHealthCommand } from "./handlers/health.js";
 import { handleJoinerGuideCommand } from "./handlers/joinerGuide.js";
-import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCampaignStatusCommand } from "./handlers/canceltask.js";
+import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCancelCampaignButton, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 
 const SLOW_HANDLER_MS = 800;
@@ -148,6 +148,9 @@ export function registerInteractionHandler(client: Client) {
 
         if (scope === "campaign") {
           if (action === "claimnext") return await timed(tag, () => handleCampaignClaimNext(interaction, parseInt(p1)));
+          if (action === "cancelconfirm" || action === "cancelabort") {
+            return await timed(tag, () => handleCancelCampaignButton(interaction, action, p1, p2));
+          }
         }
 
         if (scope === "claim") {

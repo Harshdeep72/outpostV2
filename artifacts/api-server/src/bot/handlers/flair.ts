@@ -168,11 +168,34 @@ export function getMemberFlairRoleName(member: GuildMember): string | null {
   return flair ? flair.roleName : null;
 }
 
+export function cleanBaseDisplayName(displayName: string): string {
+  // Strip existing bracketed flair tag, e.g. "Skylerrr [⚡ Speed Demon]" -> "Skylerrr"
+  return displayName.replace(/\s*\[.*?\]\s*$/, "").trim();
+}
+
+export function formatNicknameWithFlair(baseName: string, flair: CommunityFlair): string {
+  // 1. Try full tag: "Skylerrr [⚡ Speed Demon]"
+  const full = `${baseName} [${flair.roleName}]`;
+  if (full.length <= 32) return full;
+
+  // 2. Try short name: "Skylerrr [Speed Demon]"
+  const withName = `${baseName} [${flair.name}]`;
+  if (withName.length <= 32) return withName;
+
+  // 3. Try emoji only: "Skylerrr [⚡]"
+  const withEmoji = `${baseName} [${flair.emoji}]`;
+  if (withEmoji.length <= 32) return withEmoji;
+
+  // 4. Truncate base name to fit emoji
+  const maxBase = Math.max(1, 32 - flair.emoji.length - 3);
+  return `${baseName.slice(0, maxBase)} [${flair.emoji}]`;
+}
+
 export async function setMemberFlair(
   guild: Guild,
   member: GuildMember,
   flairId: string
-): Promise<{ success: boolean; equippedFlair: CommunityFlair | null; error?: string }> {
+): Promise<{ success: boolean; equippedFlair: CommunityFlair | null; nicknameUpdated: boolean; error?: string }> {
   try {
     const roleMap = await ensureFlairRoles(guild);
 
@@ -194,25 +217,48 @@ export async function setMemberFlair(
       await member.roles.remove(rolesToRemove, "Switching/removing community flair");
     }
 
+    const baseName = cleanBaseDisplayName(member.displayName || member.user.username);
+    let nicknameUpdated = false;
+
     if (flairId === "none") {
-      return { success: true, equippedFlair: null };
+      try {
+        const targetNick = baseName === member.user.username ? null : baseName;
+        if (member.nickname !== targetNick) {
+          await member.setNickname(targetNick, "Removed community flair tag");
+          nicknameUpdated = true;
+        }
+      } catch (err) {
+        logger.debug({ err, userId: member.id }, "Could not reset member nickname (non-fatal, e.g. server owner)");
+      }
+      return { success: true, equippedFlair: null, nicknameUpdated };
     }
 
     const targetFlair = COMMUNITY_FLAIRS.find((f) => f.id === flairId);
     if (!targetFlair) {
-      return { success: false, equippedFlair: null, error: "Invalid flair selected" };
+      return { success: false, equippedFlair: null, nicknameUpdated: false, error: "Invalid flair selected" };
     }
 
     const roleToAssign = roleMap.get(targetFlair.id);
     if (!roleToAssign) {
-      return { success: false, equippedFlair: null, error: "Could not create or find flair role" };
+      return { success: false, equippedFlair: null, nicknameUpdated: false, error: "Could not create or find flair role" };
     }
 
     await member.roles.add(roleToAssign, "Equipped community flair");
-    return { success: true, equippedFlair: targetFlair };
+
+    try {
+      const newNick = formatNicknameWithFlair(baseName, targetFlair);
+      if (member.nickname !== newNick) {
+        await member.setNickname(newNick, "Applied community flair tag");
+        nicknameUpdated = true;
+      }
+    } catch (err) {
+      logger.debug({ err, userId: member.id }, "Could not set member nickname (non-fatal, e.g. server owner)");
+    }
+
+    return { success: true, equippedFlair: targetFlair, nicknameUpdated };
   } catch (err) {
     logger.warn({ err, userId: member.id, flairId }, "Failed to update member flair");
-    return { success: false, equippedFlair: null, error: (err as Error).message };
+    return { success: false, equippedFlair: null, nicknameUpdated: false, error: (err as Error).message };
   }
 }
 
@@ -253,13 +299,13 @@ export function buildFlairPickerEmbed(currentFlair?: CommunityFlair | null) {
   return makeEmbed(COLORS.PRIMARY)
     .setTitle("🎭 Reddit-Style Community Flairs")
     .setDescription(
-      `Show off your style in the server! Equipping a flair gives you a colored tag in chat and shows up on your profile card.\n\n` +
+      `Show off your style in the server! Equipping a flair gives you a colored name and custom **[Flair Tag]** right in chat, plus a neon glowing badge on your \`/profile\` card.\n\n` +
       `${currentText}\n\n` +
       `**How it works:**\n` +
       `• Select a flair from the menu below to equip it.\n` +
+      `• Your chat name will be tagged (e.g. \`Name [${currentFlair?.roleName ?? "⚡ Speed Demon"}]\`).\n` +
       `• You can only equip **1 flair** at a time.\n` +
-      `• Select **None / Remove Flair** anytime to clear it.\n` +
-      `• Your flair is visible on your \`/profile\` card and in the member list!`
+      `• Select **None / Remove Flair** anytime to clear it.`
     )
     .addFields({
       name: "📋 Available Flairs",
@@ -369,14 +415,18 @@ export async function handleFlairSelect(interaction: StringSelectMenuInteraction
   }
 
   if (result.equippedFlair) {
+    const isOwner = member.id === guild.ownerId;
     return interaction.editReply({
       embeds: [
         makeEmbed(COLORS.SUCCESS)
           .setTitle("🎭 Community Flair Equipped!")
           .setDescription(
             `You are now rocking the **${result.equippedFlair.roleName}** flair!\n\n` +
-            `• Visible in chat with custom role color\n` +
-            `• Visible on your \`/profile\` card\n` +
+            `• **In Chat:** ${result.nicknameUpdated ? `Your nickname is now tagged with **[${result.equippedFlair.roleName}]** in matching role color!` : "Tagged with your custom role color!"}\n` +
+            `• **On Profile:** Neon glowing badge on \`/profile\`\n` +
+            (isOwner
+              ? `\n*(Note: Discord does not permit bots to edit the Server Owner's nickname directly — you can set your nickname to \`YourName [${result.equippedFlair.roleName}]\` manually in Server Profile!)*\n`
+              : "") +
             `• Run \`/flair\` anytime if you want to switch or remove it.`
           ),
       ],

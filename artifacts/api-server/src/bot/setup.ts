@@ -46,6 +46,7 @@ export interface GuildSetup {
   announcementsChannel: TextChannel;
   updatesChannel: TextChannel;
   rejectedTasksChannel: TextChannel;
+  scamAlertsChannel: TextChannel;
 }
 
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
@@ -310,6 +311,11 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     readOnlyOverwrites(everyoneId, adminId, modId)
   );
 
+  const { channel: scamAlertsChannel } = await ensureTextChannel(
+    guild, CHANNELS.SCAM_ALERTS, communityCategory,
+    readOnlyOverwrites(everyoneId, adminId, modId)
+  );
+
   const { channel: tasksChannel } = await ensureTextChannel(
     guild, CHANNELS.TASKS, earnCategory,
     [
@@ -350,7 +356,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     communityCategory, earnCategory, workspacesCategory,
     tasksChannel, verificationLogChannel, taskLogsChannel, withdrawalLogChannel, leaderboardChannel,
     startHereChannel, guideChannel, generalChannel, referralEventsChannel, announcementsChannel,
-    updatesChannel, rejectedTasksChannel,
+    updatesChannel, rejectedTasksChannel, scamAlertsChannel,
   };
 
   setupCache.set(guild.id, { setup, expiry: Date.now() + 5 * 60 * 1000 });

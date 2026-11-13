@@ -10,6 +10,7 @@ export const CHANNELS = {
   REFERRAL_EVENTS: "referral-events",
   ANNOUNCEMENTS: "announcements",
   UPDATES: "updates",
+  SCAM_ALERTS: "scam-alerts",
   // Mod-only log channel for tasks rejected by the worker who claimed them.
   // Created lazily by setupGuild on next bot boot or first setup() call.
   REJECTED_TASKS: "rejected-tasks",

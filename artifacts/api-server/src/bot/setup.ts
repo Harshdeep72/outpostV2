@@ -22,6 +22,7 @@ import {
   REFERRAL_TIER2_MIN_AGE_DAYS,
 } from "./constants.js";
 import { logger } from "../lib/logger.js";
+import { ensureFlairRoles } from "./handlers/flair.js";
 
 export interface GuildSetup {
   adminRole: Role;
@@ -265,6 +266,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   const karma5kRole = await ensureRole(guild, ROLES.KARMA_5K, 0x3498DB, true);
   const verifiedRole = await ensureRole(guild, ROLES.VERIFIED, COLORS.SUCCESS, true);
   const unverifiedRole = await ensureRole(guild, ROLES.UNVERIFIED, 0x95A5A6, true);
+  void ensureFlairRoles(guild).catch((err) => logger.warn({ err }, "ensureFlairRoles failed"));
 
   const everyoneId = guild.roles.everyone.id;
   const adminId = adminRole.id;

@@ -12,6 +12,8 @@ import { COLORS } from "../constants.js";
 import { fetchRedditProfile } from "../reddit.js";
 import { logger } from "../../lib/logger.js";
 import { renderProfileCard } from "../card-renderer.js";
+import { getMemberFlairRoleName } from "./flair.js";
+import { getPrimaryGuild } from "../discord-client.js";
 
 /**
  * Fetch every Reddit account linked to a Discord user, merging the primary
@@ -109,11 +111,26 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
     ? `u/${user.redditUsername}`
     : linkedAccounts.map((u) => `u/${u}`).join(", ");
 
+  // Fetch member flair if inside guild
+  let userFlair: string | null = null;
+  const targetGuild = interaction.guild ?? getPrimaryGuild();
+  if (targetGuild) {
+    try {
+      const member = await targetGuild.members.fetch(discordId).catch(() => null);
+      if (member) {
+        userFlair = getMemberFlairRoleName(member);
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle(`📋 Profile — ${targetUser.username}`)
     .setThumbnail(targetUser.displayAvatarURL())
     .addFields(
       { name: hasMultiple ? `Linked Reddit Accounts (${linkedAccounts.length})` : "Reddit Account", value: linkedDisplay, inline: false },
+      ...(userFlair ? [{ name: "🎭 Community Flair", value: userFlair, inline: true }] : []),
       { name: "Account Age", value: `${ageDays} days`, inline: true },
       { name: "Registered", value: `<t:${createdUnix}:D>`, inline: true },
       { name: "Post Karma", value: postKarma.toLocaleString(), inline: true },
@@ -145,6 +162,7 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
       pending: formatMoney(user.balancePending),
       earned: formatMoney(user.totalEarned),
       freshenedNow,
+      flair: userFlair,
     });
     const file = new AttachmentBuilder(png, { name: "profile.png" });
     await interaction.editReply({ files: [file] });

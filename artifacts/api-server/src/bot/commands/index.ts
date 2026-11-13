@@ -554,6 +554,17 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDefaultMemberPermissions(0x20)
     .setDMPermission(false);
 
+  const flair = new SlashCommandBuilder()
+    .setName("flair")
+    .setDescription("Choose or remove your Reddit-style community flair")
+    .setDMPermission(false);
+
+  const sendflairpicker = new SlashCommandBuilder()
+    .setName("sendflairpicker")
+    .setDescription("[Admin] Send a permanent community flair picker embed in this channel")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false);
+
   return [
     verify, setup, createtask, bulktask, scheduletask, scheduledtasks, cancelscheduled, referral, referralUse,
     setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
@@ -564,6 +575,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
+    flair, sendflairpicker,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

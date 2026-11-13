@@ -26,6 +26,7 @@ import { handleHealthCommand } from "./handlers/health.js";
 import { handleJoinerGuideCommand } from "./handlers/joinerGuide.js";
 import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCancelCampaignButton, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
+import { handleFlairCommand, handleSendFlairPickerCommand, handleFlairSelect } from "./handlers/flair.js";
 
 const SLOW_HANDLER_MS = 800;
 
@@ -109,6 +110,8 @@ export function registerInteractionHandler(client: Client) {
         if (name === "forcepayout") return await timed(name, () => handleForcePayout(interaction));
         if (name === "requeue") return await timed(name, () => handleRequeueCommand(interaction));
         if (name === "verifiedlist") return await timed(name, () => handleVerifiedListCommand(interaction));
+        if (name === "flair") return await timed(name, () => handleFlairCommand(interaction));
+        if (name === "sendflairpicker") return await timed(name, () => handleSendFlairPickerCommand(interaction));
         logger.warn({ name }, "Unknown command");
         return;
       }
@@ -118,6 +121,9 @@ export function registerInteractionHandler(client: Client) {
         const tag = `select:${scope}:${action}`;
         if (scope === "sub" && action === "select") {
           return await timed(tag, () => handleSubmissionSelect(interaction));
+        }
+        if (scope === "flair" && action === "select") {
+          return await timed(tag, () => handleFlairSelect(interaction));
         }
       }
 

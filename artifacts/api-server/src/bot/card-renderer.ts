@@ -277,6 +277,7 @@ export interface ProfileCardData {
   pending: string;
   earned: string;
   freshenedNow: boolean;
+  flair?: string | null;
 }
 
 export async function renderProfileCard(d: ProfileCardData): Promise<Buffer> {
@@ -309,6 +310,25 @@ export async function renderProfileCard(d: ProfileCardData): Promise<Buffer> {
     font: "bold 11px monospace", color: C.accentStrong,
   });
   ctx.restore();
+
+  // Community flair pill (if equipped).
+  if (d.flair) {
+    ctx.save();
+    ctx.font = "bold 11px sans-serif";
+    const textWidth = ctx.measureText(d.flair).width;
+    const pillW = Math.max(110, Math.min(240, textWidth + 24));
+    roundedRect(ctx, 280, 165, pillW, 26, 6);
+    ctx.fillStyle = C.card;
+    ctx.fill();
+    ctx.strokeStyle = "#60a5fa"; // blue-400 accent border
+    ctx.stroke();
+    drawText(ctx, d.flair, 292, 183, {
+      font: "bold 11px sans-serif",
+      color: C.text,
+      maxWidth: pillW - 20,
+    });
+    ctx.restore();
+  }
 
   // 3 karma cards.
   const stats = [

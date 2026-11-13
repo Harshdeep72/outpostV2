@@ -278,6 +278,7 @@ export interface ProfileCardData {
   earned: string;
   freshenedNow: boolean;
   flair?: string | null;
+  flairColor?: string | null;
 }
 
 export async function renderProfileCard(d: ProfileCardData): Promise<Buffer> {
@@ -311,20 +312,42 @@ export async function renderProfileCard(d: ProfileCardData): Promise<Buffer> {
   });
   ctx.restore();
 
-  // Community flair pill (if equipped).
+  // Community flair pill (with neon glow and gradient).
   if (d.flair) {
     ctx.save();
+    const glowColor = d.flairColor || "#38bdf8";
     ctx.font = "bold 11px sans-serif";
     const textWidth = ctx.measureText(d.flair).width;
-    const pillW = Math.max(110, Math.min(240, textWidth + 24));
-    roundedRect(ctx, 280, 165, pillW, 26, 6);
-    ctx.fillStyle = C.card;
+    const pillW = Math.max(110, Math.min(250, textWidth + 24));
+    const pillX = 280;
+    const pillY = 165;
+    const pillH = 26;
+
+    // Glowing outer shadow
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Rounded background with subtle dark gradient
+    roundedRect(ctx, pillX, pillY, pillW, pillH, 6);
+    const grad = ctx.createLinearGradient(pillX, pillY, pillX + pillW, pillY + pillH);
+    grad.addColorStop(0, "rgba(24, 24, 27, 0.95)");
+    grad.addColorStop(1, "rgba(39, 39, 42, 0.95)");
+    ctx.fillStyle = grad;
     ctx.fill();
-    ctx.strokeStyle = "#60a5fa"; // blue-400 accent border
+
+    // Glowing neon border
+    ctx.strokeStyle = glowColor;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-    drawText(ctx, d.flair, 292, 183, {
+
+    // Glowing text
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 6;
+    drawText(ctx, d.flair, pillX + 12, pillY + 18, {
       font: "bold 11px sans-serif",
-      color: C.text,
+      color: "#ffffff",
       maxWidth: pillW - 20,
     });
     ctx.restore();

@@ -12,7 +12,7 @@ import { COLORS } from "../constants.js";
 import { fetchRedditProfile } from "../reddit.js";
 import { logger } from "../../lib/logger.js";
 import { renderProfileCard } from "../card-renderer.js";
-import { getMemberFlairRoleName } from "./flair.js";
+import { getMemberFlairRoleName, getMemberFlair } from "./flair.js";
 import { getPrimaryGuild } from "../discord-client.js";
 
 /**
@@ -113,12 +113,17 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
 
   // Fetch member flair if inside guild
   let userFlair: string | null = null;
+  let userFlairColor: string | null = null;
   const targetGuild = interaction.guild ?? getPrimaryGuild();
   if (targetGuild) {
     try {
       const member = await targetGuild.members.fetch(discordId).catch(() => null);
       if (member) {
-        userFlair = getMemberFlairRoleName(member);
+        const flairObj = getMemberFlair(member);
+        if (flairObj) {
+          userFlair = flairObj.roleName;
+          userFlairColor = `#${flairObj.color.toString(16).padStart(6, "0")}`;
+        }
       }
     } catch {
       // non-fatal
@@ -163,6 +168,7 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
       earned: formatMoney(user.totalEarned),
       freshenedNow,
       flair: userFlair,
+      flairColor: userFlairColor,
     });
     const file = new AttachmentBuilder(png, { name: "profile.png" });
     await interaction.editReply({ files: [file] });

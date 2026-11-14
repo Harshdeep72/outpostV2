@@ -128,7 +128,7 @@ def main():
 
     # Select proxy if requested
     proxies = get_proxies() if use_proxy else []
-    max_attempts = max(len(proxies), 3) if use_proxy and proxies else 3
+    max_attempts = min(len(proxies), 3) if use_proxy and proxies else 3
 
     last_err = "No attempts made"
     

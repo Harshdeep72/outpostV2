@@ -138,12 +138,23 @@ router.get("/settings/auto-bump", requireAuth, async (_req, res) => {
 });
 
 router.patch("/settings/auto-bump", requireAdminRole, async (req, res) => {
-  const { enabled } = (req.body ?? {}) as { enabled?: unknown };
-  if (typeof enabled !== "boolean") {
+  const { enabled, intervalMin, percent, capPercent } = (req.body ?? {}) as {
+    enabled?: unknown;
+    intervalMin?: unknown;
+    percent?: unknown;
+    capPercent?: unknown;
+  };
+  if (enabled !== undefined && typeof enabled !== "boolean") {
     return res.status(400).json({ error: "enabled (boolean) is required" });
   }
   try {
-    const next = await setAutoBumpConfig({ enabled });
+    const patchPayload: Record<string, unknown> = {};
+    if (typeof enabled === "boolean") patchPayload.enabled = enabled;
+    if (typeof intervalMin === "number" && intervalMin > 0) patchPayload.intervalMin = intervalMin;
+    if (typeof percent === "number" && percent > 0) patchPayload.percent = percent;
+    if (typeof capPercent === "number" && capPercent > 0) patchPayload.capPercent = capPercent;
+
+    const next = await setAutoBumpConfig(patchPayload);
     res.json(next);
   } catch (err) {
     logger.error({ err }, "PATCH /settings/auto-bump failed");

@@ -449,7 +449,12 @@ function MaxRedditAccountsSection() {
   );
 }
 
-interface AutoBumpConfig { enabled: boolean }
+interface AutoBumpConfig {
+  enabled: boolean;
+  intervalMin?: number;
+  percent?: number;
+  capPercent?: number;
+}
 
 function AutoBumpSection() {
   const qc = useQueryClient();
@@ -459,26 +464,51 @@ function AutoBumpSection() {
     retry: 2,
   });
   const [enabled, setEnabled] = useState(false);
+  const [intervalMin, setIntervalMin] = useState("60");
+  const [percent, setPercent] = useState("10");
+  const [capPercent, setCapPercent] = useState("50");
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  useEffect(() => { if (data) setEnabled(data.enabled); }, [data]);
+
+  useEffect(() => {
+    if (data) {
+      setEnabled(data.enabled ?? false);
+      setIntervalMin(String(data.intervalMin ?? 60));
+      setPercent(String(data.percent ?? 10));
+      setCapPercent(String(data.capPercent ?? 50));
+    }
+  }, [data]);
 
   const save = useMutation({
-    mutationFn: () => patch<AutoBumpConfig>("/admin/settings/auto-bump", { enabled }),
+    mutationFn: () =>
+      patch<AutoBumpConfig>("/admin/settings/auto-bump", {
+        enabled,
+        intervalMin: Math.max(5, parseInt(intervalMin) || 60),
+        percent: Math.max(1, parseInt(percent) || 10),
+        capPercent: Math.max(5, parseInt(capPercent) || 50),
+      }),
     onSuccess: (next) => {
       qc.setQueryData(["admin-settings-auto-bump"], next);
       setSavedAt(Date.now());
     },
   });
 
+  const parsedInterval = parseInt(intervalMin) || 60;
+  const parsedPercent = parseInt(percent) || 10;
+  const parsedCap = parseInt(capPercent) || 50;
+
+  const isDirty =
+    enabled !== (data?.enabled ?? false) ||
+    parsedInterval !== (data?.intervalMin ?? 60) ||
+    parsedPercent !== (data?.percent ?? 10) ||
+    parsedCap !== (data?.capPercent ?? 50);
+
   return (
     <section className="rounded-xl border border-border bg-card p-6 space-y-5">
       <div>
         <h2 className="text-base font-semibold">Auto-Bump (Dutch auction)</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Master switch for the reward auto-bumper. When ON, unclaimed tasks
-          with per-task auto-bump configured will have their reward gradually
-          raised until claimed (capped). When OFF, the cron is fully dormant
-          and no task is ever bumped — safe default.
+          Automatically increases rewards for open tasks that remain unclaimed so workers pick them up faster.
+          When ON, any open task with 0 claimed slots will have its reward gradually raised every interval (default 1 hr) until claimed.
         </p>
       </div>
 
@@ -497,11 +527,77 @@ function AutoBumpSection() {
             <span className="text-sm">
               <span className="font-medium text-foreground">Auto-bump enabled</span>
               <span className="block text-muted-foreground mt-0.5">
-                Off by default. Even when ON, only tasks you explicitly
-                configured via the per-task auto-bump endpoint will be bumped.
+                Automatically bump unclaimed tasks after sitting for {parsedInterval >= 60 ? `${(parsedInterval / 60).toFixed(parsedInterval % 60 === 0 ? 0 : 1)} hr` : `${parsedInterval} min`}.
               </span>
             </span>
           </label>
+
+          {enabled && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-border">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Unclaimed interval
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="5"
+                    max="1440"
+                    value={intervalMin}
+                    onChange={(e) => setIntervalMin(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="60"
+                  />
+                  <span className="absolute right-3 top-2 text-xs text-muted-foreground">min</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Default 60 min (1 hour)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Reward bump increase
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={percent}
+                    onChange={(e) => setPercent(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="10"
+                  />
+                  <span className="absolute right-3 top-2 text-xs text-muted-foreground">%</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  e.g. +10% per bump
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Maximum cap
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="5"
+                    max="500"
+                    value={capPercent}
+                    onChange={(e) => setCapPercent(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="50"
+                  />
+                  <span className="absolute right-3 top-2 text-xs text-muted-foreground">%</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Max total increase (e.g. +50%)
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <div className="text-xs text-muted-foreground">
@@ -514,7 +610,7 @@ function AutoBumpSection() {
             <button
               type="button"
               onClick={() => save.mutate()}
-              disabled={save.isPending || enabled === (data?.enabled ?? false)}
+              disabled={save.isPending || !isDirty}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 transition"
             >
               {save.isPending ? "Saving…" : "Save"}

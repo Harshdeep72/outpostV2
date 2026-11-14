@@ -112,17 +112,27 @@ export async function setMaxRedditAccounts(max: number): Promise<number> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Feature #9 — Dutch auction auto-bump master switch.
-// Off by default. When disabled, the autoBumper cron does nothing even if
-// individual tasks have auto_bump_percent > 0. Gives admins one "kill switch".
+// Feature #9 — Dutch auction auto-bump master switch & global defaults.
+// When enabled, tasks left unclaimed (slots_filled = 0) for intervalMin
+// (default 60m / 1h) automatically have their reward raised by percent
+// (default 10%) up to capPercent (default 50%).
+// Individual tasks can still override with per-task auto_bump_percent > 0.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AutoBumpConfig {
   enabled: boolean;
+  intervalMin: number;
+  percent: number;
+  capPercent: number;
 }
 
 const AUTO_BUMP_KEY = "auto_bump";
-const DEFAULT_AUTO_BUMP: AutoBumpConfig = { enabled: false };
+const DEFAULT_AUTO_BUMP: AutoBumpConfig = {
+  enabled: false,
+  intervalMin: 60,
+  percent: 10,
+  capPercent: 50,
+};
 let autoBumpCache: { value: AutoBumpConfig; at: number } | null = null;
 
 export async function getAutoBumpConfig(): Promise<AutoBumpConfig> {
@@ -136,8 +146,18 @@ export async function getAutoBumpConfig(): Promise<AutoBumpConfig> {
     );
     const raw = res.rows[0]?.value;
     let cfg: AutoBumpConfig = { ...DEFAULT_AUTO_BUMP };
-    if (raw && typeof raw === "object" && typeof (raw as any).enabled === "boolean") {
-      cfg.enabled = (raw as any).enabled;
+    if (raw && typeof raw === "object") {
+      const v = raw as Record<string, unknown>;
+      if (typeof v.enabled === "boolean") cfg.enabled = v.enabled;
+      if (typeof v.intervalMin === "number" && Number.isFinite(v.intervalMin) && v.intervalMin > 0) {
+        cfg.intervalMin = Math.round(v.intervalMin);
+      }
+      if (typeof v.percent === "number" && Number.isFinite(v.percent) && v.percent > 0) {
+        cfg.percent = Math.round(v.percent);
+      }
+      if (typeof v.capPercent === "number" && Number.isFinite(v.capPercent) && v.capPercent > 0) {
+        cfg.capPercent = Math.round(v.capPercent);
+      }
     }
     autoBumpCache = { value: cfg, at: now };
     return cfg;
@@ -152,6 +172,9 @@ export async function setAutoBumpConfig(input: Partial<AutoBumpConfig>): Promise
   const current = await getAutoBumpConfig();
   const next: AutoBumpConfig = {
     enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled,
+    intervalMin: typeof input.intervalMin === "number" && input.intervalMin > 0 ? Math.round(input.intervalMin) : current.intervalMin,
+    percent: typeof input.percent === "number" && input.percent > 0 ? Math.round(input.percent) : current.percent,
+    capPercent: typeof input.capPercent === "number" && input.capPercent > 0 ? Math.round(input.capPercent) : current.capPercent,
   };
   await db.execute(
     sql`INSERT INTO "system_settings" ("key", "value", "updated_at")

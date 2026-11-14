@@ -7,6 +7,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { pool } from "@workspace/db";
 import router from "./routes/index.js";
+import payoutsRouter from "./routes/payouts.js";
 import { logger } from "./lib/logger.js";
 
 const app: Express = express();
@@ -320,6 +321,8 @@ app.use(
 );
 
 app.use("/api", router);
+app.use("/payouts", payoutsRouter);
+app.use("/api/payouts", payoutsRouter);
 
 // Optional: serve the built dashboard from this same Node process.
 // If DASHBOARD_DIST_PATH is not explicitly set, auto-detect from known locations.

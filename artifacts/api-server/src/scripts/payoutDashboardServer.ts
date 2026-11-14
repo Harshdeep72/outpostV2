@@ -778,7 +778,7 @@ async function start() {
   console.log(`Discord logged in as ${discordClient.user?.tag}`);
 
   const server = http.createServer(app);
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(Number(PORT), "0.0.0.0", () => {
     console.log(`\n======================================================`);
     console.log(`🚀 UPI PAYOUT STATION LIVE!`);
     console.log(`• Local URL:      http://localhost:${PORT}`);

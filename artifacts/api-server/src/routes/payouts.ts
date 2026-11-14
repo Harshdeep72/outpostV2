@@ -237,7 +237,7 @@ router.get("/", (_req: Request, res: Response) => {
   }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   body { background: var(--bg); color: var(--text-main); min-height: 100vh; padding: 24px 16px; }
-  .container { max-width: 1200px; margin: 0 auto; }
+  .container { max-width: 1060px; margin: 0 auto; }
 
   /* Header */
   header {
@@ -253,8 +253,8 @@ router.get("/", (_req: Request, res: Response) => {
     gap: 16px;
     box-shadow: 0 10px 25px -5px rgba(0,0,0,0.4);
   }
-  .header-left h1 { font-size: 1.6rem; font-weight: 800; display: flex; align-items: center; gap: 10px; color: #fff; }
-  .header-left p { color: #a5b4fc; font-size: 0.9rem; margin-top: 4px; }
+  .header-left h1 { font-size: 1.5rem; font-weight: 800; display: flex; align-items: center; gap: 10px; color: #fff; }
+  .header-left p { color: #a5b4fc; font-size: 0.88rem; margin-top: 4px; }
 
   .rate-box {
     background: rgba(15, 23, 42, 0.8);
@@ -307,7 +307,7 @@ router.get("/", (_req: Request, res: Response) => {
   /* Summary Stats */
   .stats-bar {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 14px;
     margin-bottom: 24px;
   }
@@ -321,7 +321,7 @@ router.get("/", (_req: Request, res: Response) => {
     gap: 4px;
   }
   .stat-box .title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); font-weight: 600; }
-  .stat-box .val { font-size: 1.5rem; font-weight: 800; color: #fff; }
+  .stat-box .val { font-size: 1.4rem; font-weight: 800; color: #fff; }
 
   /* Progress Bar */
   .progress-wrap {
@@ -361,23 +361,26 @@ router.get("/", (_req: Request, res: Response) => {
   .tab-btn:hover { background: #1f2937; color: #fff; }
   .tab-btn.active { background: #2563eb; color: #fff; border-color: #3b82f6; }
 
-  /* Grid of Cards */
+  /* Grid of Cards: 2 Columns on Desktop, 1 on Mobile */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px;
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
   }
 
   .card {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     border-radius: 16px;
-    padding: 18px;
+    padding: 16px;
     display: flex;
     gap: 16px;
+    align-items: stretch;
     transition: all 0.2s;
-    position: relative;
-    overflow: hidden;
+    min-width: 0;
   }
   .card:hover { border-color: #3b82f6; box-shadow: 0 8px 24px -4px rgba(59, 130, 246, 0.15); }
   .card.is-paid {
@@ -394,8 +397,8 @@ router.get("/", (_req: Request, res: Response) => {
     background: #fff;
     padding: 8px;
     border-radius: 12px;
-    width: 140px;
-    height: 140px;
+    width: 135px;
+    height: 135px;
     flex-shrink: 0;
   }
   .qr-img { width: 100%; height: 100%; object-fit: contain; }
@@ -403,6 +406,7 @@ router.get("/", (_req: Request, res: Response) => {
 
   .card-body {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -412,9 +416,27 @@ router.get("/", (_req: Request, res: Response) => {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
   }
-  .username { font-size: 1.1rem; font-weight: 700; color: #fff; }
-  .badge-row { display: flex; gap: 6px; margin-top: 4px; }
+  .user-info {
+    min-width: 0;
+    flex: 1;
+  }
+  .username {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
   .wd-pill {
     background: #1e293b;
     color: #94a3b8;
@@ -422,6 +444,7 @@ router.get("/", (_req: Request, res: Response) => {
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
+    white-space: nowrap;
   }
   .ws-pill {
     background: #312e81;
@@ -430,10 +453,23 @@ router.get("/", (_req: Request, res: Response) => {
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 4px;
+    white-space: nowrap;
   }
 
-  .inr-val { font-size: 1.35rem; font-weight: 800; color: #38bdf8; }
-  .usd-val { font-size: 0.8rem; color: var(--text-muted); }
+  .amount-info {
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .inr-val {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #38bdf8;
+    line-height: 1.2;
+  }
+  .usd-val {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
 
   .vpa-pill {
     background: #020617;
@@ -443,12 +479,17 @@ router.get("/", (_req: Request, res: Response) => {
     font-family: monospace;
     font-size: 0.85rem;
     color: #e2e8f0;
-    word-break: break-all;
+    margin: 8px 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 4px;
-    margin: 8px 0;
+    gap: 6px;
+    min-width: 0;
+  }
+  .vpa-pill span {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .copy-btn {
     background: #1e293b;
@@ -464,43 +505,46 @@ router.get("/", (_req: Request, res: Response) => {
   .copy-btn:hover { background: #334155; color: #fff; }
 
   .card-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
     gap: 8px;
     margin-top: 6px;
   }
   .btn-pay-app {
+    flex: 1;
     background: #2563eb;
     color: #fff;
     border: none;
-    padding: 9px 10px;
+    padding: 9px 12px;
     border-radius: 8px;
     font-size: 0.85rem;
     font-weight: 700;
     text-align: center;
     text-decoration: none;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    white-space: nowrap;
     transition: background 0.15s;
   }
   .btn-pay-app:hover { background: #1d4ed8; }
 
   .btn-mark-paid {
+    flex: 1;
     background: #059669;
     color: #fff;
     border: none;
-    padding: 9px 10px;
+    padding: 9px 12px;
     border-radius: 8px;
     font-size: 0.85rem;
     font-weight: 700;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    white-space: nowrap;
     transition: background 0.15s;
   }
   .btn-mark-paid:hover { background: #047857; }
@@ -543,11 +587,13 @@ router.get("/", (_req: Request, res: Response) => {
     to { transform: translateY(0); opacity: 1; }
   }
 
-  @media (max-width: 600px) {
+  @media (max-width: 520px) {
     .card { flex-direction: column; align-items: center; text-align: center; }
+    .card-body { width: 100%; }
     .user-header { flex-direction: column; align-items: center; gap: 4px; }
+    .amount-info { text-align: center; margin-top: 4px; }
     .badge-row { justify-content: center; }
-    .qr-section { width: 180px; height: 180px; }
+    .qr-section { width: 160px; height: 160px; }
     .vpa-pill { justify-content: center; }
   }
 </style>
@@ -614,8 +660,7 @@ let isLiveApiMode = true;
 let currentRate = 94.29;
 
 function getApiBase() {
-  const p = window.location.pathname.replace(/\\/$/, '');
-  return p;
+  return window.location.pathname.replace(/\\/$/, '');
 }
 
 async function loadData() {
@@ -711,21 +756,21 @@ function render() {
       <div class="card-body">
         <div>
           <div class="user-header">
-            <div>
-              <div class="username">\${w.discord_username}</div>
+            <div class="user-info">
+              <div class="username" title="\${w.discord_username}">\${w.discord_username}</div>
               <div class="badge-row">
                 <span class="wd-pill">#\${w.id}</span>
                 \${w.workspace_channel_id ? '<span class="ws-pill">📂 Workspace Linked</span>' : ''}
               </div>
             </div>
-            <div style="text-align: right;">
+            <div class="amount-info">
               <div class="inr-val">₹\${inrAmt}</div>
               <div class="usd-val">$\${parseFloat(w.amount).toFixed(2)} USD</div>
             </div>
           </div>
           
-          <div class="vpa-pill" style="margin-top: 8px;">
-            <span>\${w.destination}</span>
+          <div class="vpa-pill">
+            <span title="\${w.destination}">\${w.destination}</span>
             <button class="copy-btn" onclick="copyText('\${w.destination}')" title="Copy">📋 Copy</button>
           </div>
         </div>

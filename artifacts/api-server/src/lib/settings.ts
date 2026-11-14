@@ -112,26 +112,22 @@ export async function setMaxRedditAccounts(max: number): Promise<number> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Feature #9 — Dutch auction auto-bump master switch & global defaults.
+// Feature #9 — Auto-bump unclaimed tasks in Discord.
 // When enabled, tasks left unclaimed (slots_filled = 0) for intervalMin
-// (default 60m / 1h) automatically have their reward raised by percent
-// (default 10%) up to capPercent (default 50%).
-// Individual tasks can still override with per-task auto_bump_percent > 0.
+// (default 60m / 1h) are automatically re-bumped to the top of the #tasks
+// channel in Discord with an @here notification so workers see them.
+// Reward is NEVER changed ($1.00/comment rate preserved).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface AutoBumpConfig {
   enabled: boolean;
   intervalMin: number;
-  percent: number;
-  capPercent: number;
 }
 
 const AUTO_BUMP_KEY = "auto_bump";
 const DEFAULT_AUTO_BUMP: AutoBumpConfig = {
-  enabled: false,
+  enabled: true,
   intervalMin: 60,
-  percent: 10,
-  capPercent: 50,
 };
 let autoBumpCache: { value: AutoBumpConfig; at: number } | null = null;
 
@@ -152,12 +148,6 @@ export async function getAutoBumpConfig(): Promise<AutoBumpConfig> {
       if (typeof v.intervalMin === "number" && Number.isFinite(v.intervalMin) && v.intervalMin > 0) {
         cfg.intervalMin = Math.round(v.intervalMin);
       }
-      if (typeof v.percent === "number" && Number.isFinite(v.percent) && v.percent > 0) {
-        cfg.percent = Math.round(v.percent);
-      }
-      if (typeof v.capPercent === "number" && Number.isFinite(v.capPercent) && v.capPercent > 0) {
-        cfg.capPercent = Math.round(v.capPercent);
-      }
     }
     autoBumpCache = { value: cfg, at: now };
     return cfg;
@@ -173,8 +163,6 @@ export async function setAutoBumpConfig(input: Partial<AutoBumpConfig>): Promise
   const next: AutoBumpConfig = {
     enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled,
     intervalMin: typeof input.intervalMin === "number" && input.intervalMin > 0 ? Math.round(input.intervalMin) : current.intervalMin,
-    percent: typeof input.percent === "number" && input.percent > 0 ? Math.round(input.percent) : current.percent,
-    capPercent: typeof input.capPercent === "number" && input.capPercent > 0 ? Math.round(input.capPercent) : current.capPercent,
   };
   await db.execute(
     sql`INSERT INTO "system_settings" ("key", "value", "updated_at")

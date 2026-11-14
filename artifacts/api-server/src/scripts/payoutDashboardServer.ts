@@ -631,7 +631,7 @@ function render() {
   filtered.forEach(w => {
     const isPaid = w.status === 'approved';
     const inrAmt = (parseFloat(w.amount) * rate).toFixed(2);
-    const upiLink = \`upi://pay?pa=\${encodeURIComponent(w.destination)}&pn=\${encodeURIComponent(w.discord_username)}&am=\${inrAmt}&cu=INR&tn=\${encodeURIComponent('Reddit Microtasks WD#' + w.id)}\`;
+    const upiLink = \`upi://pay?pa=\${encodeURIComponent(w.destination)}&pn=\${encodeURIComponent(w.discord_username)}&am=\${inrAmt}&cu=INR&tn=\${encodeURIComponent('Payment from reddit microtasks')}\`;
     const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=\${encodeURIComponent(upiLink)}\`;
 
     const card = document.createElement('div');

@@ -288,7 +288,7 @@ function render() {
     const isPaid = paidSet.has(p.id);
     if (isPaid) paidCount++;
 
-    const upiLink = `upi://pay?pa=${encodeURIComponent(p.vpa)}&pn=${encodeURIComponent(p.user)}&am=${inr}&cu=INR&tn=${encodeURIComponent('Reddit Microtasks #' + p.id)}`;
+    const upiLink = `upi://pay?pa=${encodeURIComponent(p.vpa)}&pn=${encodeURIComponent(p.user)}&am=${inr}&cu=INR&tn=${encodeURIComponent('Payment from reddit microtasks')}`;
 
     const card = document.createElement("div");
     card.className = `payout-item ${isPaid ? 'paid' : ''}`;
@@ -351,7 +351,7 @@ function markPaid(id) {
 }
 
 function showQr(user, vpa, inr, id) {
-  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(user)}&am=${inr}&cu=INR&tn=${encodeURIComponent('Reddit Microtasks #' + id)}`;
+  const upiUri = `upi://pay?pa=${encodeURIComponent(vpa)}&pn=${encodeURIComponent(user)}&am=${inr}&cu=INR&tn=${encodeURIComponent('Payment from reddit microtasks')}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUri)}`;
   document.getElementById("qrUser").textContent = user;
   document.getElementById("qrAmount").textContent = `₹${inr}`;

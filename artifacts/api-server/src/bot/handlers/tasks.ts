@@ -881,6 +881,14 @@ export async function handleTaskClaim(
 
   if (!twitterTask && !quoraTask) {
     wsFields.push({
+      name: "⚠️ Anti-Spam Rule (Crucial for Approval)",
+      value:
+        "• **Do NOT copy-paste directly:** Reddit's spam AI automatically shadow-removes identical copy-pasted comments.\n" +
+        "• **Slightly rephrase or type by hand** in your own words while keeping the exact brand name intact.\n" +
+        "• **Always verify in Incognito:** Test your comment link in a Private / Incognito window to confirm it is publicly visible.",
+      inline: false,
+    });
+    wsFields.push({
       name: "⏱️ How to Spend Your 1-Hour Window (Keep Comments Live)",
       value:
         "⚠️ **Brand Rule:** The brand is what clients pay for — **never remove or divert away from the brand**!\n" +
@@ -1107,6 +1115,14 @@ export async function handleAssignTaskCommand(interaction: ChatInputCommandInter
   }
 
   if (!twitterTask && !quoraTask) {
+    wsFields.push({
+      name: "⚠️ Anti-Spam Rule (Crucial for Approval)",
+      value:
+        "• **Do NOT copy-paste directly:** Reddit's spam AI automatically shadow-removes identical copy-pasted comments.\n" +
+        "• **Slightly rephrase or type by hand** in your own words while keeping the exact brand name intact.\n" +
+        "• **Always verify in Incognito:** Test your comment link in a Private / Incognito window to confirm it is publicly visible.",
+      inline: false,
+    });
     wsFields.push({
       name: "⏱️ How to Spend Your 1-Hour Window (Keep Comments Live)",
       value:
@@ -1451,7 +1467,7 @@ export async function handleClaimCopy(
   // copy icon on the block. We escape any stray ``` to prevent breaking out.
   const safe = content.replace(/```/g, "''");
   const tip = label === "comment"
-    ? "\n\n💡 **Tip:** Please type it manually in your own natural words while keeping the brand name for 100% comment survival!"
+    ? "\n\n⚠️ **Anti-Spam Rule:** Do NOT paste this verbatim into Reddit! Slightly rephrase in your own natural words so Reddit's spam filter does not shadow-delete your comment. Keep the exact brand name intact!"
     : "";
   await interaction.editReply({ content: `📋 **Copy this ${label}** (tap the copy icon on mobile):\n\`\`\`\n${safe}\n\`\`\`${tip}` });
 }
@@ -1871,22 +1887,26 @@ export async function handleClaimSubmitModal(interaction: ModalSubmitInteraction
     await interaction.editReply({
       embeds: [
         makeEmbed(COLORS.WARNING)
-          .setTitle(`${v.statusEmoji} Proof Validated — Hold Period Started`)
+          .setTitle(`${v.statusEmoji} Proof Validated — 24h Hold Started`)
           .setDescription(
-            `Your comment is **${v.statusLabel.toLowerCase()}** with **${upsLabel}**.\n\n` +
-            `Your proof is in the **${holdHoursDisplay} verification hold**. Keep your comment live — ` +
-            `it will be re-checked at <t:${unixAvail}:F>. If it is still live then, **${formatMoney(task.reward)}** will be paid out automatically.`
+            `Your comment was verified as **${v.statusLabel.toLowerCase()}** with **${upsLabel}**.\n\n` +
+            `💰 **Pending Reward:** **${formatMoney(task.reward)}** has been added to your **Pending Balance** (check with \`/wallet\`).\n` +
+            `⏱️ **Unlocks In:** <t:${unixAvail}:R> (<t:${unixAvail}:F>). Once the 24h hold completes and your comment is still live, it automatically moves to your **Available Balance**.\n\n` +
+            `⚠️ **Reddit Shadowban Warning:**\n` +
+            `Reddit often hides spam comments from public view while still showing them to you when logged into your account. ` +
+            `**Always open your proof URL in a Private / Incognito window** to confirm other users can actually see it!`
           ),
       ],
     });
 
     try {
       await member_dm(guild, user.discordId, makeEmbed(COLORS.WARNING)
-        .setTitle("⏳ Proof Validated — Verification Hold")
+        .setTitle("⏳ Proof Validated — 24h Hold Started")
         .setDescription(
           `Your submission for **${task.title}** passed initial validation!\n\n` +
-          `**Keep your comment live.** It will be re-checked at <t:${unixAvail}:F>.\n` +
-          `If it is still live at that point, **${formatMoney(sub.reward)}** will be moved from your pending balance to available automatically.`
+          `💰 **${formatMoney(sub.reward)}** added to your **Pending Balance**.\n` +
+          `⏱️ Moves to **Available Balance** automatically in <t:${unixAvail}:R> (<t:${unixAvail}:F>).\n\n` +
+          `💡 *Tip: Test your comment link in an Incognito / Private window to confirm it's visible to the public.*`
         ));
     } catch {}
 

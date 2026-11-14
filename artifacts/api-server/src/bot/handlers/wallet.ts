@@ -116,15 +116,42 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
   const streak = await getUserStreak(user.discordId);
   const streakLabel = streak === 0 ? "—" : `🔥 ${streak} day${streak === 1 ? "" : "s"}`;
 
+  let nextUnlockUnix: number | null = null;
+  if (parseFloat(user.balancePending) > 0) {
+    try {
+      const unlockRes = await db.execute<{ next_avail: Date | null }>(
+        sql`SELECT MIN(available_at) as next_avail
+              FROM submissions
+             WHERE discord_id = ${user.discordId}
+               AND review_status = 'pending_hold'
+               AND available_at > NOW()`
+      );
+      if (unlockRes.rows[0]?.next_avail) {
+        nextUnlockUnix = Math.floor(new Date(unlockRes.rows[0].next_avail).getTime() / 1000);
+      }
+    } catch (err) {
+      logger.debug({ err }, "Could not fetch next unlock for wallet");
+    }
+  }
+
+  const pendingDisplay = nextUnlockUnix
+    ? `${formatMoney(user.balancePending)}\n*(Unlocks <t:${nextUnlockUnix}:R>)*`
+    : formatMoney(user.balancePending);
+
   const embed = makeEmbed(COLORS.PRIMARY)
     .setTitle(`💼 Wallet — ${target.username}`)
     .setThumbnail(target.displayAvatarURL())
+    .setDescription(
+      parseFloat(user.balancePending) > 0
+        ? `💡 *Pending rewards are on a 24-hour verification hold. Once comments pass the live check, they move to Available automatically.*`
+        : ""
+    )
     .addFields(
       { name: "Status", value: user.verified ? "✅ Verified earner" : "❌ Not yet verified", inline: true },
       ...(user.redditUsername ? [{ name: "Reddit", value: `[u/${user.redditUsername}](https://reddit.com/u/${user.redditUsername})`, inline: true }] : []),
       { name: "\u200b", value: "\u200b" },
       { name: "💰 Available", value: formatMoney(user.balanceAvailable), inline: true },
-      { name: "⏳ Pending", value: formatMoney(user.balancePending), inline: true },
+      { name: "⏳ Pending", value: pendingDisplay, inline: true },
       { name: "📈 Lifetime Earnings", value: formatMoney(user.totalEarned), inline: true },
       { name: "🔗 Referral Earnings", value: formatMoney(user.referralEarnings), inline: true },
       { name: `🛡️ Trust Score`, value: `${user.trustScore} — ${trustBadge(user.trustScore)}`, inline: true },
@@ -160,7 +187,7 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
       flagged: !!user.flagged,
     });
     const file = new AttachmentBuilder(png, { name: "wallet.png" });
-    return interaction.editReply({ files: [file] });
+    return interaction.editReply({ embeds: [embed], files: [file] });
   } catch (err) {
     logger.warn({ err, discordId: target.id }, "Wallet card PNG render failed — falling back to embed");
     return interaction.editReply({ embeds: [embed] });

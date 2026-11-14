@@ -478,6 +478,7 @@ export function buildPublicTaskEmbed(task: typeof tasks.$inferSelect): EmbedBuil
       { name: "⏱ Claim window", value: `${task.timeLimitMinutes} min to submit`, inline: true },
       ...(task.minTrustScore > 0 ? [{ name: "🏆 Min trust", value: `≥ ${task.minTrustScore}`, inline: true }] : []),
       { name: "👤 Created by", value: formatTaskCreator(task.creatorDiscordId), inline: true },
+      { name: "💡 Anti-Spam Tip", value: "Rephrase in your own natural words — never copy-paste directly to prevent Reddit auto-deletions!", inline: false },
     )
     .setFooter({
       text:
@@ -515,7 +516,14 @@ export function buildSharedTaskEmbed(task: typeof tasks.$inferSelect): EmbedBuil
         ? [{ name: "Instructions", value: task.instructions.slice(0, 1000) }]
         : []),
       { name: linkLabel, value: task.redditLink },
-      ...(task.prewrittenComment ? [{ name: contentLabel, value: `||${task.prewrittenComment.slice(0, 900)}||` }] : [])
+      ...(task.prewrittenComment ? [
+        { name: contentLabel, value: `||${task.prewrittenComment.slice(0, 900)}||` },
+        {
+          name: "⚠️ Anti-Spam Rule (Crucial for Approval)",
+          value: "• **Do NOT copy-paste directly:** Reddit's spam AI automatically shadow-removes identical copy-pasted comments.\n• **Slightly rephrase or type by hand** in your own words while keeping the exact brand name intact.\n• **Always verify in Incognito:** Test your comment link in a Private / Incognito tab to ensure it is publicly visible.",
+          inline: false,
+        }
+      ] : [])
     )
     .setFooter({ text: `Task #${task.id}${task.status === "closed" || isFull ? " — CLOSED" : ""}` });
   if (task.imageUrl) embed.setImage(task.imageUrl);

@@ -153,19 +153,51 @@ async function notifySubmissionCleared(
  */
 async function notifyHoldRejected(
   client: Client,
-  row: { id: string; discord_id: string; reward: string; live_status: string }
+  row: {
+    id: string;
+    discord_id: string;
+    reward: string;
+    live_status: string;
+    proof_link?: string;
+    task_id?: string;
+    task_title?: string | null;
+  }
 ): Promise<void> {
   const emoji = row.live_status === "deleted" ? "🗑️" : "🛡️";
   const statusLabel = row.live_status === "deleted" ? "deleted" : "removed";
+  const isDeleted = row.live_status === "deleted";
+
   const embed = new EmbedBuilder()
     .setColor(COLORS.DANGER)
-    .setTitle(`${emoji} Submission Rejected — Comment ${statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}`)
+    .setTitle(`${emoji} Submission #${row.id} Rejected — Comment ${statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}`)
     .setDescription(
-      `Your submission **#${row.id}** did not pass the end-of-hold liveness check.\n\n` +
-      `Your comment was found **${statusLabel}** when we re-verified it after the hold period. ` +
-      `The reward of **$${row.reward}** has not been credited.\n\n` +
-      `Comments must remain live throughout the entire hold period to qualify for payout.`
+      `Your submission **#${row.id}**${row.task_title ? ` for **${row.task_title}**` : ""} did not pass the end-of-hold liveness check.\n\n` +
+      `Our verification engine re-checked your comment after the 24-hour hold period and detected it as **${statusLabel.toUpperCase()}**.\n` +
+      `The reward of **$${row.reward}** has not been credited.`
     )
+    .addFields(
+      ...(row.proof_link
+        ? [{ name: "🔗 Submitted Link", value: row.proof_link, inline: false }]
+        : []),
+      {
+        name: isDeleted ? "❓ Why was this rejected?" : "🕵️ Why does Reddit do this? (Shadow-Removals)",
+        value: isDeleted
+          ? "The comment was deleted directly on Reddit. Submissions must remain live on Reddit for the entire 24h verification period to receive payout."
+          : "Reddit frequently **shadow-removes** comments via subreddit AutoMod rules, spam filters, or account karma/age thresholds.\n\n" +
+            "⚠️ **Important:** When a comment is shadow-removed, **Reddit still shows it to YOU when logged in**, making it look like it's still there! However, it is completely hidden from everyone else on Reddit and our verification checker.\n\n" +
+            "💡 **How to verify:** Open your comment link in a private/incognito browser window (logged out). If it displays as `[removed]` or says *\"Comment removed by moderator\"*, it was filtered by Reddit.",
+        inline: false,
+      },
+      {
+        name: "💡 Tips to avoid removals on future tasks",
+        value:
+          "• **Never copy-paste verbatim:** Always rewrite the template in your own natural tone and words.\n" +
+          "• **Check subreddit rules:** Some subreddits require minimum post/comment karma or account age.\n" +
+          "• **Fit the context:** Make sure your comment genuinely addresses the Reddit post without looking promotional.",
+        inline: false,
+      }
+    )
+    .setFooter({ text: "Comments must remain publicly live for the full 24h hold period to qualify for payout." })
     .setTimestamp(new Date());
 
   try {
@@ -340,9 +372,19 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
     // -----------------------------------------------------------------------
     try {
       const now = new Date();
-      const holdRows = await db.execute<{ id: string; user_id: string; reward: string; discord_id: string; proof_link: string; available_at: Date | string }>(
-        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.available_at
+      const holdRows = await db.execute<{
+        id: string;
+        user_id: string;
+        reward: string;
+        discord_id: string;
+        proof_link: string;
+        available_at: Date | string;
+        task_id: string;
+        task_title: string | null;
+      }>(
+        sql`SELECT s.id, s.user_id, s.reward, s.discord_id, s.proof_link, s.available_at, s.task_id, t.title AS task_title
             FROM submissions s
+            LEFT JOIN tasks t ON t.id = s.task_id
             WHERE s.review_status = 'pending_hold'
               AND s.available_at <= ${now}
             ORDER BY s.last_checked_at ASC NULLS FIRST

@@ -51,11 +51,11 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
     return interaction.editReply({
       embeds: [
         makeEmbed(COLORS.PRIMARY)
-          .setTitle("📋 Your Active Submissions")
+          .setTitle("📋 Your Active Submissions & Hold Status")
           .setDescription(
-            "You have no active submissions right now.\n\n" +
-            "When you submit proof for a task, it will appear here " +
-            "so you can track its review status and payout timing."
+            "You have no active submissions on hold right now.\n\n" +
+            "When you submit proof for a task, it enters a 24-hour verification hold " +
+            "and will appear here with live status and exact unlock countdowns."
           ),
       ],
     });
@@ -65,10 +65,10 @@ export async function handleMyStatusCommand(interaction: ChatInputCommandInterac
 
   const embed = new EmbedBuilder()
     .setColor(COLORS.WARNING)
-    .setTitle("📋 Your Active Submissions")
+    .setTitle("📋 Your Active Submissions & Hold Status")
     .setDescription(
       `You have **${active.length}** active submission${active.length === 1 ? "" : "s"}.\n` +
-      `Keep your comments live — they are checked automatically.`
+      `Keep your comments live — they are checked automatically after the 24-hour verification hold.`
     )
     .setTimestamp(new Date());
 

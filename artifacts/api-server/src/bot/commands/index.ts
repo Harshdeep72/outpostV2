@@ -484,6 +484,16 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDescription("View your pending submissions — reward, live status, and time until payout")
     .setDMPermission(true);
 
+  const myhold = new SlashCommandBuilder()
+    .setName("myhold")
+    .setDescription("View your pending hold submissions and exact payout unlock countdowns")
+    .setDMPermission(true);
+
+  const drops = new SlashCommandBuilder()
+    .setName("drops")
+    .setDescription("View daily task drop schedule, timezone timings, and tips to catch new drops")
+    .setDMPermission(true);
+
   const processholds = new SlashCommandBuilder()
     .setName("processholds")
     .setDescription("Force-run the pending holds processor immediately (admin only)");
@@ -573,7 +583,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
     canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
-    checksubmission, submission, approvesubmission, reopenslot, mystatus, processholds, earlypayout, forcepayout, requeue,
+    checksubmission, submission, approvesubmission, reopenslot, mystatus, myhold, drops, processholds, earlypayout, forcepayout, requeue,
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
     buildDigest(),

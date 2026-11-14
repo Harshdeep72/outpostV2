@@ -151,6 +151,7 @@ async function postStartHereContent(ch: TextChannel) {
         .addFields(
           { name: "📌 How to Start", value: "1. Read `#guide` for the full setup guide\n2. Run `/verify` to link your Reddit account\n3. Browse `#tasks` and click **Claim Task**\n4. Submit your proof link after completing\n5. Get paid every Saturday!" },
           { name: "🛡️ Account Safety & Anti-Ban FAQ", value: "• **Alts Welcome:** You can link up to 3 Reddit accounts — feel free to use an alt rather than your personal main.\n• **Zero Passwords:** We never ask for Reddit passwords, emails, or sensitive tokens. Verification only checks public profile karma & age.\n• **Anti-Ban Protection:** Our 5–6 min pre-engagement guidelines and cooldowns are specifically engineered to keep your Reddit accounts completely safe." },
+          { name: "🚨 Anti-Scam Advisory", value: "Staff will **NEVER** DM you asking for Reddit passwords, crypto deposits, or off-platform work. All tasks and payouts happen strictly inside this server. See `#scam-alerts` for full details." },
           { name: "🔗 Referral Program", value: `Run \`/referral\` to get your code.\nShare it with friends — earn **+$${REFERRAL_TIER1_REWARD}** (Tier 1: 300+ karma & 3+ mo) or **+$${REFERRAL_TIER2_REWARD}** (Tier 2: 150+ karma & 1+ mo) when they complete their first task and clear the 24hr live check.` },
           { name: "💼 Your Wallet", value: "Run `/wallet` anytime to see your balance, trust score, and earnings." },
         )
@@ -201,6 +202,10 @@ async function postGuideContent(ch: TextChannel) {
             value: "+2 per accepted task | −3 per rejection | −10 per flag\nHigher trust = access to better tasks. Start at 100.",
           },
           {
+            name: "🚨 Anti-Scam Security",
+            value: "• **Zero Passwords:** We NEVER ask for Reddit passwords, 2FA codes, or logins.\n• **No DM Tasks:** All tasks happen exclusively in `#tasks` and your assigned `#work-*` channel.\n• **Zero Fees:** We will never ask you to pay any deposit or fee to withdraw your earnings.\n• **Impersonators:** Beware of users pretending to be admins/managers (e.g. \"Jason\"). Report suspicious DMs immediately in `#chitchat`.",
+          },
+          {
             name: "⚠️ Rules",
             value: "• One Reddit account per Discord account\n• No fake or deleted proof links\n• No sharing tasks with others\n• Abuse = permanent flag + payout block",
           },
@@ -224,6 +229,50 @@ async function postUpdatesIntro(ch: TextChannel) {
         )
         .setFooter({ text: "Reddit Microtasks • Patch notes" })
         .setTimestamp(),
+    ],
+  });
+}
+
+export async function postScamAlertsContent(ch: TextChannel): Promise<void> {
+  await ch.send({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(COLORS.DANGER)
+        .setTitle("🚨 OFFICIAL SECURITY ADVISORY: Beware of Impersonators & Direct Message Scams")
+        .setDescription(
+          "**Please read this carefully to protect your earnings, Reddit accounts, and personal security.**\n\n" +
+          "Several members have reported receiving unsolicited Direct Messages (DMs) from individuals (such as impersonators going by **\"Jason\"** or claiming to be \"Outpost Admin / Task Manager\") offering off-platform tasks or requesting account access."
+        )
+        .addFields(
+          {
+            name: "🛑 1. Staff NEVER Ask for Reddit Passwords or Credentials",
+            value:
+              "Official staff and our automated bot will **NEVER** ask for your Reddit password, 2FA codes, account cookies, or login credentials. Verification only requires your public Reddit username/link.",
+            inline: false,
+          },
+          {
+            name: "🔒 2. ALL Tasks & Proofs Are Exclusively on Discord",
+            value:
+              "All genuine tasks are posted in `#tasks` and managed inside your private `#work-<username>` channel by our automated bot. **Never** accept tasks offered via private DMs or third-party links.",
+            inline: false,
+          },
+          {
+            name: "💸 3. Zero Fees or Deposits to Withdraw",
+            value:
+              "You will **NEVER** be asked to pay an \"activation fee\", \"verification deposit\", or \"crypto gas fee\" to receive your payouts. Payouts are 100% free and sent directly to your registered UPI / GCash / PayPal / BEP-20 wallet.",
+            inline: false,
+          },
+          {
+            name: "🛡️ What to Do If Someone DMs You",
+            value:
+              "• **Do NOT click external links or provide login details.**\n" +
+              "• Take a screenshot of the DM and username.\n" +
+              "• Report them immediately to an Admin/Mod or in `#chitchat`, then block them.",
+            inline: false,
+          }
+        )
+        .setFooter({ text: "Reddit Microtasks Official Security Bulletin" })
+        .setTimestamp(new Date()),
     ],
   });
 }
@@ -311,7 +360,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     readOnlyOverwrites(everyoneId, adminId, modId)
   );
 
-  const { channel: scamAlertsChannel } = await ensureTextChannel(
+  const { channel: scamAlertsChannel, created: scamCreated } = await ensureTextChannel(
     guild, CHANNELS.SCAM_ALERTS, communityCategory,
     readOnlyOverwrites(everyoneId, adminId, modId)
   );
@@ -350,6 +399,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   if (guideCreated) postGuideContent(guideChannel).catch(() => {});
   if (refCreated) postReferralEventsContent(referralEventsChannel).catch(() => {});
   if (updatesCreated) postUpdatesIntro(updatesChannel).catch(() => {});
+  if (scamCreated) postScamAlertsContent(scamAlertsChannel).catch(() => {});
 
   const setup: GuildSetup = {
     adminRole, modRole, verifiedRole, unverifiedRole, karma10kRole, karma5kRole,

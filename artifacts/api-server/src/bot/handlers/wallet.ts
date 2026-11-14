@@ -143,8 +143,8 @@ export async function handleWalletCommand(interaction: ChatInputCommandInteracti
     .setThumbnail(target.displayAvatarURL())
     .setDescription(
       parseFloat(user.balancePending) > 0
-        ? `💡 *Pending rewards are on a 24-hour verification hold. Once comments pass the live check, they move to Available automatically.*`
-        : ""
+        ? `💡 *Pending rewards unlock 24h after submission if still live. Track unlock timers with \`/myhold\`.*`
+        : `💡 *Next daily task drop: ~5:30 PM IST. Use \`/drops\` for schedule & timings.*`
     )
     .addFields(
       { name: "Status", value: user.verified ? "✅ Verified earner" : "❌ Not yet verified", inline: true },

@@ -1,7 +1,7 @@
 import express from "express";
 import http from "http";
 import { Client, GatewayIntentBits, TextChannel, EmbedBuilder } from "discord.js";
-import { db } from "@workspace/db";
+import { db, startDbWarmer } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
@@ -24,11 +24,11 @@ const app = express();
 app.use(express.json());
 
 // In-memory cache for live exchange rate
-let cachedExchangeRate = 88.5;
+let cachedExchangeRate = 94.29;
 let lastRateFetch = 0;
 
 async function getLiveExchangeRate(): Promise<number> {
-  if (Date.now() - lastRateFetch < 10 * 60 * 1000) {
+  if (Date.now() - lastRateFetch < 60 * 1000) {
     return cachedExchangeRate;
   }
   try {
@@ -37,10 +37,23 @@ async function getLiveExchangeRate(): Promise<number> {
     if (data && data.rates && typeof data.rates.INR === "number") {
       cachedExchangeRate = parseFloat(data.rates.INR.toFixed(2));
       lastRateFetch = Date.now();
+      return cachedExchangeRate;
     }
   } catch (err) {
-    logger.warn({ err }, "Failed to fetch live exchange rate, using fallback");
+    logger.warn({ err }, "Primary exchange rate fetch failed, trying fallback");
   }
+
+  try {
+    const res2 = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+    const data2 = await res2.json() as any;
+    if (data2 && data2.rates && typeof data2.rates.INR === "number") {
+      cachedExchangeRate = parseFloat(data2.rates.INR.toFixed(2));
+      lastRateFetch = Date.now();
+    }
+  } catch (err) {
+    logger.warn({ err }, "Fallback exchange rate fetch failed, using cached");
+  }
+
   return cachedExchangeRate;
 }
 
@@ -506,14 +519,17 @@ app.get("/", (_req, res) => {
   </div>
   <div class="rate-panel">
     <div>
-      <label for="rateInput">Conversion Rate:</label>
-      <div style="font-size: 0.75rem; color: #94a3b8;">1 USD to INR</div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <label for="rateInput">Conversion Rate:</label>
+        <span id="livePill" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 0.65rem; font-weight: bold; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.4);">🟢 LIVE API</span>
+      </div>
+      <div style="font-size: 0.75rem; color: #94a3b8;">1 USD to INR (auto-synced)</div>
     </div>
-    <input type="number" id="rateInput" class="rate-input" value="88.5" step="0.5">
+    <input type="number" id="rateInput" class="rate-input" value="94.29" step="0.01">
     <div class="presets">
+      <button class="preset-btn active" id="btnLiveApi" onclick="enableLiveApi()" style="background: #059669; color: #fff; font-weight: bold;">⚡ Live API</button>
       <button class="preset-btn" onclick="setRate(88)">₹88</button>
       <button class="preset-btn" onclick="setRate(90)">₹90</button>
-      <button class="preset-btn" onclick="fetchLiveRate()">Live API</button>
     </div>
   </div>
 </header>
@@ -553,7 +569,8 @@ app.get("/", (_req, res) => {
 <script>
 let withdrawals = [];
 let currentFilter = 'pending';
-let currentRate = 88.5;
+let isLiveApiMode = true;
+let currentRate = 94.29;
 
 async function loadData() {
   try {
@@ -561,7 +578,7 @@ async function loadData() {
     const data = await res.json();
     if (data.ok) {
       withdrawals = data.withdrawals;
-      if (data.liveRate && !localStorage.getItem('custom_rate')) {
+      if (data.liveRate && isLiveApiMode) {
         currentRate = data.liveRate;
         document.getElementById('rateInput').value = currentRate;
       }
@@ -572,21 +589,23 @@ async function loadData() {
   }
 }
 
-function setRate(val) {
-  currentRate = parseFloat(val);
-  document.getElementById('rateInput').value = currentRate;
-  localStorage.setItem('custom_rate', currentRate);
-  render();
+function enableLiveApi() {
+  isLiveApiMode = true;
+  document.getElementById('livePill').style.display = 'inline-block';
+  document.getElementById('btnLiveApi').style.background = '#059669';
+  document.getElementById('btnLiveApi').style.color = '#fff';
+  showToast('⚡ Live API rate enabled');
+  loadData();
 }
 
-async function fetchLiveRate() {
-  showToast('Fetching latest live rate...');
-  const res = await fetch('/api/data');
-  const data = await res.json();
-  if (data.liveRate) {
-    setRate(data.liveRate);
-    showToast('Updated to live rate: ₹' + data.liveRate);
-  }
+function setRate(val) {
+  isLiveApiMode = false;
+  currentRate = parseFloat(val);
+  document.getElementById('rateInput').value = currentRate;
+  document.getElementById('livePill').style.display = 'none';
+  document.getElementById('btnLiveApi').style.background = '#1e293b';
+  document.getElementById('btnLiveApi').style.color = '#e2e8f0';
+  render();
 }
 
 function setFilter(f) {
@@ -753,6 +772,7 @@ setInterval(loadData, 30000);
 // ──────────────────────────────────────────────────────────────────────────
 
 async function start() {
+  startDbWarmer(15000);
   console.log("Connecting Discord client for Payout Station...");
   await discordClient.login(token);
   console.log(`Discord logged in as ${discordClient.user?.tag}`);

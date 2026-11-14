@@ -421,7 +421,7 @@ export async function handleTaskClaim(
   const discordId = interaction.user.id;
 
   // Fan-out all independent reads in parallel — was the biggest source of latency.
-  const [member, user, activeClaimsRes, task, existingClaimRows] = await Promise.all([
+  const [member, user, activeClaimsRes, task, existingClaimRows, accountsRes] = await Promise.all([
     guild.members.fetch(discordId),
     getUserByDiscordId(discordId),
     db.execute<{ count: string }>(
@@ -431,11 +431,22 @@ export async function handleTaskClaim(
     db.execute<{ id: number; status: string; expires_at: string | null }>(
       sql`SELECT id, status, expires_at FROM claims WHERE task_id = ${taskId} AND discord_id = ${discordId} AND status = 'claimed'`
     ),
+    db.execute<{ reddit_username: string; last_used_at: string | null }>(
+      sql`SELECT reddit_username, last_used_at
+            FROM reddit_accounts
+           WHERE discord_id = ${discordId}`
+    ),
   ]);
+
+  if (!user) return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ User not found.")] });
+
+  const taskType = (task?.type ?? "").toLowerCase();
+  const isRedditTask = !isTwitterTask(taskType) && !isQuoraTask(taskType);
+  const hasLinkedReddit = !!user.redditUsername || accountsRes.rows.length > 0;
 
   // Check Discord role first; fall back to the DB `verified` flag so users
   // who were manually verified (role may have failed to assign) can still claim.
-  if (!hasVerifiedRole(member, guild) && !user?.verified) {
+  if (!hasVerifiedRole(member, guild) && !user.verified) {
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("verify:start")
@@ -455,7 +466,27 @@ export async function handleTaskClaim(
     });
   }
 
-  if (!user) return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ User not found.")] });
+  // Even if the user has the Discord Verified role, they MUST have a linked Reddit
+  // account in the database to claim any Reddit task.
+  if (isRedditTask && !hasLinkedReddit) {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("verify:start")
+        .setLabel("🔗 Click Here to Link Reddit Account")
+        .setStyle(ButtonStyle.Success)
+    );
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("🔒 Linked Reddit Account Required")
+          .setDescription(
+            "You must link and verify a Reddit account before claiming Reddit tasks.\n\n" +
+            "Click the button below to link your Reddit account in seconds:"
+          ),
+      ],
+      components: [row],
+    });
+  }
 
   if (user.flagged) {
     return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged. Contact an admin.")] });
@@ -490,18 +521,11 @@ export async function handleTaskClaim(
   const cooldownActive = cooldownCfg.enabled && taskCooldownEnabled && cooldownCfg.minutes > 0;
   if (cooldownActive) {
     const cooldownMs = cooldownCfg.minutes * 60 * 1000;
-    const taskType = (task?.type ?? "").toLowerCase();
-    const isRedditTask = !isTwitterTask(taskType) && !isQuoraTask(taskType);
     if (isRedditTask) {
       // Look at every Reddit account this Discord user has linked. The claim
       // is allowed if AT LEAST ONE account is off cooldown (last_used_at is
       // NULL or older than cooldown window). The submit handler will stamp
       // the specific account that was used.
-      const accountsRes = await db.execute<{ reddit_username: string; last_used_at: string | null }>(
-        sql`SELECT reddit_username, last_used_at
-              FROM reddit_accounts
-              WHERE discord_id = ${discordId}`
-      );
       if (accountsRes.rows.length === 0) {
         // No multi-account row yet (legacy user). Fall back to the user-level
         // cooldown so the gate still applies.

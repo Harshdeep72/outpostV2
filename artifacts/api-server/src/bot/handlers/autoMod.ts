@@ -14,6 +14,8 @@ export const MEDIA_CHANNEL_ID = "1567226854778208318";
 export const TASKS_CHANNEL_ID = "1565661343737192531";
 // #payment-proof channel ID where messages must be payment screenshots/proofs only
 export const PAYMENT_PROOF_CHANNEL_ID = "1565798973690876044";
+// #bot-commands channel ID where messages must be bot commands only
+export const BOT_COMMANDS_CHANNEL_ID = "1565663449583980624";
 
 /**
  * Checks whether content or attachments contain non-GIF images or file uploads
@@ -397,6 +399,66 @@ export async function handleAutoModMessage(
       } catch (err) {
         logger.warn({ err }, "Failed to auto-moderate payment-proof channel message");
       }
+    }
+    return;
+  }
+
+  // 5. #bot-commands: Strictly bot commands only. No conversational chatter, memes, or casual messages.
+  if (message.channelId === BOT_COMMANDS_CHANNEL_ID) {
+    const content = message.content.trim();
+
+    // Recognized prefix commands for bots in the server (e.g. MEE6 !rank, FlaviBot .p / .play)
+    const isPrefixCommand = /^[!.]\w+/i.test(content);
+    if (isPrefixCommand) {
+      return;
+    }
+
+    // Check if user typed our slash commands as plain text (e.g. /wallet, /drops, /myhold)
+    const slashMatch = content.match(/^\/([a-zA-Z0-9_-]+)/i);
+    const validSlashCommands = new Set([
+      "wallet",
+      "myhold",
+      "mystatus",
+      "drops",
+      "payouthistory",
+      "setupi",
+      "setgcash",
+      "setpaypal",
+      "setwallet",
+      "profile",
+      "flair",
+      "referral",
+      "referraluse",
+      "digest",
+      "stats",
+      "ping",
+      "help",
+    ]);
+
+    try {
+      await message.delete();
+      if (slashMatch && validSlashCommands.has(slashMatch[1].toLowerCase())) {
+        const cmdName = slashMatch[1].toLowerCase();
+        const tip = await message.channel.send({
+          content: `💡 <@${message.author.id}>, to run **/${cmdName}**, please select it from Discord's slash command popup (\`/\`) so the bot can process it!`,
+        });
+        setTimeout(() => {
+          tip.delete().catch(() => {});
+        }, 6000).unref?.();
+      } else {
+        const warning = await message.channel.send({
+          content: `⚠️ <@${message.author.id}>, <#${BOT_COMMANDS_CHANNEL_ID}> is strictly for bot commands only! Please take all casual chatting, questions, and memes to <#${CHITCHAT_CHANNEL_ID}>.`,
+        });
+        setTimeout(() => {
+          warning.delete().catch(() => {});
+        }, 5000).unref?.();
+      }
+      logger.info(
+        { author: message.author.tag, channel: message.channelId, content: message.content },
+        "AutoMod deleted non-command chatter from #bot-commands"
+      );
+    } catch (err) {
+      logger.warn({ err }, "Failed to auto-moderate bot-commands message");
     }
     return;
   }

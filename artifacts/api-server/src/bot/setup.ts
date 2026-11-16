@@ -489,6 +489,29 @@ export async function getOrCreateWorkspaceChannel(
   await guild.channels.fetch();
   const { workspacesCategory, adminRole, modRole } = await setupGuild(guild);
 
+  // Check if this member already has a recorded workspaceChannelId in the database
+  try {
+    const { getUserByDiscordId } = await import("./db.js");
+    const userRow = await getUserByDiscordId(member.id);
+    if (userRow?.workspaceChannelId) {
+      const existingCh = guild.channels.cache.get(userRow.workspaceChannelId) as TextChannel | undefined;
+      if (existingCh && existingCh.type === ChannelType.GuildText) {
+        if (!existingCh.permissionOverwrites.cache.has(member.id)) {
+          await existingCh.permissionOverwrites.edit(member.id, {
+            ViewChannel: true,
+            SendMessages: true,
+            AttachFiles: true,
+            EmbedLinks: true,
+            ReadMessageHistory: true,
+          }, { reason: `Restoring workspace permissions for ${member.user.username}` }).catch(() => {});
+        }
+        return existingCh;
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, userId: member.id }, "getOrCreateWorkspaceChannel: failed checking db workspaceChannelId");
+  }
+
   // Sanitise the Discord username for use as a channel name. Falls back to
   // "user" if the username contains zero alphanumerics so we never end up
   // with a degenerate "work-" name that would collide for every such user.

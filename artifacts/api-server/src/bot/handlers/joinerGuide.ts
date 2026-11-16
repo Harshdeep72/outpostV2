@@ -8,9 +8,10 @@ import {
   EmbedBuilder,
   ChatInputCommandInteraction,
 } from "discord.js";
-import { setupGuild } from "../setup.js";
-import { upsertUserSmart } from "../db.js";
-import { pool } from "@workspace/db";
+import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
+import { upsertUserSmart, getUserByDiscordId } from "../db.js";
+import { pool, db, users, redditAccounts } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { makeEmbed, hasAdminRole, hasModRole } from "../util.js";
 import {
   COLORS,
@@ -98,20 +99,137 @@ export async function handleGuildMemberAdd(member: GuildMember) {
     logger.warn({ err, userId: member.id }, "Failed to upsert new member");
   });
 
-  // Always ensure Unverified role on join for new members
+  // Check if member is a returning verified user
+  let isReturningVerified = false;
+  let workspaceChannel: TextChannel | null = null;
   try {
     const guild = member.guild;
     const setup = await setupGuild(guild);
+    const existingUser = await getUserByDiscordId(member.id);
 
-    if (
-      setup.unverifiedRole &&
-      !member.roles.cache.has(setup.verifiedRole.id) &&
-      !member.roles.cache.has(setup.unverifiedRole.id)
-    ) {
-      await member.roles.add(setup.unverifiedRole, "Auto-assign Unverified role on join").catch(() => {});
+    if (existingUser?.verified) {
+      isReturningVerified = true;
+      logger.info({ userId: member.id, username: member.user.username }, "Returning verified member detected, restoring verified status");
+
+      // 1. Assign Verified role and strip Unverified role if present
+      if (setup.verifiedRole && !member.roles.cache.has(setup.verifiedRole.id)) {
+        await member.roles.add(setup.verifiedRole, "Restoring Verified role for returning member").catch((err) => {
+          logger.warn({ err, userId: member.id }, "Failed adding verified role on rejoin");
+        });
+      }
+      if (setup.unverifiedRole && member.roles.cache.has(setup.unverifiedRole.id)) {
+        await member.roles.remove(setup.unverifiedRole, "Removing Unverified role for returning member").catch(() => {});
+      }
+
+      // 2. Restore karma roles if applicable
+      try {
+        const karmaAccounts = await db.select().from(redditAccounts).where(eq(redditAccounts.discordId, member.id));
+        let maxKarma = 0;
+        for (const acct of karmaAccounts) {
+          const total = (acct.postKarma || 0) + (acct.commentKarma || 0);
+          if (total > maxKarma) maxKarma = total;
+        }
+        if (maxKarma >= 10000) {
+          if (setup.karma10kRole && !member.roles.cache.has(setup.karma10kRole.id)) {
+            await member.roles.add(setup.karma10kRole).catch(() => {});
+          }
+          if (setup.karma5kRole && !member.roles.cache.has(setup.karma5kRole.id)) {
+            await member.roles.add(setup.karma5kRole).catch(() => {});
+          }
+        } else if (maxKarma >= 5000) {
+          if (setup.karma5kRole && !member.roles.cache.has(setup.karma5kRole.id)) {
+            await member.roles.add(setup.karma5kRole).catch(() => {});
+          }
+        }
+      } catch (kErr) {
+        logger.warn({ err: kErr, userId: member.id }, "Failed restoring karma roles on rejoin");
+      }
+
+      // 3. Restore workspace channel & permissions
+      if (existingUser.workspaceChannelId) {
+        workspaceChannel = (await guild.channels.fetch(existingUser.workspaceChannelId).catch(() => null)) as TextChannel | null;
+      }
+
+      if (!workspaceChannel) {
+        workspaceChannel = await getOrCreateWorkspaceChannel(guild, member).catch(() => null);
+        if (workspaceChannel && workspaceChannel.id !== existingUser.workspaceChannelId) {
+          await db.update(users).set({ workspaceChannelId: workspaceChannel.id }).where(eq(users.discordId, member.id)).catch(() => {});
+        }
+      } else {
+        await workspaceChannel.permissionOverwrites.edit(member.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          AttachFiles: true,
+          EmbedLinks: true,
+          ReadMessageHistory: true,
+        }, { reason: `Restoring workspace permissions for returning member ${member.user.username}` }).catch((e) => {
+          logger.warn({ err: e, channelId: workspaceChannel!.id, userId: member.id }, "Failed restoring workspace channel overwrites on rejoin");
+        });
+      }
+    } else {
+      // New or unverified member: assign Unverified role
+      if (
+        setup.unverifiedRole &&
+        !member.roles.cache.has(setup.verifiedRole.id) &&
+        !member.roles.cache.has(setup.unverifiedRole.id)
+      ) {
+        await member.roles.add(setup.unverifiedRole, "Auto-assign Unverified role on join").catch(() => {});
+      }
     }
   } catch (err) {
-    logger.warn({ err, userId: member.id }, "Failed auto-assigning initial roles on join");
+    logger.warn({ err, userId: member.id }, "Failed auto-assigning initial roles or restoring status on join");
+  }
+
+  // Handle returning verified member notification and exit early
+  if (isReturningVerified) {
+    try {
+      const guild = member.guild;
+      const setup = await setupGuild(guild);
+
+      // DM returning member
+      await member.send({
+        embeds: [
+          makeEmbed(COLORS.SUCCESS)
+            .setTitle(`👋 Welcome back to ${guild.name}!`)
+            .setDescription(
+              `Your **Verified** status and private workspace have been automatically restored!\n\n` +
+              (workspaceChannel ? `📂 **Your Workspace:** <#${workspaceChannel.id}>\n` : "") +
+              (setup.tasksChannel ? `📋 **Active Tasks:** <#${setup.tasksChannel.id}>\n\n` : "\n") +
+              `Head over to your workspace or check active tasks to continue earning.`
+            ),
+        ],
+      }).catch(() => {
+        logger.debug({ userId: member.id }, "Could not DM returning member (DMs closed)");
+      });
+
+      // Post welcome message in workspace channel
+      if (workspaceChannel) {
+        await workspaceChannel.send({
+          embeds: [
+            makeEmbed(COLORS.SUCCESS)
+              .setTitle("👋 Welcome back!")
+              .setDescription(
+                `Hey <@${member.id}>! You've rejoined **${guild.name}**.\n\n` +
+                `Your verified status and workspace have been automatically restored. Check ${setup.tasksChannel ? `<#${setup.tasksChannel.id}>` : "tasks"} to claim tasks and keep earning!`
+              ),
+          ],
+        }).catch(() => {});
+      }
+
+      // Welcome message in public welcome/start-here channel
+      const welcomeChannel = (guild.channels.cache.find(
+        (c) => c.isTextBased() && (c.name === "welcome" || c.name === "start-here" || c.name === "chat-area" || c.name === "general")
+      ) as TextChannel | undefined) ?? setup.startHereChannel ?? setup.generalChannel;
+
+      if (welcomeChannel) {
+        await welcomeChannel.send({
+          content: `👋 Welcome back <@${member.id}> to **${guild.name}**! Your verified status has been automatically restored. ${workspaceChannel ? `Check your workspace: <#${workspaceChannel.id}>` : ""}`,
+        }).catch(() => {});
+      }
+    } catch (err) {
+      logger.warn({ err, userId: member.id }, "Failed sending returning member welcome notices");
+    }
+    return;
   }
 
   // 0. Automatically track invite & apply referral if joined through a member's link

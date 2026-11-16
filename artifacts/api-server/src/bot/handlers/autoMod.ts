@@ -198,7 +198,6 @@ export function checkRoleOrMassMention(message: Message | OmitPartialGroupDMChan
 export function checkSpam(message: Message | OmitPartialGroupDMChannel<Message>): {
   isSpam: boolean;
   reason: string;
-  shouldTimeout: boolean;
 } {
   const userId = message.author.id;
   const now = Date.now();
@@ -233,8 +232,7 @@ export function checkSpam(message: Message | OmitPartialGroupDMChannel<Message>)
         ? "cross-posting identical messages across multiple channels is not allowed"
         : "please do not spam the same message repeatedly";
 
-      const shouldTimeout = tracker.spamWarningCount >= 3;
-      return { isSpam: true, reason, shouldTimeout };
+      return { isSpam: true, reason };
     }
   }
 
@@ -246,7 +244,6 @@ export function checkSpam(message: Message | OmitPartialGroupDMChannel<Message>)
     return {
       isSpam: true,
       reason: "sending messages too quickly (burst spam)",
-      shouldTimeout: tracker.spamWarningCount >= 2,
     };
   }
 
@@ -257,7 +254,7 @@ export function checkSpam(message: Message | OmitPartialGroupDMChannel<Message>)
     timestamp: now,
   });
 
-  return { isSpam: false, reason: "", shouldTimeout: false };
+  return { isSpam: false, reason: "" };
 }
 
 export async function handleAutoModMessage(
@@ -295,22 +292,12 @@ export async function handleAutoModMessage(
   if (spamCheck.isSpam) {
     try {
       await message.delete();
-      if (spamCheck.shouldTimeout && message.member && typeof (message.member as any).timeout === "function") {
-        await (message.member as any).timeout(30 * 1000, "Automated anti-spam: repeated message spam").catch(() => {});
-        const timeoutNotice = await message.channel.send({
-          content: `🔇 <@${message.author.id}> has been timed out for 30 seconds due to repeated message spam.`,
-        });
-        setTimeout(() => {
-          timeoutNotice.delete().catch(() => {});
-        }, 6000).unref?.();
-      } else {
-        const warning = await message.channel.send({
-          content: `⚠️ <@${message.author.id}>, ${spamCheck.reason}!`,
-        });
-        setTimeout(() => {
-          warning.delete().catch(() => {});
-        }, 5000).unref?.();
-      }
+      const warning = await message.channel.send({
+        content: `⚠️ <@${message.author.id}>, ${spamCheck.reason}!`,
+      });
+      setTimeout(() => {
+        warning.delete().catch(() => {});
+      }, 5000).unref?.();
       logger.info(
         { author: message.author.tag, channel: message.channelId, content: message.content },
         "AutoMod deleted spam message"

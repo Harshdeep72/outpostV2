@@ -620,29 +620,36 @@ export async function handleMyPaymentCommand(interaction: ChatInputCommandIntera
 
   const wallets = (user.cryptoWallets as Record<string, unknown>) ?? {};
   const usdtWallet = wallets["USDT"] as { address?: string; network?: string } | string | undefined;
-  const usdtAddress = typeof usdtWallet === "string" ? usdtWallet : usdtWallet?.address;
+  const usdtAddress = (typeof usdtWallet === "string" ? usdtWallet : usdtWallet?.address)?.trim() || "";
 
   const gcashFromWallet = wallets["GCASH"] as { address?: string } | string | undefined;
-  const gcashNumber = user.gcashNumber || (typeof gcashFromWallet === "string" ? gcashFromWallet : gcashFromWallet?.address);
+  const rawGcash = user.gcashNumber || (typeof gcashFromWallet === "string" ? gcashFromWallet : gcashFromWallet?.address);
+  const gcashNumber = rawGcash?.trim() || "";
+
+  const upiId = user.upiId?.trim() || "";
+  const paypalEmail = user.paypalEmail?.trim() || "";
 
   // Determine active primary method for weekly payouts
   let primaryMethod = "None set";
   let primaryDestination = "";
-  if (user.upiId) {
+  if (upiId) {
     primaryMethod = "🇮🇳 UPI";
-    primaryDestination = `\`${user.upiId}\``;
+    primaryDestination = `\`${upiId}\``;
   } else if (gcashNumber) {
     primaryMethod = "🇵🇭 GCash";
     primaryDestination = `\`${gcashNumber}\``;
-  } else if (user.paypalEmail) {
+  } else if (paypalEmail) {
     primaryMethod = "🌐 PayPal";
-    primaryDestination = `\`${user.paypalEmail}\``;
+    primaryDestination = `\`${paypalEmail}\``;
   } else if (usdtAddress) {
     primaryMethod = "🪙 USDT (BEP-20)";
     primaryDestination = `\`${usdtAddress}\``;
   }
 
-  const hasAnyMethod = !!(user.upiId || gcashNumber || user.paypalEmail || usdtAddress);
+  const hasAnyMethod = !!(upiId || gcashNumber || paypalEmail || usdtAddress);
+
+  const nextPayout = nextPayoutDate();
+  const nextPayoutUnix = Math.floor(nextPayout.getTime() / 1000);
 
   const embed = makeEmbed(hasAnyMethod ? COLORS.PRIMARY : COLORS.WARNING)
     .setTitle("💳 Your Payout Destination Details")
@@ -661,7 +668,7 @@ export async function handleMyPaymentCommand(interaction: ChatInputCommandIntera
       },
       {
         name: "🇮🇳 UPI ID (India)",
-        value: user.upiId ? `\`${user.upiId}\`` : "*(Not set)* — `/setupi <upi_id>`",
+        value: upiId ? `\`${upiId}\`` : "*(Not set)* — `/setupi <upi_id>`",
         inline: true,
       },
       {
@@ -671,7 +678,7 @@ export async function handleMyPaymentCommand(interaction: ChatInputCommandIntera
       },
       {
         name: "🌐 PayPal (Global)",
-        value: user.paypalEmail ? `\`${user.paypalEmail}\`` : "*(Not set)* — `/setpaypal <email>`",
+        value: paypalEmail ? `\`${paypalEmail}\`` : "*(Not set)* — `/setpaypal <email>`",
         inline: true,
       },
       {
@@ -686,7 +693,7 @@ export async function handleMyPaymentCommand(interaction: ChatInputCommandIntera
       },
       {
         name: "📅 Next Payout",
-        value: nextPayoutDate(),
+        value: `<t:${nextPayoutUnix}:D> (<t:${nextPayoutUnix}:R>)`,
         inline: true,
       }
     )

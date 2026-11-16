@@ -109,17 +109,153 @@ export function isValidMediaOnly(
 }
 
 function isStaff(message: Message | OmitPartialGroupDMChannel<Message>): boolean {
-  if (message.member && message.guild) {
+  const member = message.member ?? (message.guild && message.author ? message.guild.members.cache.get(message.author.id) : null);
+  if (member && message.guild) {
     if (
-      message.member.permissions.has(PermissionFlagsBits.Administrator) ||
-      message.member.permissions.has(PermissionFlagsBits.ManageMessages) ||
-      hasAdminRole(message.member as any, message.guild) ||
-      hasModRole(message.member as any, message.guild)
+      member.permissions.has(PermissionFlagsBits.Administrator) ||
+      member.permissions.has(PermissionFlagsBits.ManageMessages) ||
+      hasAdminRole(member as any, message.guild) ||
+      hasModRole(member as any, message.guild)
     ) {
       return true;
     }
   }
   return false;
+}
+
+interface MessageRecord {
+  normalized: string;
+  channelId: string;
+  timestamp: number;
+}
+
+interface SpamTracker {
+  recentMessages: MessageRecord[];
+  spamWarningCount: number;
+  lastSpamActionAt: number;
+}
+
+const userSpamTrackers = new Map<string, SpamTracker>();
+
+// Clean up idle trackers periodically to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, tracker] of userSpamTrackers.entries()) {
+    tracker.recentMessages = tracker.recentMessages.filter((m) => now - m.timestamp < 120_000);
+    if (tracker.recentMessages.length === 0 && now - tracker.lastSpamActionAt > 300_000) {
+      userSpamTrackers.delete(userId);
+    }
+  }
+}, 60_000).unref?.();
+
+/**
+ * Checks if a message attempts to tag roles, @everyone/@here, or mass user pings.
+ */
+export function checkRoleOrMassMention(message: Message | OmitPartialGroupDMChannel<Message>): {
+  blocked: boolean;
+  reason: string;
+} {
+  // 1. Explicit Discord role mentions or raw role ping syntax <@&id>
+  if (message.mentions.roles.size > 0 || /<@&\d+>/i.test(message.content)) {
+    return { blocked: true, reason: "mentioning roles is strictly not allowed in any channel" };
+  }
+
+  // 2. Mass mentions: @everyone / @here
+  if (message.mentions.everyone || /@(everyone|here)\b/i.test(message.content)) {
+    return { blocked: true, reason: "mass pings (@everyone / @here) are strictly not allowed" };
+  }
+
+  // 3. Literal text matching any server role name prefixed by @ (case-insensitive)
+  if (message.guild && message.content.includes("@")) {
+    const content = message.content;
+    const roles = message.guild.roles.cache;
+    for (const [_, role] of roles) {
+      if (role.name === "@everyone") continue;
+      const escaped = role.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`(^|\\s|[^a-zA-Z0-9])@${escaped}(\\b|[^a-zA-Z0-9]|$)`, "i");
+      if (regex.test(content)) {
+        return {
+          blocked: true,
+          reason: `mentioning roles (@${role.name}) is strictly not allowed in any channel`,
+        };
+      }
+    }
+  }
+
+  // 4. Mass user pings (4+ users)
+  if (message.mentions.users.size >= 4) {
+    return { blocked: true, reason: "tagging multiple members is not allowed" };
+  }
+
+  return { blocked: false, reason: "" };
+}
+
+/**
+ * Checks for repeated / duplicate message spam across single or multiple channels.
+ */
+export function checkSpam(message: Message | OmitPartialGroupDMChannel<Message>): {
+  isSpam: boolean;
+  reason: string;
+  shouldTimeout: boolean;
+} {
+  const userId = message.author.id;
+  const now = Date.now();
+  const normalized = message.content.trim().toLowerCase().replace(/\s+/g, " ");
+
+  let tracker = userSpamTrackers.get(userId);
+  if (!tracker) {
+    tracker = { recentMessages: [], spamWarningCount: 0, lastSpamActionAt: 0 };
+    userSpamTrackers.set(userId, tracker);
+  }
+
+  // Retain messages from the last 2 minutes
+  tracker.recentMessages = tracker.recentMessages.filter((m) => now - m.timestamp < 120_000);
+
+  // 1. Repeated / Duplicate message checks (ignore empty or single-character messages)
+  if (normalized.length >= 3) {
+    // Identical message in same channel within 45 seconds
+    const duplicatesSameChannel = tracker.recentMessages.filter(
+      (m) => m.normalized === normalized && m.channelId === message.channelId && now - m.timestamp < 45_000
+    );
+
+    // Identical message in another channel within 60 seconds (cross-channel spam)
+    const duplicatesOtherChannel = tracker.recentMessages.filter(
+      (m) => m.normalized === normalized && m.channelId !== message.channelId && now - m.timestamp < 60_000
+    );
+
+    if (duplicatesSameChannel.length >= 1 || duplicatesOtherChannel.length >= 1) {
+      tracker.spamWarningCount++;
+      tracker.lastSpamActionAt = now;
+
+      const reason = duplicatesOtherChannel.length >= 1
+        ? "cross-posting identical messages across multiple channels is not allowed"
+        : "please do not spam the same message repeatedly";
+
+      const shouldTimeout = tracker.spamWarningCount >= 3;
+      return { isSpam: true, reason, shouldTimeout };
+    }
+  }
+
+  // 2. High-speed burst spam (more than 5 messages within 5 seconds)
+  const burstCount = tracker.recentMessages.filter((m) => now - m.timestamp < 5_000).length;
+  if (burstCount >= 5) {
+    tracker.spamWarningCount++;
+    tracker.lastSpamActionAt = now;
+    return {
+      isSpam: true,
+      reason: "sending messages too quickly (burst spam)",
+      shouldTimeout: tracker.spamWarningCount >= 2,
+    };
+  }
+
+  // Valid message: record in user history
+  tracker.recentMessages.push({
+    normalized,
+    channelId: message.channelId,
+    timestamp: now,
+  });
+
+  return { isSpam: false, reason: "", shouldTimeout: false };
 }
 
 export async function handleAutoModMessage(
@@ -131,20 +267,12 @@ export async function handleAutoModMessage(
 
   // 0. Anti-role-mention & Anti-mass-ping across ALL guild channels:
   // Non-staff members are strictly forbidden from tagging roles, @everyone/@here, or mass-pinging.
-  const hasRoleMention = message.mentions.roles.size > 0 || /<@&\d+>/.test(message.content);
-  const hasEveryonePing = message.mentions.everyone || /@(everyone|here)\b/i.test(message.content);
-  const hasMassUserPing = message.mentions.users.size >= 4;
-
-  if (hasRoleMention || hasEveryonePing || hasMassUserPing) {
+  const mentionCheck = checkRoleOrMassMention(message);
+  if (mentionCheck.blocked) {
     try {
       await message.delete();
-      const reason = hasRoleMention
-        ? "mentioning roles is not allowed"
-        : hasEveryonePing
-        ? "mass pings (@everyone / @here) are not allowed"
-        : "tagging multiple members is not allowed";
       const warning = await message.channel.send({
-        content: `⚠️ <@${message.author.id}>, ${reason}!`,
+        content: `⚠️ <@${message.author.id}>, ${mentionCheck.reason}!`,
       });
       setTimeout(() => {
         warning.delete().catch(() => {});
@@ -155,6 +283,38 @@ export async function handleAutoModMessage(
       );
     } catch (err) {
       logger.warn({ err }, "Failed to auto-moderate role mention");
+    }
+    return;
+  }
+
+  // 0.5. Anti-spam & Repeated message prevention across ALL guild channels:
+  // Prevents members from spamming the same message repeatedly or flooding channels.
+  const spamCheck = checkSpam(message);
+  if (spamCheck.isSpam) {
+    try {
+      await message.delete();
+      if (spamCheck.shouldTimeout && message.member && typeof (message.member as any).timeout === "function") {
+        await (message.member as any).timeout(5 * 60 * 1000, "Automated anti-spam: repeated message spam").catch(() => {});
+        const timeoutNotice = await message.channel.send({
+          content: `🔇 <@${message.author.id}> has been timed out for 5 minutes due to repeated message spam.`,
+        });
+        setTimeout(() => {
+          timeoutNotice.delete().catch(() => {});
+        }, 8000).unref?.();
+      } else {
+        const warning = await message.channel.send({
+          content: `⚠️ <@${message.author.id}>, ${spamCheck.reason}!`,
+        });
+        setTimeout(() => {
+          warning.delete().catch(() => {});
+        }, 5000).unref?.();
+      }
+      logger.info(
+        { author: message.author.tag, channel: message.channelId, content: message.content },
+        "AutoMod deleted spam message"
+      );
+    } catch (err) {
+      logger.warn({ err }, "Failed to auto-moderate spam message");
     }
     return;
   }

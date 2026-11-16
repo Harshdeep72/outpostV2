@@ -419,6 +419,8 @@ export async function handleAutoModMessage(
       "wallet",
       "myhold",
       "mystatus",
+      "mypayment",
+      "paymentmethod",
       "drops",
       "payouthistory",
       "setupi",

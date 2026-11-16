@@ -8,7 +8,7 @@ import { logger } from "../lib/logger.js";
 
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleAssignTaskCommand, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
-import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet, handleAdminSetPaypal } from "./handlers/wallet.js";
+import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet, handleAdminSetPaypal, handleMyPaymentCommand } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand, handleVerifiedListCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleDropsCommand } from "./handlers/drops.js";
@@ -106,6 +106,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "approvesubmission") return await timed(name, () => handleApproveSubmission(interaction));
         if (name === "reopenslot") return await timed(name, () => handleReopenSlot(interaction));
         if (name === "mystatus" || name === "myhold") return await timed(name, () => handleMyStatusCommand(interaction));
+        if (name === "mypayment" || name === "paymentmethod") return await timed(name, () => handleMyPaymentCommand(interaction));
         if (name === "drops") return await timed(name, () => handleDropsCommand(interaction));
         if (name === "processholds") return await timed(name, () => handleProcessHolds(interaction));
         if (name === "earlypayout") return await timed(name, () => handleEarlyPayout(interaction));

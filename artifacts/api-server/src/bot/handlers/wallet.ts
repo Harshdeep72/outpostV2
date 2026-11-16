@@ -599,3 +599,100 @@ export async function handleAdminSetGcash(interaction: ChatInputCommandInteracti
     ],
   });
 }
+
+// ---------------------------------------------------------------------------
+// User: check own payout destinations (strictly private / ephemeral)
+// ---------------------------------------------------------------------------
+export async function handleMyPaymentCommand(interaction: ChatInputCommandInteraction) {
+  // Always private/ephemeral — only the requesting user can see their own payment methods.
+  await interaction.deferReply({ flags: 64 });
+
+  const user = await getUserByDiscordId(interaction.user.id);
+  if (!user) {
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.DANGER)
+          .setTitle("❌ Not Registered")
+          .setDescription("You haven't registered on the server yet. Please verify in the server first!"),
+      ],
+    });
+  }
+
+  const wallets = (user.cryptoWallets as Record<string, unknown>) ?? {};
+  const usdtWallet = wallets["USDT"] as { address?: string; network?: string } | string | undefined;
+  const usdtAddress = typeof usdtWallet === "string" ? usdtWallet : usdtWallet?.address;
+
+  const gcashFromWallet = wallets["GCASH"] as { address?: string } | string | undefined;
+  const gcashNumber = user.gcashNumber || (typeof gcashFromWallet === "string" ? gcashFromWallet : gcashFromWallet?.address);
+
+  // Determine active primary method for weekly payouts
+  let primaryMethod = "None set";
+  let primaryDestination = "";
+  if (user.upiId) {
+    primaryMethod = "🇮🇳 UPI";
+    primaryDestination = `\`${user.upiId}\``;
+  } else if (gcashNumber) {
+    primaryMethod = "🇵🇭 GCash";
+    primaryDestination = `\`${gcashNumber}\``;
+  } else if (user.paypalEmail) {
+    primaryMethod = "🌐 PayPal";
+    primaryDestination = `\`${user.paypalEmail}\``;
+  } else if (usdtAddress) {
+    primaryMethod = "🪙 USDT (BEP-20)";
+    primaryDestination = `\`${usdtAddress}\``;
+  }
+
+  const hasAnyMethod = !!(user.upiId || gcashNumber || user.paypalEmail || usdtAddress);
+
+  const embed = makeEmbed(hasAnyMethod ? COLORS.PRIMARY : COLORS.WARNING)
+    .setTitle("💳 Your Payout Destination Details")
+    .setDescription(
+      hasAnyMethod
+        ? `Here are the payout destinations currently linked to your account (**${interaction.user.username}**).\n` +
+          `Payouts are processed automatically every Saturday to your active destination.`
+        : `⚠️ **You haven't linked any payout method yet!**\n` +
+          `To receive your weekly earnings, please link at least one destination below.`
+    )
+    .addFields(
+      {
+        name: "🎯 Active Payout Destination (Auto-Payouts)",
+        value: hasAnyMethod ? `${primaryMethod}: ${primaryDestination}` : "❌ **None Set** (earnings will roll over)",
+        inline: false,
+      },
+      {
+        name: "🇮🇳 UPI ID (India)",
+        value: user.upiId ? `\`${user.upiId}\`` : "*(Not set)* — `/setupi <upi_id>`",
+        inline: true,
+      },
+      {
+        name: "🇵🇭 GCash (Philippines)",
+        value: gcashNumber ? `\`${gcashNumber}\`` : "*(Not set)* — `/setgcash <number>`",
+        inline: true,
+      },
+      {
+        name: "🌐 PayPal (Global)",
+        value: user.paypalEmail ? `\`${user.paypalEmail}\`` : "*(Not set)* — `/setpaypal <email>`",
+        inline: true,
+      },
+      {
+        name: "🪙 USDT BEP-20 (Crypto)",
+        value: usdtAddress ? `\`${usdtAddress}\`` : "*(Not set)* — `/setwallet coin:USDT address:<0x...>`",
+        inline: false,
+      },
+      {
+        name: "💰 Available for Next Payout",
+        value: `**${formatMoney(user.balanceAvailable)}**`,
+        inline: true,
+      },
+      {
+        name: "📅 Next Payout",
+        value: nextPayoutDate(),
+        inline: true,
+      }
+    )
+    .setFooter({
+      text: "🔒 Strictly Private • To change an existing destination, please contact an Admin",
+    });
+
+  return interaction.editReply({ embeds: [embed] });
+}

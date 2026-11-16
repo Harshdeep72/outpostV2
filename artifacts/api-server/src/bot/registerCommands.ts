@@ -9,6 +9,7 @@ import { logger } from "../lib/logger.js";
 const DM_PUBLIC_COMMANDS = new Set([
   "digest", "referral", "referraluse",
   "setupi", "setgcash", "setwallet", "setpaypal",
+  "mypayment", "paymentmethod",
   "wallet", "profile", "ping", "stats", "mystatus", "myhold", "drops",
 ]);
 

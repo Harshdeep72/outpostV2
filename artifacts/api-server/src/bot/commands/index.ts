@@ -489,6 +489,16 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDescription("View your pending hold submissions and exact payout unlock countdowns")
     .setDMPermission(true);
 
+  const mypayment = new SlashCommandBuilder()
+    .setName("mypayment")
+    .setDescription("View your saved payout destinations (UPI, GCash, PayPal, USDT)")
+    .setDMPermission(true);
+
+  const paymentmethod = new SlashCommandBuilder()
+    .setName("paymentmethod")
+    .setDescription("View your saved payout destinations (UPI, GCash, PayPal, USDT)")
+    .setDMPermission(true);
+
   const drops = new SlashCommandBuilder()
     .setName("drops")
     .setDescription("View daily task drop schedule, timezone timings, and tips to catch new drops")
@@ -584,6 +594,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, myhold, drops, processholds, earlypayout, forcepayout, requeue,
+    mypayment, paymentmethod,
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
     buildDigest(),

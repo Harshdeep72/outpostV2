@@ -296,13 +296,13 @@ export async function handleAutoModMessage(
     try {
       await message.delete();
       if (spamCheck.shouldTimeout && message.member && typeof (message.member as any).timeout === "function") {
-        await (message.member as any).timeout(5 * 60 * 1000, "Automated anti-spam: repeated message spam").catch(() => {});
+        await (message.member as any).timeout(30 * 1000, "Automated anti-spam: repeated message spam").catch(() => {});
         const timeoutNotice = await message.channel.send({
-          content: `🔇 <@${message.author.id}> has been timed out for 5 minutes due to repeated message spam.`,
+          content: `🔇 <@${message.author.id}> has been timed out for 30 seconds due to repeated message spam.`,
         });
         setTimeout(() => {
           timeoutNotice.delete().catch(() => {});
-        }, 8000).unref?.();
+        }, 6000).unref?.();
       } else {
         const warning = await message.channel.send({
           content: `⚠️ <@${message.author.id}>, ${spamCheck.reason}!`,

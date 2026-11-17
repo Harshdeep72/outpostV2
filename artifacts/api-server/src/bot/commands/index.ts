@@ -80,6 +80,11 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
         .setRequired(false)
     )
     .addStringOption((o) =>
+      o.setName("date")
+        .setDescription("Daily ledger date (e.g. 17.11.2026). Omit to auto-pick latest date in sheet")
+        .setRequired(false)
+    )
+    .addStringOption((o) =>
       o.setName("schedule_time_ist")
         .setDescription("Schedule drop time in IST (e.g. 19:30, 7:30 PM, tomorrow 14:00, in 2h)")
         .setRequired(false)
@@ -106,6 +111,11 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .addStringOption((o) =>
       o.setName("sheets_url")
         .setDescription("Public Google Sheets URL (omit to paste CSV manually)")
+        .setRequired(false)
+    )
+    .addStringOption((o) =>
+      o.setName("date")
+        .setDescription("Daily ledger date (e.g. 17.11.2026). Omit to auto-pick latest date in sheet")
         .setRequired(false)
     )
     .addIntegerOption((o) =>

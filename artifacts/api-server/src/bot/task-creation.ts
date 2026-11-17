@@ -901,10 +901,139 @@ export function parseCsvRows(raw: string): string[][] {
   return rows;
 }
 
-export function parseTaskCsv(raw: string): ParsedTaskRow[] {
+export interface ParsedTaskResult extends Array<ParsedTaskRow> {
+  detectedDate?: string;
+  availableDates?: string[];
+}
+
+export function parseTaskCsv(raw: string, targetDate?: string): ParsedTaskRow[] & { detectedDate?: string; availableDates?: string[] } {
   const rowsData = parseCsvRows(raw);
   if (rowsData.length < 2) throw new Error("CSV must have a header row and at least one data row.");
 
+  const dateBannerRegex = /(?:Date\s+)?(\d{1,2}[\.\-\/]\d{1,2}[\.\-\/]\d{2,4})/i;
+  const redditUrlRegex = /https?:\/\/(?:www\.|old\.|new\.)?reddit\.com\/[^\s"]+/i;
+
+  // 1. Check if this is a "Daily Ledger" format sheet:
+  // Daily ledger sheets have date banners (e.g. "Date 17.11.2026") or repeated section headers.
+  let hasDateBanners = false;
+  for (const row of rowsData) {
+    for (const cell of row) {
+      if (!redditUrlRegex.test(cell) && dateBannerRegex.test(cell)) {
+        hasDateBanners = true;
+        break;
+      }
+    }
+    if (hasDateBanners) break;
+  }
+
+  if (hasDateBanners) {
+    const sections: { date: string; rows: string[][] }[] = [];
+    let current: { date: string; rows: string[][] } = { date: "unknown", rows: [] };
+
+    for (let i = 0; i < rowsData.length; i++) {
+      const row = rowsData[i]!;
+      let rowDate: string | null = null;
+      for (const cell of row) {
+        if (!redditUrlRegex.test(cell)) {
+          const m = cell.match(dateBannerRegex);
+          if (m) {
+            rowDate = m[1]!;
+            break;
+          }
+        }
+      }
+
+      if (rowDate) {
+        if (current.rows.length > 0) sections.push(current);
+        current = { date: rowDate, rows: [] };
+        continue;
+      }
+
+      // Check if row has a Reddit URL
+      const hasReddit = row.some((c) => redditUrlRegex.test(c));
+      if (hasReddit) {
+        current.rows.push(row);
+      }
+    }
+    if (current.rows.length > 0) sections.push(current);
+
+    const availableDates = sections.map((s) => s.date).filter((d) => d !== "unknown");
+    let selectedSection = sections[sections.length - 1];
+
+    if (targetDate) {
+      const normalizedTarget = targetDate.trim().toLowerCase().replace(/[\-\/]/g, ".");
+      const found = sections.find((s) => {
+        const normS = s.date.trim().toLowerCase().replace(/[\-\/]/g, ".");
+        return normS === normalizedTarget || normS.includes(normalizedTarget);
+      });
+      if (found) {
+        selectedSection = found;
+      } else {
+        throw new Error(`Date "${targetDate}" not found in sheet. Available dates: ${availableDates.join(", ")}`);
+      }
+    }
+
+    if (!selectedSection || selectedSection.rows.length === 0) {
+      throw new Error(`No tasks found for date "${targetDate || "latest"}" in sheet. Available dates: ${availableDates.join(", ")}`);
+    }
+
+    const tasks: ParsedTaskRow[] = [];
+    for (let idx = 0; idx < selectedSection.rows.length; idx++) {
+      const r = selectedSection.rows[idx]!;
+      let link = "";
+      let linkIdx = -1;
+      for (let c = 0; c < r.length; c++) {
+        const m = r[c]!.match(redditUrlRegex);
+        if (m) {
+          link = m[0];
+          linkIdx = c;
+          break;
+        }
+      }
+      if (!link) continue;
+
+      let comment = "";
+      if (linkIdx !== -1 && linkIdx + 1 < r.length && !redditUrlRegex.test(r[linkIdx + 1]!)) {
+        comment = r[linkIdx + 1]!.trim();
+      } else if (r[2] && !redditUrlRegex.test(r[2])) {
+        comment = r[2].trim();
+      }
+
+      // Clean comment of leading/trailing double quotes if wrapped
+      if (comment.startsWith('"') && comment.endsWith('"') && comment.length >= 2) {
+        comment = comment.slice(1, -1).trim();
+      }
+
+      const subMatch = link.match(/\/r\/([a-zA-Z0-9_]+)/i);
+      const sub = subMatch ? subMatch[1]! : "reddit";
+      const title = `Reddit Comment - r/${sub}`;
+
+      tasks.push({
+        type: "comment",
+        title,
+        task_link: link,
+        instructions: "",
+        reward: 1.00,
+        slots: 1,
+        time_limit: 60,
+        hold_hours: 24,
+        min_trust: 0,
+        max_claims_per_user: 3,
+        prewritten_comment: comment || undefined,
+      });
+    }
+
+    if (tasks.length === 0) {
+      throw new Error(`No valid Reddit task links found for date "${selectedSection.date}".`);
+    }
+
+    return Object.assign(tasks, {
+      detectedDate: selectedSection.date,
+      availableDates,
+    });
+  }
+
+  // 2. Standard CSV parsing fallback for regular formatted CSVs
   const headers = rowsData[0]!.map((h) => h.toLowerCase().replace(/[\s-]/g, "_"));
   const rows: ParsedTaskRow[] = [];
   const errors: string[] = [];
@@ -1063,8 +1192,13 @@ export async function createBulkTasksFromCsv(args: {
   notifyUnclaimed?: boolean;
   scheduledStartAt?: Date | null;
   formattedIst?: string | null;
+  targetDate?: string;
 }): Promise<CreateBulkResult> {
-  const rows = parseTaskCsv(args.csv);
+  const rows = parseTaskCsv(args.csv, args.targetDate);
+  const detectedDate = (rows as any).detectedDate;
+  const campaignTitle = (args.campaignTitle && !args.campaignTitle.startsWith("Sheet Import —"))
+    ? args.campaignTitle
+    : (detectedDate ? `Daily Drop — ${detectedDate} (${rows.length} Tasks)` : (args.campaignTitle || "Bulk Task Campaign"));
   // Allow fractional minutes so sub-minute drip intervals work (e.g. 0.5 = 30s).
   const intervalMinutes = Math.max(0, Math.min(1440, args.intervalMinutes ?? 0));
   const allowMultipleClaims = !!args.allowMultipleClaims;
@@ -1081,7 +1215,7 @@ export async function createBulkTasksFromCsv(args: {
 
   const [campaign] = await db.insert(campaigns).values({
     creatorDiscordId: args.creatorDiscordId,
-    title: args.campaignTitle,
+    title: campaignTitle,
     sourceType: args.sourceType,
     sourceUrl: args.sourceUrl ?? null,
     totalTasks: rows.length,

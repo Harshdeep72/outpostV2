@@ -61,9 +61,33 @@ async function fetchSheetCsv(url: string): Promise<string> {
     );
   }
 
+  let targetGid = parsed.gid;
+  // If no gid was explicitly in the URL (it defaulted to "0"), check if sheet has newer tabs
+  if (!url.includes("gid=")) {
+    try {
+      const htmlRes = await fetch(`https://docs.google.com/spreadsheets/d/${parsed.sheetId}/htmlview`, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) RedditMicrotasksBot/1.0" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (htmlRes.ok) {
+        const html = await htmlRes.text();
+        const matches = [...html.matchAll(/gid=([0-9]+)/g)].map((m) => m[1]!);
+        const uniqueGids = [...new Set(matches)];
+        if (uniqueGids.length > 1) {
+          // The last tab in the spreadsheet is typically the newest tab (e.g. Sheet2)
+          targetGid = uniqueGids[uniqueGids.length - 1]!;
+        }
+      }
+    } catch {
+      // fallback to original gid
+    }
+  }
+
   const candidateUrls = [
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv&gid=${targetGid}`,
     `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv&gid=${parsed.gid}`,
     `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/gviz/tq?tqx=out:csv`,
+    `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${targetGid}`,
     `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv&gid=${parsed.gid}`,
     `https://docs.google.com/spreadsheets/d/${parsed.sheetId}/export?format=csv`,
   ];
@@ -208,6 +232,7 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
   }
 
   const sheetsUrl = interaction.options.getString("sheets_url");
+  const targetDate = interaction.options.getString("date")?.trim();
   const intervalMinutes = interaction.options.getInteger("interval_minutes") ?? 0;
   const maxClaimsPerUser = interaction.options.getInteger("max_claims_per_user") ?? 3;
   const scheduleTimeRaw = (
@@ -242,7 +267,7 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
 
   if (sheetsUrl) {
     await interaction.deferReply({ flags: 64 });
-    await processBulkFromUrl(interaction, sheetsUrl, intervalMinutes, maxClaimsPerUser, scheduledStartAt, formattedIst);
+    await processBulkFromUrl(interaction, sheetsUrl, intervalMinutes, maxClaimsPerUser, scheduledStartAt, formattedIst, targetDate);
   } else {
     const modal = new ModalBuilder()
       .setCustomId(`bulktask:csvmodal:${intervalMinutes}:${maxClaimsPerUser}`)
@@ -300,6 +325,7 @@ async function processBulkFromUrl(
   maxClaimsPerUser: number = 3,
   scheduledStartAt: Date | null = null,
   formattedIst: string | null = null,
+  targetDate?: string,
 ) {
   let csv: string;
   try {
@@ -310,8 +336,9 @@ async function processBulkFromUrl(
     });
   }
 
+  let parsedRows: ReturnType<typeof parseTaskCsv>;
   try {
-    parseTaskCsv(csv);
+    parsedRows = parseTaskCsv(csv, targetDate);
   } catch (err: any) {
     return interaction.editReply({
       embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ CSV parse error: ${err.message}`)],
@@ -322,12 +349,16 @@ async function processBulkFromUrl(
   await setupGuild(guild);
 
   const urlObj = new URL(sheetsUrl);
-  const campaignTitle = `Sheet Import — ${urlObj.hostname}${urlObj.pathname.slice(0, 40)}`;
+  const detectedDate = (parsedRows as any).detectedDate;
+  const campaignTitle = detectedDate
+    ? `Daily Drop — ${detectedDate} (${parsedRows.length} Tasks)`
+    : `Sheet Import — ${urlObj.hostname}${urlObj.pathname.slice(0, 40)}`;
 
   let result;
   try {
     result = await createBulkTasksFromCsv({
       csv,
+      targetDate,
       campaignTitle,
       sourceType: "sheets",
       sourceUrl: sheetsUrl,

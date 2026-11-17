@@ -30,6 +30,7 @@ import { startUnverifiedPruner } from "./unverifiedPruner.js";
 import { startCacheSweeper } from "./cache.js";
 import { setDiscordClient } from "./discord-client.js";
 import { handleGuildMemberAdd } from "./handlers/joinerGuide.js";
+import { handleGuildMemberRemove } from "./handlers/memberLeave.js";
 import { handleAutoModMessage } from "./handlers/autoMod.js";
 import { logger } from "../lib/logger.js";
 
@@ -89,6 +90,7 @@ export async function startBot() {
   client.on("shardReconnecting", (id) => logger.info({ id }, "Shard reconnecting"));
   client.on("shardResume", (id, replayed) => logger.info({ id, replayed }, "Shard resumed"));
   client.on("guildMemberAdd", (member) => handleGuildMemberAdd(member));
+  client.on("guildMemberRemove", (member) => handleGuildMemberRemove(member));
   client.on("inviteCreate", (invite) => handleInviteCreate(invite));
   client.on("inviteDelete", (invite) => handleInviteDelete(invite));
   client.on("roleCreate", async (role) => {

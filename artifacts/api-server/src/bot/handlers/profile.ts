@@ -27,7 +27,7 @@ import { getPrimaryGuild } from "../discord-client.js";
  * Wrapped in try/catch — never throws, /profile keeps working even if
  * the DB hiccups on this auxiliary query.
  */
-async function fetchAllLinkedRedditAccounts(discordId: string, primary: string | null): Promise<string[]> {
+export async function fetchAllLinkedRedditAccounts(discordId: string, primary: string | null): Promise<string[]> {
   try {
     const result = await db.execute<{ reddit_username: string }>(
       sql`SELECT DISTINCT LOWER(reddit_username) AS reddit_username

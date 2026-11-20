@@ -11,6 +11,7 @@ import { makeEmbed, hasModRole } from "../util.js";
 import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { createBulkTasksFromCsv, parseTaskCsv, type CreateBulkResult } from "../task-creation.js";
+import { getMasterSheetUrl } from "./sheetSync.js";
 import { runCampaignLivenessCheck } from "../redditLivenessChecker.js";
 import { db, campaigns, campaignQueue } from "@workspace/db";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -265,9 +266,16 @@ export async function handleBulkTaskCommand(interaction: ChatInputCommandInterac
     formattedIst = parsed.formattedIst;
   }
 
-  if (sheetsUrl) {
+  let resolvedSheetsUrl = sheetsUrl?.trim();
+  if (!resolvedSheetsUrl && targetDate) {
+    resolvedSheetsUrl = await getMasterSheetUrl(guild.id);
+  } else if (resolvedSheetsUrl?.toLowerCase() === "master" || resolvedSheetsUrl?.toLowerCase() === "default") {
+    resolvedSheetsUrl = await getMasterSheetUrl(guild.id);
+  }
+
+  if (resolvedSheetsUrl) {
     await interaction.deferReply({ flags: 64 });
-    await processBulkFromUrl(interaction, sheetsUrl, intervalMinutes, maxClaimsPerUser, scheduledStartAt, formattedIst, targetDate);
+    await processBulkFromUrl(interaction, resolvedSheetsUrl, intervalMinutes, maxClaimsPerUser, scheduledStartAt, formattedIst, targetDate);
   } else {
     const modal = new ModalBuilder()
       .setCustomId(`bulktask:csvmodal:${intervalMinutes}:${maxClaimsPerUser}`)

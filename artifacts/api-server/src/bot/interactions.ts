@@ -28,6 +28,7 @@ import { handleJoinerGuideCommand } from "./handlers/joinerGuide.js";
 import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCancelCampaignButton, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 import { handleFlairCommand, handleSendFlairPickerCommand, handleFlairSelect } from "./handlers/flair.js";
+import { handleSyncSheetCommand, handleSheetSyncButton, handleSheetSyncSelect, handleSheetSyncScheduleModal, handleSetMasterSheetCommand } from "./handlers/sheetSync.js";
 
 const SLOW_HANDLER_MS = 800;
 
@@ -61,6 +62,8 @@ export function registerInteractionHandler(client: Client) {
         if (name === "createtask") return await timed(name, () => handleCreateTaskCommand(interaction));
         if (name === "bulktask") return await timed(name, () => handleBulkTaskCommand(interaction));
         if (name === "scheduletask") return await timed(name, () => handleBulkTaskCommand(interaction));
+        if (name === "syncsheet" || name === "dropsheet") return await timed(name, () => handleSyncSheetCommand(interaction));
+        if (name === "setmastersheet") return await timed(name, () => handleSetMasterSheetCommand(interaction));
         if (name === "scheduledtasks") return await timed(name, () => handleListScheduledCommand(interaction));
         if (name === "cancelscheduled") return await timed(name, () => handleCancelScheduledCommand(interaction));
         if (name === "canceltask") return await timed(name, () => handleCancelTaskCommand(interaction));
@@ -128,6 +131,9 @@ export function registerInteractionHandler(client: Client) {
         if (scope === "flair" && action === "select") {
           return await timed(tag, () => handleFlairSelect(interaction));
         }
+        if (scope === "sheetsync" && action === "select") {
+          return await timed(tag, () => handleSheetSyncSelect(interaction));
+        }
       }
 
       if (interaction.isButton()) {
@@ -135,6 +141,10 @@ export function registerInteractionHandler(client: Client) {
         const p1 = rest[0] ?? "";
         const p2 = rest[1] ?? "";
         const tag = `btn:${scope}:${action}`;
+
+        if (scope === "sheetsync") {
+          return await timed(tag, () => handleSheetSyncButton(interaction, action, p1));
+        }
 
         if (scope === "verify") {
           if (action === "start") return await timed(tag, () => handleVerifyStart(interaction));
@@ -276,6 +286,10 @@ export function registerInteractionHandler(client: Client) {
 
         if (scope === "bulktask" && action === "csvmodal") {
           return await timed(tag, () => handleBulkTaskCsvModal(interaction));
+        }
+
+        if (scope === "sheetsync" && action === "schedmodal") {
+          return await timed(tag, () => handleSheetSyncScheduleModal(interaction, parts[2]!));
         }
 
         if (scope === "massdm" && action === "modal") {

@@ -595,6 +595,60 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     .setDefaultMemberPermissions(0x20)
     .setDMPermission(false);
 
+  const syncsheet = new SlashCommandBuilder()
+    .setName("syncsheet")
+    .setDescription("Auto-fetch tasks from Master Google Sheet and post or schedule with 1 click (Admin/Mod)")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o.setName("date").setDescription("Date section in sheet (e.g. 20.11.2026). Omit to auto-pick latest date")
+    )
+    .addStringOption((o) =>
+      o.setName("action")
+        .setDescription("Action to take (default: interactive preview with buttons)")
+        .addChoices(
+          { name: "Preview with buttons (default)", value: "preview" },
+          { name: "Post tasks now (immediate drop)", value: "post_now" },
+          { name: "Schedule drop (requires time_ist)", value: "schedule" },
+        )
+    )
+    .addStringOption((o) =>
+      o.setName("time_ist").setDescription("Drop time in IST (e.g. 19:30, 7:30 PM, tomorrow 14:00, in 2h)")
+    )
+    .addIntegerOption((o) =>
+      o.setName("interval_minutes").setDescription("Drip interval: minutes between each task drop (0 = all at once, default 0)").setMinValue(0).setMaxValue(1440)
+    )
+    .addIntegerOption((o) =>
+      o.setName("max_claims_per_user").setDescription("Max tasks a worker can claim (default 3, scaled by accounts)").setMinValue(1).setMaxValue(100)
+    )
+    .addStringOption((o) =>
+      o.setName("sheet_url").setDescription("Override Master Google Sheet URL")
+    );
+
+  const dropsheet = new SlashCommandBuilder()
+    .setName("dropsheet")
+    .setDescription("Quick 1-click drop from Master Google Sheet (alias for /syncsheet)")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o.setName("date").setDescription("Date section in sheet (e.g. 20.11.2026). Omit to auto-pick latest date")
+    )
+    .addStringOption((o) =>
+      o.setName("time_ist").setDescription("Drop time in IST (e.g. 19:30, 7:30 PM, in 2h). Omit to post now")
+    )
+    .addIntegerOption((o) =>
+      o.setName("interval_minutes").setDescription("Drip interval: minutes between each task drop (default 0)").setMinValue(0).setMaxValue(1440)
+    );
+
+  const setmastersheet = new SlashCommandBuilder()
+    .setName("setmastersheet")
+    .setDescription("[Admin] Set the default Master Google Sheet URL for automated drops")
+    .setDefaultMemberPermissions(0x20)
+    .setDMPermission(false)
+    .addStringOption((o) =>
+      o.setName("url").setDescription("The public Google Sheets URL").setRequired(true)
+    );
+
   return [
     verify, setup, createtask, bulktask, scheduletask, scheduledtasks, cancelscheduled, referral, referralUse,
     setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
@@ -607,6 +661,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     mypayment, paymentmethod,
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
+    syncsheet, dropsheet, setmastersheet,
     buildDigest(),
   ] as unknown as SlashCommandBuilder[];
 }

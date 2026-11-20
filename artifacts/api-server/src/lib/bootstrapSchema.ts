@@ -326,6 +326,8 @@ const POST_FIXES: string[] = [
   `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "current_week_start" TIMESTAMPTZ;`,
   `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "last_weekly_payout_at" TIMESTAMPTZ;`,
   `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "last_changelog_version" TEXT;`,
+  `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "master_sheet_url" TEXT;`,
+  `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "last_synced_sheet_date" TEXT;`,
   `ALTER TABLE "server_config" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
   `DELETE FROM "server_config" a USING "server_config" b WHERE a."guild_id" = b."guild_id" AND a."id" > b."id";`,
   `DO $$ BEGIN

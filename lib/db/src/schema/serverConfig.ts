@@ -8,6 +8,8 @@ export const serverConfig = pgTable("server_config", {
   currentWeekStart: timestamp("current_week_start", { withTimezone: true }),
   lastWeeklyPayoutAt: timestamp("last_weekly_payout_at", { withTimezone: true }),
   lastChangelogVersion: text("last_changelog_version"),
+  masterSheetUrl: text("master_sheet_url"),
+  lastSyncedSheetDate: text("last_synced_sheet_date"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -934,18 +934,22 @@ export function parseTaskCsv(raw: string, targetDate?: string): ParsedTaskRow[] 
       const row = rowsData[i]!;
       let rowDate: string | null = null;
       for (const cell of row) {
-        if (!redditUrlRegex.test(cell)) {
-          const m = cell.match(dateBannerRegex);
-          if (m) {
-            rowDate = m[1]!;
-            break;
-          }
+        const m = cell.match(/(?:Date\s+)(\d{1,2}[\.\-\/]\d{1,2}[\.\-\/]\d{2,4})/i) ||
+          (!redditUrlRegex.test(cell) ? cell.match(dateBannerRegex) : null);
+        if (m) {
+          rowDate = m[1]!;
+          break;
         }
       }
 
       if (rowDate) {
         if (current.rows.length > 0) sections.push(current);
         current = { date: rowDate, rows: [] };
+        // If this row also contains a Reddit URL, keep the task row in the section
+        const hasReddit = row.some((c) => redditUrlRegex.test(c));
+        if (hasReddit) {
+          current.rows.push(row);
+        }
         continue;
       }
 
@@ -956,6 +960,20 @@ export function parseTaskCsv(raw: string, targetDate?: string): ParsedTaskRow[] 
       }
     }
     if (current.rows.length > 0) sections.push(current);
+
+    // Sort sections chronologically by DD.MM.YYYY
+    function parseDateToTime(dStr: string): number {
+      const parts = dStr.split(/[\.\-\/]/);
+      if (parts.length === 3) {
+        const day = parseInt(parts[0]!, 10);
+        const month = parseInt(parts[1]!, 10) - 1;
+        let year = parseInt(parts[2]!, 10);
+        if (year < 100) year += 2000;
+        return new Date(year, month, day).getTime();
+      }
+      return 0;
+    }
+    sections.sort((a, b) => parseDateToTime(a.date) - parseDateToTime(b.date));
 
     const availableDates = sections.map((s) => s.date).filter((d) => d !== "unknown");
     let selectedSection = sections[sections.length - 1];

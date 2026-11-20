@@ -29,6 +29,7 @@ import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCancelCampa
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 import { handleFlairCommand, handleSendFlairPickerCommand, handleFlairSelect } from "./handlers/flair.js";
 import { handleSyncSheetCommand, handleSheetSyncButton, handleSheetSyncSelect, handleSheetSyncScheduleModal, handleSetMasterSheetCommand } from "./handlers/sheetSync.js";
+import { handleWorkspaceCommand, handleWorkspaceAutocomplete, handleOpenWorkspaceContextMenu, handleWorkspaceButton } from "./handlers/workspaceFinder.js";
 
 const SLOW_HANDLER_MS = 800;
 
@@ -118,7 +119,22 @@ export function registerInteractionHandler(client: Client) {
         if (name === "verifiedlist") return await timed(name, () => handleVerifiedListCommand(interaction));
         if (name === "flair") return await timed(name, () => handleFlairCommand(interaction));
         if (name === "sendflairpicker") return await timed(name, () => handleSendFlairPickerCommand(interaction));
+        if (name === "workspace" || name === "ws") return await timed(name, () => handleWorkspaceCommand(interaction));
         logger.warn({ name }, "Unknown command");
+        return;
+      }
+
+      if (interaction.isUserContextMenuCommand()) {
+        if (interaction.commandName === "Open Workspace") {
+          return await timed("context:Open Workspace", () => handleOpenWorkspaceContextMenu(interaction));
+        }
+      }
+
+      if (interaction.isAutocomplete()) {
+        const name = interaction.commandName;
+        if (name === "workspace" || name === "ws") {
+          return await handleWorkspaceAutocomplete(interaction);
+        }
         return;
       }
 
@@ -144,6 +160,10 @@ export function registerInteractionHandler(client: Client) {
 
         if (scope === "sheetsync") {
           return await timed(tag, () => handleSheetSyncButton(interaction, action, p1));
+        }
+
+        if (scope === "ws") {
+          return await timed(tag, () => handleWorkspaceButton(interaction, action, p1));
         }
 
         if (scope === "verify") {

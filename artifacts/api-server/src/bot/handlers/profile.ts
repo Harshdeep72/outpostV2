@@ -1,6 +1,9 @@
 import {
   type ChatInputCommandInteraction,
   AttachmentBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from "discord.js";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
@@ -147,8 +150,22 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
       { name: "Balance Available", value: formatMoney(user.balanceAvailable), inline: true },
       { name: "Balance Pending", value: formatMoney(user.balancePending), inline: true },
       { name: "Lifetime Earnings", value: formatMoney(user.totalEarned), inline: true },
+      ...(user.workspaceChannelId ? [{ name: "📂 Workspace", value: `<#${user.workspaceChannelId}>`, inline: true }] : []),
     )
     .setFooter({ text: freshenedNow ? "Karma refreshed from Reddit API" : "Karma as of last verification" });
+
+  const components: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (user.workspaceChannelId && targetGuild) {
+    const wsUrl = `https://discord.com/channels/${targetGuild.id}/${user.workspaceChannelId}`;
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setLabel("📂 Jump to Workspace")
+          .setStyle(ButtonStyle.Link)
+          .setURL(wsUrl)
+      )
+    );
+  }
 
   // Try to render a fancy PNG profile card. ANY failure → fall back to the
   // existing embed-only reply (so this can never break /profile for users).
@@ -171,10 +188,10 @@ export async function handleProfileCommand(interaction: ChatInputCommandInteract
       flairColor: userFlairColor,
     });
     const file = new AttachmentBuilder(png, { name: "profile.png" });
-    await interaction.editReply({ files: [file] });
+    await interaction.editReply({ files: [file], components });
   } catch (err) {
     logger.warn({ err, discordId }, "Profile card PNG render failed — falling back to embed");
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed], components });
   }
 
   logger.info({ discordId, targetId: discordId }, "Profile viewed");

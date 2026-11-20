@@ -1,5 +1,7 @@
 import {
   SlashCommandBuilder,
+  ContextMenuCommandBuilder,
+  ApplicationCommandType,
 } from "discord.js";
 import { TASK_TYPES, COIN_CHOICES } from "../constants.js";
 
@@ -30,7 +32,7 @@ function buildDigest(): SlashCommandBuilder {
   return b;
 }
 
-export function getCommandBuilders(): SlashCommandBuilder[] {
+export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandBuilder)[] {
   const verify = new SlashCommandBuilder()
     .setName("verify")
     .setDescription("Post the public verification panel (admin/mod only)");
@@ -649,6 +651,33 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
       o.setName("url").setDescription("The public Google Sheets URL").setRequired(true)
     );
 
+  const workspace = new SlashCommandBuilder()
+    .setName("workspace")
+    .setDescription("Jump to any worker's private workspace channel without scrolling the channel list")
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Worker's Discord mention or tag")
+    )
+    .addStringOption((o) =>
+      o.setName("worker").setDescription("Search worker by Discord username or Reddit username").setAutocomplete(true)
+    )
+    .addStringOption((o) =>
+      o.setName("reddit").setDescription("Reddit username (e.g. u/username)")
+    );
+
+  const ws = new SlashCommandBuilder()
+    .setName("ws")
+    .setDescription("Quick jump to a worker's workspace channel (alias for /workspace)")
+    .addUserOption((o) =>
+      o.setName("user").setDescription("Worker's Discord mention or tag")
+    )
+    .addStringOption((o) =>
+      o.setName("worker").setDescription("Search worker by Discord or Reddit username").setAutocomplete(true)
+    );
+
+  const openWorkspaceContext = new ContextMenuCommandBuilder()
+    .setName("Open Workspace")
+    .setType(ApplicationCommandType.User);
+
   return [
     verify, setup, createtask, bulktask, scheduletask, scheduledtasks, cancelscheduled, referral, referralUse,
     setupi, setgcash, setwallet, setpaypal, wallet, leaderboard, resetleaderboard,
@@ -662,6 +691,7 @@ export function getCommandBuilders(): SlashCommandBuilder[] {
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
     syncsheet, dropsheet, setmastersheet,
+    workspace, ws, openWorkspaceContext,
     buildDigest(),
-  ] as unknown as SlashCommandBuilder[];
+  ] as unknown as (SlashCommandBuilder | ContextMenuCommandBuilder)[];
 }

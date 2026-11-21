@@ -8,13 +8,43 @@ import { TextChannel, EmbedBuilder } from "discord.js";
 const router: IRouter = Router();
 
 // In-memory cache for live exchange rates
-let cachedRates: { INR: number; PHP: number } = { INR: 94.29, PHP: 58.75 };
+let cachedRates: { INR: number; PHP: number } = { INR: 92.68, PHP: 63.78 };
 let lastRateFetch = 0;
 
 async function getLiveExchangeRates(): Promise<{ INR: number; PHP: number }> {
   if (Date.now() - lastRateFetch < 60 * 1000) {
     return cachedRates;
   }
+
+  // 1. Primary: Frankfurter API (Real-time ECB/forex rate matching Google)
+  try {
+    const res = await fetch("https://api.frankfurter.dev/v1/latest?base=USD");
+    const data = (await res.json()) as any;
+    if (data && data.rates) {
+      if (typeof data.rates.INR === "number") cachedRates.INR = parseFloat(data.rates.INR.toFixed(2));
+      if (typeof data.rates.PHP === "number") cachedRates.PHP = parseFloat(data.rates.PHP.toFixed(2));
+      lastRateFetch = Date.now();
+      return cachedRates;
+    }
+  } catch (err) {
+    logger.warn({ err }, "Frankfurter live exchange rate fetch failed, trying FxRatesAPI");
+  }
+
+  // 2. Fallback 1: FxRatesAPI
+  try {
+    const res = await fetch("https://api.fxratesapi.com/latest?base=USD");
+    const data = (await res.json()) as any;
+    if (data && data.rates) {
+      if (typeof data.rates.INR === "number") cachedRates.INR = parseFloat(data.rates.INR.toFixed(2));
+      if (typeof data.rates.PHP === "number") cachedRates.PHP = parseFloat(data.rates.PHP.toFixed(2));
+      lastRateFetch = Date.now();
+      return cachedRates;
+    }
+  } catch (err) {
+    logger.warn({ err }, "FxRatesAPI fallback failed, trying open.er-api");
+  }
+
+  // 3. Fallback 2: open.er-api
   try {
     const res = await fetch("https://open.er-api.com/v6/latest/USD");
     const data = (await res.json()) as any;
@@ -25,19 +55,7 @@ async function getLiveExchangeRates(): Promise<{ INR: number; PHP: number }> {
       return cachedRates;
     }
   } catch (err) {
-    logger.warn({ err }, "Primary exchange rate fetch failed, trying fallback");
-  }
-
-  try {
-    const res2 = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-    const data2 = (await res2.json()) as any;
-    if (data2 && data2.rates) {
-      if (typeof data2.rates.INR === "number") cachedRates.INR = parseFloat(data2.rates.INR.toFixed(2));
-      if (typeof data2.rates.PHP === "number") cachedRates.PHP = parseFloat(data2.rates.PHP.toFixed(2));
-      lastRateFetch = Date.now();
-    }
-  } catch (err) {
-    logger.warn({ err }, "Fallback exchange rate fetch failed, using cached");
+    logger.warn({ err }, "open.er-api fallback failed, using cached");
   }
 
   return cachedRates;
@@ -1122,6 +1140,10 @@ async function markPaid(id) {
 }
 
 document.getElementById('rateInput').addEventListener('input', (e) => {
+  isLiveApiMode = false;
+  document.getElementById('livePill').style.display = 'none';
+  document.getElementById('btnLiveApi').style.background = '#1e293b';
+  document.getElementById('btnLiveApi').style.color = '#e2e8f0';
   currentRate = parseFloat(e.target.value) || 88.5;
   localStorage.setItem('custom_rate', currentRate);
   render();

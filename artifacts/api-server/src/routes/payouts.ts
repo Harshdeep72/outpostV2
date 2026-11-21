@@ -1042,6 +1042,10 @@ function render() {
             <div class="paid-badge">
               <span>✅ PAID & WORKSPACE NOTIFIED</span>
             </div>
+          \` : w.status === 'on_hold' ? \`
+            <div class="paid-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">
+              <span>⏸️ ON HOLD</span>
+            </div>
           \` : \`
             <div class="card-actions">
               \${actionBtnHtml}

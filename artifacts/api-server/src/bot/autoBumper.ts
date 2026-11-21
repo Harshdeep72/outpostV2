@@ -38,6 +38,7 @@ async function runBumpTick(client: Client): Promise<void> {
 
   // Find open tasks that have 0 slots claimed and have been unclaimed for >= intervalMin
   // (either since creation if never bumped, or since last bump).
+  // Strictly filter for tasks posted TODAY so older tasks from previous days are never bumped.
   const r = await pool.query(
     `SELECT id, title, reward, slots_filled, max_slots, channel_message_id,
             auto_bump_count, last_bump_at, created_at, campaign_id,
@@ -46,13 +47,15 @@ async function runBumpTick(client: Client): Promise<void> {
        FROM tasks
       WHERE status = 'open'
         AND slots_filled = 0
-        AND auto_bump_count < $1
+        AND created_at >= CURRENT_DATE
+        AND COALESCE(auto_bump_count, 0) < $1
         AND (
           (last_bump_at IS NULL AND created_at < NOW() - ($2 || ' minutes')::interval)
           OR
           (last_bump_at IS NOT NULL AND last_bump_at < NOW() - ($2 || ' minutes')::interval)
         )
-      LIMIT 50`,
+      ORDER BY id ASC
+      LIMIT 5`,
     [MAX_BUMPS, intervalMin],
   );
   if (r.rowCount === 0) return;
@@ -76,7 +79,7 @@ async function runBumpTick(client: Client): Promise<void> {
       // Update bump count and timestamp without touching reward
       const upd = await pool.query(
         `UPDATE tasks
-            SET auto_bump_count = auto_bump_count + 1,
+            SET auto_bump_count = COALESCE(auto_bump_count, 0) + 1,
                 last_bump_at    = NOW()
           WHERE id = $1 AND status = 'open' AND slots_filled = 0
           RETURNING *`,
@@ -129,6 +132,9 @@ async function runBumpTick(client: Client): Promise<void> {
         `UPDATE tasks SET channel_message_id = $1 WHERE id = $2`,
         [newMsg.id, taskId],
       );
+
+      // Pace out bumps to avoid Discord rate limits
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (err) {
       logger.warn({ err, taskId: row.id }, "autoBumper: bump failed for task");
     }

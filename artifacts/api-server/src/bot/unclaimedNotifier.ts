@@ -76,8 +76,9 @@ async function runNotifyTick(client: Client): Promise<void> {
        FROM tasks
       WHERE status = 'open'
         AND slots_filled = 0
+        AND created_at >= CURRENT_DATE
         AND unclaimed_notify_enabled = TRUE
-        AND unclaimed_notify_count < $1
+        AND COALESCE(unclaimed_notify_count, 0) < $1
       LIMIT 200`,
     [MAX_BUMPS],
   );

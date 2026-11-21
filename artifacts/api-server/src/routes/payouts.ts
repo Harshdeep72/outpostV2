@@ -476,6 +476,7 @@ router.get("/", (_req: Request, res: Response) => {
   }
 
   .qr-section {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -486,9 +487,67 @@ router.get("/", (_req: Request, res: Response) => {
     width: 135px;
     height: 135px;
     flex-shrink: 0;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .qr-img { width: 100%; height: 100%; object-fit: contain; }
-  .scan-tip { font-size: 0.65rem; color: #64748b; font-weight: 700; margin-top: 4px; text-transform: uppercase; }
+  .qr-section:hover:not(.is-revealed) {
+    box-shadow: 0 0 16px rgba(59, 130, 246, 0.5);
+    transform: translateY(-2px);
+  }
+  .qr-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transition: filter 0.2s ease, opacity 0.2s ease;
+  }
+  .scan-tip {
+    font-size: 0.65rem;
+    color: #64748b;
+    font-weight: 700;
+    margin-top: 4px;
+    text-transform: uppercase;
+  }
+
+  /* Privacy & Mis-Scan Blur Protection (avoids camera accidentally scanning adjacent QRs) */
+  body.qr-blur-active .qr-section:not(.is-revealed) .qr-img {
+    filter: blur(14px);
+    opacity: 0.18;
+  }
+  body.qr-blur-active .qr-section .qr-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: rgba(15, 23, 42, 0.82);
+    color: #f8fafc;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-align: center;
+    padding: 6px;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .qr-hint-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+  }
+  body.qr-blur-active .qr-section.is-revealed .qr-hint {
+    display: none;
+  }
+  body.qr-blur-active .qr-section.is-revealed {
+    outline: 3px solid #10b981;
+    outline-offset: 3px;
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.55);
+  }
+  body:not(.qr-blur-active) .qr-hint {
+    display: none;
+  }
 
   .icon-section {
     display: flex;
@@ -720,7 +779,7 @@ router.get("/", (_req: Request, res: Response) => {
   }
 </style>
 </head>
-<body>
+<body class="qr-blur-active">
 <div class="container">
   <header>
     <div class="header-left">
@@ -788,10 +847,17 @@ router.get("/", (_req: Request, res: Response) => {
     </div>
   </div>
 
-  <div class="filter-tabs">
-    <button class="tab-btn active" id="tabUnpaid" onclick="setFilter('pending')">Pending (To Pay)</button>
-    <button class="tab-btn" id="tabAll" onclick="setFilter('all')">All Statuses</button>
-    <button class="tab-btn" id="tabPaid" onclick="setFilter('approved')">Completed</button>
+  <div class="filter-tabs" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+      <button class="tab-btn active" id="tabUnpaid" onclick="setFilter('pending')">Pending (To Pay)</button>
+      <button class="tab-btn" id="tabAll" onclick="setFilter('all')">All Statuses</button>
+      <button class="tab-btn" id="tabPaid" onclick="setFilter('approved')">Completed</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button class="tab-btn" id="btnToggleBlur" onclick="toggleQrBlurMode()" style="background: #059669; color: #fff; font-size: 0.8rem; padding: 7px 14px; font-weight: 600; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px;">
+        <span>🔒 Anti-Mis-Scan Blur:</span> <b>ON</b>
+      </button>
+    </div>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -804,8 +870,62 @@ let withdrawals = [];
 let currentFilter = 'pending';
 let currentMethod = 'all';
 let isLiveApiMode = true;
-let currentRate = 94.29;
-let currentPhpRate = 58.75;
+let currentRate = 92.68;
+let currentPhpRate = 63.78;
+let activeRevealedQrId = null;
+let isQrBlurEnabled = localStorage.getItem('qr_blur_enabled') !== 'false';
+
+function renderQrBox(id, qrUrl, scanTip, isPaid) {
+  const isRevealed = activeRevealedQrId === id;
+  return \`
+    <div class="qr-section \${isRevealed ? 'is-revealed' : ''}" id="qr-sec-\${id}" onclick="toggleQrReveal(\${id})" title="Click to reveal / scan this QR">
+      <img class="qr-img" src="\${qrUrl}" alt="\${scanTip}">
+      <span class="scan-tip">\${isPaid ? 'PAID' : scanTip}</span>
+      <div class="qr-hint">
+        <span class="qr-hint-icon">👁️</span>
+        <span>Click to Scan</span>
+      </div>
+    </div>
+  \`;
+}
+
+function toggleQrReveal(id, forceOpen = false) {
+  if (!isQrBlurEnabled) return;
+  if (!forceOpen && activeRevealedQrId === id) {
+    const el = document.getElementById('qr-sec-' + id);
+    if (el) el.classList.remove('is-revealed');
+    activeRevealedQrId = null;
+    return;
+  }
+  if (activeRevealedQrId !== null && activeRevealedQrId !== id) {
+    const prev = document.getElementById('qr-sec-' + activeRevealedQrId);
+    if (prev) prev.classList.remove('is-revealed');
+  }
+  activeRevealedQrId = id;
+  const current = document.getElementById('qr-sec-' + id);
+  if (current) current.classList.add('is-revealed');
+}
+
+function toggleQrBlurMode() {
+  isQrBlurEnabled = !isQrBlurEnabled;
+  localStorage.setItem('qr_blur_enabled', isQrBlurEnabled ? 'true' : 'false');
+  updateQrBlurUi();
+}
+
+function updateQrBlurUi() {
+  document.body.classList.toggle('qr-blur-active', isQrBlurEnabled);
+  const btn = document.getElementById('btnToggleBlur');
+  if (btn) {
+    btn.innerHTML = isQrBlurEnabled 
+      ? '<span>🔒 Anti-Mis-Scan Blur:</span> <b>ON</b>' 
+      : '<span>🔓 Anti-Mis-Scan Blur:</span> <b>OFF</b>';
+    btn.style.background = isQrBlurEnabled ? '#059669' : '#334155';
+  }
+  if (!isQrBlurEnabled) {
+    document.querySelectorAll('.qr-section').forEach(el => el.classList.remove('is-revealed'));
+    activeRevealedQrId = null;
+  }
+}
 
 function getApiBase() {
   return window.location.pathname.replace(/\\/$/, '');
@@ -944,12 +1064,7 @@ function render() {
       const upiLink = \`upi://pay?pa=\${encodeURIComponent(w.destination)}&pn=\${encodeURIComponent(w.discord_username)}&am=\${inrAmt}&cu=INR&tn=\${encodeURIComponent('Payment from reddit microtasks')}\`;
       const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=\${encodeURIComponent(upiLink)}\`;
       
-      leftColHtml = \`
-        <div class="qr-section">
-          <img class="qr-img" src="\${qrUrl}" alt="Scan UPI">
-          <span class="scan-tip">\${isPaid ? 'PAID' : 'SCAN TO PAY'}</span>
-        </div>
-      \`;
+      leftColHtml = renderQrBox(w.id, qrUrl, 'SCAN TO PAY', isPaid);
       primaryAmtHtml = \`₹\${inrAmt}\`;
       secondaryAmtHtml = \`$\${usdVal} USD\`;
       actionBtnHtml = \`
@@ -962,12 +1077,7 @@ function render() {
       const ppLink = \`https://www.paypal.com/myaccount/transfer/homepage/buy/preview?recipient=\${encodeURIComponent(w.destination)}&amount=\${usdVal}&currencyCode=USD\`;
       const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=\${encodeURIComponent(w.destination)}\`;
 
-      leftColHtml = \`
-        <div class="qr-section">
-          <img class="qr-img" src="\${qrUrl}" alt="PayPal Email">
-          <span class="scan-tip">PAYPAL QR</span>
-        </div>
-      \`;
+      leftColHtml = renderQrBox(w.id, qrUrl, 'PAYPAL QR', isPaid);
       primaryAmtHtml = \`$\${usdVal} USD\`;
       secondaryAmtHtml = \`PayPal Transfer\`;
       actionBtnHtml = \`
@@ -979,12 +1089,7 @@ function render() {
       const phpAmt = (parseFloat(w.amount) * currentPhpRate).toFixed(0);
       const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=\${encodeURIComponent(w.destination)}\`;
 
-      leftColHtml = \`
-        <div class="qr-section">
-          <img class="qr-img" src="\${qrUrl}" alt="GCash Number">
-          <span class="scan-tip">GCASH NUMBER</span>
-        </div>
-      \`;
+      leftColHtml = renderQrBox(w.id, qrUrl, 'GCASH NUMBER', isPaid);
       primaryAmtHtml = \`$\${usdVal} USD\`;
       secondaryAmtHtml = \`~₱\${phpAmt} PHP\`;
       actionBtnHtml = \`
@@ -995,12 +1100,7 @@ function render() {
       methodBadgeClass = 'crypto';
       const qrUrl = \`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=\${encodeURIComponent(w.destination)}\`;
 
-      leftColHtml = \`
-        <div class="qr-section">
-          <img class="qr-img" src="\${qrUrl}" alt="Scan BEP-20 Address">
-          <span class="scan-tip">SCAN ADDRESS</span>
-        </div>
-      \`;
+      leftColHtml = renderQrBox(w.id, qrUrl, 'SCAN ADDRESS', isPaid);
       primaryAmtHtml = \`$\${usdVal} USDT\`;
       secondaryAmtHtml = \`BNB Chain (BEP-20)\`;
       actionBtnHtml = \`
@@ -1154,6 +1254,7 @@ document.getElementById('rateInput').addEventListener('input', (e) => {
 });
 
 // Initial load
+updateQrBlurUi();
 loadData();
 // Auto refresh data every 30 seconds
 setInterval(loadData, 30000);

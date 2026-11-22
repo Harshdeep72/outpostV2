@@ -674,6 +674,13 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
       o.setName("worker").setDescription("Search worker by Discord or Reddit username").setAutocomplete(true)
     );
 
+  const checkreddit = new SlashCommandBuilder()
+    .setName("checkreddit")
+    .setDescription("Check if your linked Reddit accounts (or any username) are active or shadowbanned")
+    .addStringOption((o) =>
+      o.setName("username").setDescription("Optional Reddit username to check (leave blank to check your linked accounts)").setRequired(false)
+    );
+
   const openWorkspaceContext = new ContextMenuCommandBuilder()
     .setName("Open Workspace")
     .setType(ApplicationCommandType.User);
@@ -691,7 +698,7 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
     syncsheet, dropsheet, setmastersheet,
-    workspace, ws, openWorkspaceContext,
+    workspace, ws, checkreddit, openWorkspaceContext,
     buildDigest(),
   ] as unknown as (SlashCommandBuilder | ContextMenuCommandBuilder)[];
 }

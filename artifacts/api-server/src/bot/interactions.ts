@@ -28,6 +28,7 @@ import { handleJoinerGuideCommand } from "./handlers/joinerGuide.js";
 import { handleCancelTaskCommand, handleCancelCampaignCommand, handleCancelCampaignButton, handleCampaignStatusCommand } from "./handlers/canceltask.js";
 import { handleTestUrlCommand } from "./handlers/testurl.js";
 import { handleFlairCommand, handleSendFlairPickerCommand, handleFlairSelect } from "./handlers/flair.js";
+import { handleCheckRedditCommand } from "./handlers/checkreddit.js";
 import { handleSyncSheetCommand, handleSheetSyncButton, handleSheetSyncSelect, handleSheetSyncScheduleModal, handleSetMasterSheetCommand } from "./handlers/sheetSync.js";
 import { handleWorkspaceCommand, handleWorkspaceAutocomplete, handleOpenWorkspaceContextMenu, handleWorkspaceButton } from "./handlers/workspaceFinder.js";
 
@@ -120,6 +121,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "flair") return await timed(name, () => handleFlairCommand(interaction));
         if (name === "sendflairpicker") return await timed(name, () => handleSendFlairPickerCommand(interaction));
         if (name === "workspace" || name === "ws") return await timed(name, () => handleWorkspaceCommand(interaction));
+        if (name === "checkreddit" || name === "checkaccount") return await timed(name, () => handleCheckRedditCommand(interaction));
         logger.warn({ name }, "Unknown command");
         return;
       }

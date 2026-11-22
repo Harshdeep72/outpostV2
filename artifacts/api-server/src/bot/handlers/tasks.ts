@@ -25,6 +25,7 @@ import { logSubmissionToSheet, logSubmissionEvent } from "../../lib/sheetsLogger
 import { refreshLeaderboard } from "./leaderboard.js";
 import { notifyReferralCompletion } from "./referral.js";
 import { validateRedditProof, extractTaskSubreddit, detectAppUrl, appUrlHelpMessage } from "../reddit-validator.js";
+import { checkRedditAccountHealth } from "../shadowbanChecker.js";
 import { invalidateStreak } from "../streak.js";
 import { randomBytes } from "node:crypto";
 import { normalizeTaskInput, createTaskAndPost, buildSharedTaskEmbed, buildPublicTaskEmbed, buildPublicButtons, formatTaskCreator, buildCampaignProgressEmbed, refreshCampaignSummary } from "../task-creation.js";
@@ -469,7 +470,8 @@ export async function handleTaskClaim(
       linkedAccountNames.add(row.reddit_username.trim().toLowerCase());
     }
   }
-  const linkedAccountsCount = linkedAccountNames.size;
+  let healthyAccountNames = new Set<string>(linkedAccountNames);
+  let linkedAccountsCount = linkedAccountNames.size;
 
   // Check Discord role first; fall back to the DB `verified` flag so users
   // who were manually verified (role may have failed to assign) can still claim.
@@ -513,6 +515,48 @@ export async function handleTaskClaim(
       ],
       components: [row],
     });
+  }
+
+  // ---- Automatic Reddit Shadowban / Suspension Pre-Check -----------------
+  if (isRedditTask && linkedAccountNames.size > 0) {
+    const healthList = await Promise.all(
+      Array.from(linkedAccountNames).map((acc) => checkRedditAccountHealth(acc))
+    );
+
+    const deadList = healthList.filter((h) => !h.isHealthy);
+    const healthyList = healthList.filter((h) => h.isHealthy);
+
+    // If ALL linked accounts are dead/shadowbanned/suspended: block claim completely
+    if (healthyList.length === 0) {
+      const deadDetails = deadList
+        .map((h) => {
+          const statusDesc = h.isSuspended
+            ? "Suspended by Reddit"
+            : "Shadowbanned (profile returns 404 Not Found)";
+          return `• **u/${h.username}** — ${statusDesc}`;
+        })
+        .join("\n");
+
+      return interaction.editReply({
+        embeds: [
+          makeEmbed(COLORS.DANGER)
+            .setTitle("🚫 Reddit Account Shadowbanned")
+            .setDescription(
+              `Your linked Reddit account${deadList.length > 1 ? "s are" : " is"} **shadowbanned or suspended by Reddit**:\n\n` +
+              `${deadDetails}\n\n` +
+              `🔍 **Why this matters:**\n` +
+              `To you inside the Reddit mobile app or browser, your comments may look visible. But to Reddit and everyone else, this account does not exist (404). Any comments you post are automatically invisible and will be rejected by the 24-hour verification hold.\n\n` +
+              `💡 **How to fix this:**\n` +
+              `1. Check your account in an **Incognito / Private tab** (logged out) or post on r/ShadowBan.\n` +
+              `2. Link a healthy, active Reddit account using \`/verify\` before claiming tasks.\n` +
+              `3. Check account status anytime using \`/checkreddit\`.`
+            ),
+        ],
+      });
+    }
+
+    healthyAccountNames = new Set(healthyList.map((h) => h.username.toLowerCase()));
+    linkedAccountsCount = healthyAccountNames.size;
   }
 
   if (user.flagged) {
@@ -568,10 +612,14 @@ export async function handleTaskClaim(
         }
       } else {
         const now = Date.now();
-        // For single-account users, ensure user.lastTaskCompletedAt is also respected as a safety net
-        const available = accountsRes.rows.filter((r) => {
+        // Only evaluate healthy accounts for cooldown so dead accounts don't spoof cooldowns
+        const healthyRows = accountsRes.rows.filter((r) =>
+          healthyAccountNames.has((r.reddit_username ?? "").trim().toLowerCase())
+        );
+        const rowsToCheck = healthyRows.length > 0 ? healthyRows : accountsRes.rows;
+        const available = rowsToCheck.filter((r) => {
           let lastUsed = r.last_used_at ? new Date(r.last_used_at).getTime() : 0;
-          if (accountsRes.rows.length === 1 && user.lastTaskCompletedAt) {
+          if (rowsToCheck.length === 1 && user.lastTaskCompletedAt) {
             lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
           }
           if (!lastUsed) return true;
@@ -581,10 +629,10 @@ export async function handleTaskClaim(
           // All accounts on cooldown → block; show earliest readyAt AND which
           // specific Reddit account will free up first so the user knows
           // which one to wait for.
-          const sorted = accountsRes.rows
+          const sorted = rowsToCheck
             .map((r) => {
               let lastUsed = r.last_used_at ? new Date(r.last_used_at).getTime() : 0;
-              if (accountsRes.rows.length === 1 && user.lastTaskCompletedAt) {
+              if (rowsToCheck.length === 1 && user.lastTaskCompletedAt) {
                 lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
               }
               return {
@@ -597,9 +645,9 @@ export async function handleTaskClaim(
           const unixReady = Math.floor(next.readyAt / 1000);
           return interaction.editReply({
             embeds: [makeEmbed(COLORS.WARNING).setDescription(
-              accountsRes.rows.length === 1
+              rowsToCheck.length === 1
                 ? `⏳ Your Reddit account (**u/${next.name}**) is on cooldown.\n\nYou can claim again: <t:${unixReady}:R>`
-                : `⏳ All your Reddit accounts (${accountsRes.rows.length}) are on cooldown.\n\nNext to free up: **u/${next.name}** — <t:${unixReady}:R>`
+                : `⏳ All your Reddit accounts (${rowsToCheck.length}) are on cooldown.\n\nNext to free up: **u/${next.name}** — <t:${unixReady}:R>`
             )],
           });
         }

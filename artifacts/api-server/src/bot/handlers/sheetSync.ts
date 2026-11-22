@@ -655,7 +655,7 @@ export async function handleSheetSyncButton(interaction: ButtonInteraction, acti
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("max_claims")
-          .setLabel("Max Claims Per Worker")
+          .setLabel("Max Claims (Scaled by Linked Accounts)")
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
           .setValue("3")

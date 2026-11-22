@@ -7,6 +7,7 @@ import { COLORS } from "./constants.js";
 import { setupGuild } from "./setup.js";
 import { createTaskAndPost, type NormalizedTask } from "./task-creation.js";
 import { makeEmbed } from "./util.js";
+import { isSubredditBotBouncerActive } from "./botBouncerChecker.js";
 
 const TICK_MS = 15_000;
 const BATCH_LIMIT = 20;
@@ -87,6 +88,24 @@ async function processQueuedRow(
   const state = await getOrInitCampaignState(batchMap, row.campaignId, row.guildId);
   const isSingleTaskCampaign = state.totalTasks === 1 && !state.hadPriorPosted && state.postedNow === 0;
   const norm = row.payload as unknown as NormalizedTask;
+
+  // Bot Bouncer check before posting:
+  if (norm.redditLink) {
+    const bouncer = await isSubredditBotBouncerActive(norm.redditLink);
+    if (bouncer.active) {
+      logger.warn(
+        { queueId: row.id, campaignId: row.campaignId, sub: bouncer.subreddit, reason: bouncer.reason },
+        "Drip queue: cancelling task due to Bot Bouncer on subreddit"
+      );
+      await db.update(campaignQueue)
+        .set({
+          status: "cancelled",
+          lastError: `Cancelled: Bot Bouncer active on r/${bouncer.subreddit} (${bouncer.reason})`,
+        })
+        .where(eq(campaignQueue.id, row.id));
+      return;
+    }
+  }
 
   try {
     // Single-task drops ping directly on the card; multi-task drops post cards

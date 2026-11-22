@@ -22,6 +22,7 @@ import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { createBulkTasksFromCsv } from "../task-creation.js";
 import { parseIstScheduleTime, formatIstDate } from "./bulktask.js";
+import { isSubredditBotBouncerActive } from "../botBouncerChecker.js";
 
 export const DEFAULT_MASTER_SHEET_URL =
   "https://docs.google.com/spreadsheets/d/1-xyVOJH3jPOXMdpEWPeExuelSpgvG23KLaatc9oyCNw/edit?usp=sharing";
@@ -779,12 +780,59 @@ async function executeSheetDropPost(params: {
 }): Promise<void> {
   const { interaction, guild, section, sheetUrl, intervalMinutes, maxClaimsPerUser, scheduledStartAt, formattedIst } = params;
 
-  const campaignTitle = `Daily Drop — ${section.date} (${section.tasks.length} Tasks)`;
+  // Scan all task subreddits for active Bot Bouncer
+  const flaggedBouncers: string[] = [];
+  const safeTasks: ParsedSheetTask[] = [];
+
+  for (const t of section.tasks) {
+    const bouncer = await isSubredditBotBouncerActive(t.task_link);
+    if (bouncer.active && bouncer.subreddit) {
+      flaggedBouncers.push(`r/${bouncer.subreddit}`);
+    } else {
+      safeTasks.push(t);
+    }
+  }
+
+  if (safeTasks.length === 0) {
+    const errorEmbed = makeEmbed(COLORS.DANGER)
+      .setTitle("❌ Sheet Drop Blocked: Bot Bouncer")
+      .setDescription(
+        `All tasks in date section **${section.date}** belong to subreddits with active Bot Bouncer:\n` +
+        Array.from(new Set(flaggedBouncers)).map((b) => `• ${b}`).join("\n") +
+        `\n\nTasks on these subreddits cannot be posted because comments will trigger automated bans.`
+      );
+    if (interaction.isButton()) {
+      await interaction.followUp({ embeds: [errorEmbed], flags: 64 });
+    } else {
+      await interaction.editReply({ embeds: [errorEmbed], components: [] });
+    }
+    return;
+  }
+
+  // Re-build CSV if some tasks were excluded due to Bot Bouncer
+  let effectiveCsv = section.csvText;
+  if (flaggedBouncers.length > 0) {
+    const escapeCsv = (str: string) => {
+      if (!str) return '""';
+      if (str.includes('"') || str.includes(",") || str.includes("\n") || str.includes("\r")) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+    const header = "type,task_link,prewritten_comment,reward,slots,hold_hours";
+    const csvRows = [header];
+    for (const t of safeTasks) {
+      csvRows.push(`${t.type},${t.task_link},${escapeCsv(t.prewritten_comment)},${t.reward.toFixed(2)},${t.slots},${t.hold_hours}`);
+    }
+    effectiveCsv = csvRows.join("\n");
+  }
+
+  const campaignTitle = `Daily Drop — ${section.date} (${safeTasks.length} Tasks)`;
 
   let result;
   try {
     result = await createBulkTasksFromCsv({
-      csv: section.csvText,
+      csv: effectiveCsv,
       targetDate: section.date,
       campaignTitle,
       sourceType: "sheets",
@@ -832,6 +880,14 @@ async function executeSheetDropPost(params: {
     )
     .setFooter({ text: `Synced from Master Sheet • Date: ${section.date}` })
     .setTimestamp();
+
+  if (flaggedBouncers.length > 0) {
+    const distinctBouncers = Array.from(new Set(flaggedBouncers)).join(", ");
+    successEmbed.addFields({
+      name: "⚠️ Excluded (Bot Bouncer Detected)",
+      value: `Skipped **${flaggedBouncers.length}** task(s) on **${distinctBouncers}** to protect worker accounts from automated bans.`,
+    });
+  }
 
   if (interaction.isButton()) {
     await interaction.editReply({ embeds: [successEmbed], components: [] }).catch(async () => {

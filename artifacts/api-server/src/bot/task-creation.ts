@@ -24,6 +24,7 @@ import {
 } from "./constants.js";
 import { extractTaskSubreddit } from "./reddit-validator.js";
 import { logger } from "../lib/logger.js";
+import { isSubredditBotBouncerActive } from "./botBouncerChecker.js";
 
 const VALID_TYPES = new Set(TASK_TYPES as readonly string[]);
 
@@ -574,6 +575,13 @@ export async function createTaskAndPost(
     mediaItems?: { buffer: Buffer; filename: string; contentType: string | null }[];
   } = {}
 ): Promise<typeof tasks.$inferSelect> {
+  if (norm.redditLink) {
+    const bouncer = await isSubredditBotBouncerActive(norm.redditLink);
+    if (bouncer.active) {
+      throw new Error(`Cannot post task: r/${bouncer.subreddit} has Bot Bouncer active (${bouncer.reason}). Comments in this subreddit risk automated bans.`);
+    }
+  }
+
   const { tasksChannel } = await setupGuild(guild);
 
   const [task] = await db.insert(tasks).values({

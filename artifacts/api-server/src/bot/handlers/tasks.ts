@@ -276,28 +276,13 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
     return interaction.editReply({ embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Your account is flagged. Contact an admin.")] });
   }
 
-  // Check campaign-wide per-user cap (default 3 tasks per campaign, scaled by linked accounts)
+  // Check campaign-wide per-user cap (default 3 tasks per campaign)
   const campRes = await db.execute<{ max_claims_per_user: number | null }>(
     sql`SELECT max_claims_per_user FROM campaigns WHERE id = ${campaignId} LIMIT 1`
   );
   const rawCap = campRes.rows[0]?.max_claims_per_user;
   const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 3;
   if (campCap > 0) {
-    const accountsRes = await db.execute<{ reddit_username: string }>(
-      sql`SELECT reddit_username FROM reddit_accounts WHERE discord_id = ${discordId}`
-    );
-    const linkedAccountNames = new Set<string>();
-    if (user?.redditUsername && user.redditUsername.trim()) {
-      linkedAccountNames.add(user.redditUsername.trim().toLowerCase());
-    }
-    for (const row of accountsRes.rows) {
-      if (row.reddit_username && row.reddit_username.trim()) {
-        linkedAccountNames.add(row.reddit_username.trim().toLowerCase());
-      }
-    }
-    const accountCap = Math.max(1, linkedAccountNames.size);
-    const effectiveCap = Math.min(campCap, accountCap);
-
     const priorInCampaignRes = await db.execute<{ count: string }>(
       sql`SELECT COUNT(DISTINCT t.id)::text AS count
             FROM tasks t
@@ -307,13 +292,10 @@ export async function handleCampaignClaimNext(interaction: ButtonInteraction, ca
              AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
     );
     const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
-    if (priorInCampaign >= effectiveCap) {
+    if (priorInCampaign >= campCap) {
       return interaction.editReply({
         embeds: [makeEmbed(COLORS.WARNING).setDescription(
-          `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign.\n\n` +
-          (effectiveCap < campCap
-            ? `💡 *Your claim limit is based on your linked Reddit accounts (**${accountCap} linked** vs campaign max **${campCap}**). Link additional accounts via \`/verify\` to claim more tasks in future campaigns!*`
-            : "")
+          `⚠️ You have reached your maximum of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign.`
         )],
       });
     }
@@ -471,7 +453,6 @@ export async function handleTaskClaim(
     }
   }
   let healthyAccountNames = new Set<string>(linkedAccountNames);
-  let linkedAccountsCount = linkedAccountNames.size;
 
   // Check Discord role first; fall back to the DB `verified` flag so users
   // who were manually verified (role may have failed to assign) can still claim.
@@ -556,7 +537,6 @@ export async function handleTaskClaim(
     }
 
     healthyAccountNames = new Set(healthyList.map((h) => h.username.toLowerCase()));
-    linkedAccountsCount = healthyAccountNames.size;
   }
 
   if (user.flagged) {
@@ -729,15 +709,10 @@ export async function handleTaskClaim(
 
     if (maxClaimsPerUser > 1) {
       // Per-user cap is greater than 1 (set via /bulktask max_claims_per_user).
-      const taskAccountCap = isRedditTask ? Math.max(1, linkedAccountsCount) : 1;
-      const effectiveTaskCap = Math.min(maxClaimsPerUser, taskAccountCap);
-      if (priorCount >= effectiveTaskCap) {
+      if (priorCount >= maxClaimsPerUser) {
         return interaction.editReply({
           embeds: [makeEmbed(COLORS.WARNING).setDescription(
-            `⚠️ You've reached the maximum of **${effectiveTaskCap}** submission${effectiveTaskCap === 1 ? "" : "s"} for this task.\n\n` +
-            (isRedditTask && effectiveTaskCap < maxClaimsPerUser
-              ? `💡 *Your claim limit is based on your linked Reddit accounts (**${taskAccountCap} linked** vs task max **${maxClaimsPerUser}**). Link additional accounts via \`/verify\` to claim more tasks!*`
-              : "")
+            `⚠️ You've reached the maximum of **${maxClaimsPerUser}** submission${maxClaimsPerUser === 1 ? "" : "s"} for this task.`
           )],
         });
       }
@@ -754,7 +729,7 @@ export async function handleTaskClaim(
   // CAMPAIGN-WIDE per-user cap.
   // ---------------------------------------------------------------------
   // Enforces a strict limit on how many tasks a single worker can claim/submit
-  // across an entire campaign (defaults to 3 tasks per campaign, scaled by linked accounts).
+  // across an entire campaign (defaults to 3 tasks per campaign).
   // 0 means UNLIMITED.
   const taskCampaignId = (task as typeof task & { campaignId?: number | null }).campaignId ?? null;
   if (taskCampaignId != null) {
@@ -764,12 +739,6 @@ export async function handleTaskClaim(
     const rawCap = campRes.rows[0]?.max_claims_per_user;
     const campCap = rawCap !== undefined && rawCap !== null ? rawCap : 3;
     if (campCap > 0) {
-      // Dynamic scaling: only users with N linked accounts can claim up to N tasks in this campaign
-      // (e.g. 1 account = max 1 task, 2 accounts = max 2 tasks, 3 accounts = max 3 tasks),
-      // capped by the campaign max_claims_per_user limit.
-      const accountCap = isRedditTask ? Math.max(1, linkedAccountsCount) : 1;
-      const effectiveCap = Math.min(campCap, accountCap);
-
       const priorInCampaignRes = await db.execute<{ count: string }>(
         sql`SELECT COUNT(DISTINCT t.id)::text AS count
               FROM tasks t
@@ -779,13 +748,10 @@ export async function handleTaskClaim(
                AND (s.id IS NOT NULL OR c.id IS NOT NULL)`
       );
       const priorInCampaign = parseInt(priorInCampaignRes.rows[0]?.count ?? "0");
-      if (priorInCampaign >= effectiveCap) {
+      if (priorInCampaign >= campCap) {
         return interaction.editReply({
           embeds: [makeEmbed(COLORS.WARNING).setDescription(
-            `⚠️ You have reached your maximum of **${effectiveCap}** task${effectiveCap === 1 ? "" : "s"} for this campaign.\n\n` +
-            (isRedditTask && effectiveCap < campCap
-              ? `💡 *Your claim limit is based on your linked Reddit accounts (**${accountCap} linked** vs campaign max **${campCap}**). Link additional accounts via \`/verify\` to claim more tasks in future campaigns!*`
-              : "")
+            `⚠️ You have reached your maximum of **${campCap}** task${campCap === 1 ? "" : "s"} for this campaign.`
           )],
         });
       }

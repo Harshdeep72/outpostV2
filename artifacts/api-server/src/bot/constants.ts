@@ -14,6 +14,7 @@ export const CHANNELS = {
   // Mod-only log channel for tasks rejected by the worker who claimed them.
   // Created lazily by setupGuild on next bot boot or first setup() call.
   REJECTED_TASKS: "rejected-tasks",
+  SUGGESTIONS: "suggestions",
 } as const;
 
 export const CATEGORIES = {

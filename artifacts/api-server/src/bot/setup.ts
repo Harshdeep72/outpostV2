@@ -47,6 +47,7 @@ export interface GuildSetup {
   updatesChannel: TextChannel;
   rejectedTasksChannel: TextChannel;
   scamAlertsChannel: TextChannel;
+  suggestionsChannel?: TextChannel;
 }
 
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
@@ -395,6 +396,10 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     guild, CHANNELS.REJECTED_TASKS, earnCategory, modOnlyOverwrites(everyoneId, adminId, modId)
   );
 
+  const { channel: suggestionsChannel } = await ensureTextChannel(
+    guild, CHANNELS.SUGGESTIONS, communityCategory
+  );
+
   if (startCreated) postStartHereContent(startHereChannel).catch(() => {});
   if (guideCreated) postGuideContent(guideChannel).catch(() => {});
   if (refCreated) postReferralEventsContent(referralEventsChannel).catch(() => {});
@@ -406,7 +411,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     communityCategory, earnCategory, workspacesCategory,
     tasksChannel, verificationLogChannel, taskLogsChannel, withdrawalLogChannel, leaderboardChannel,
     startHereChannel, guideChannel, generalChannel, referralEventsChannel, announcementsChannel,
-    updatesChannel, rejectedTasksChannel, scamAlertsChannel,
+    updatesChannel, rejectedTasksChannel, scamAlertsChannel, suggestionsChannel,
   };
 
   setupCache.set(guild.id, { setup, expiry: Date.now() + 5 * 60 * 1000 });

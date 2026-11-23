@@ -233,8 +233,9 @@ router.get("/cooldowns", requireAuth, async (_req, res) => {
       pool.query(
         `SELECT ra.discord_id, u.discord_username, ra.reddit_username,
                 ra.last_used_at,
-                (ra.last_used_at + ($1 || ' minutes')::interval) AS ready_at,
-                GREATEST(0, EXTRACT(EPOCH FROM (ra.last_used_at + ($1 || ' minutes')::interval - NOW())) * 1000)::bigint AS ms_remaining
+                (ra.last_used_at + ((CASE WHEN (COALESCE(ra.post_karma, 0) + COALESCE(ra.comment_karma, 0)) >= 5000 THEN FLOOR($1 / 2) ELSE $1 END) || ' minutes')::interval) AS ready_at,
+                GREATEST(0, EXTRACT(EPOCH FROM (ra.last_used_at + ((CASE WHEN (COALESCE(ra.post_karma, 0) + COALESCE(ra.comment_karma, 0)) >= 5000 THEN FLOOR($1 / 2) ELSE $1 END) || ' minutes')::interval - NOW())) * 1000)::bigint AS ms_remaining,
+                ((COALESCE(ra.post_karma, 0) + COALESCE(ra.comment_karma, 0)) >= 5000) AS is_vip
            FROM reddit_accounts ra
            JOIN users u ON u.discord_id = ra.discord_id
           WHERE ra.last_used_at IS NOT NULL AND ra.last_used_at > $2
@@ -244,8 +245,9 @@ router.get("/cooldowns", requireAuth, async (_req, res) => {
       ),
       pool.query(
         `SELECT u.discord_id, u.discord_username, u.last_task_completed_at,
-                (u.last_task_completed_at + ($1 || ' minutes')::interval) AS ready_at,
-                GREATEST(0, EXTRACT(EPOCH FROM (u.last_task_completed_at + ($1 || ' minutes')::interval - NOW())) * 1000)::bigint AS ms_remaining
+                (u.last_task_completed_at + ((CASE WHEN (COALESCE(u.reddit_post_karma, 0) + COALESCE(u.reddit_comment_karma, 0)) >= 5000 THEN FLOOR($1 / 2) ELSE $1 END) || ' minutes')::interval) AS ready_at,
+                GREATEST(0, EXTRACT(EPOCH FROM (u.last_task_completed_at + ((CASE WHEN (COALESCE(u.reddit_post_karma, 0) + COALESCE(u.reddit_comment_karma, 0)) >= 5000 THEN FLOOR($1 / 2) ELSE $1 END) || ' minutes')::interval - NOW())) * 1000)::bigint AS ms_remaining,
+                ((COALESCE(u.reddit_post_karma, 0) + COALESCE(u.reddit_comment_karma, 0)) >= 5000) AS is_vip
            FROM users u
           WHERE u.last_task_completed_at IS NOT NULL AND u.last_task_completed_at > $2
           ORDER BY ms_remaining DESC

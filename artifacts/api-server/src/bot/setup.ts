@@ -48,6 +48,7 @@ export interface GuildSetup {
   rejectedTasksChannel: TextChannel;
   scamAlertsChannel: TextChannel;
   suggestionsChannel?: TextChannel;
+  vipChatChannel?: TextChannel;
 }
 
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
@@ -304,6 +305,39 @@ async function postReferralEventsContent(ch: TextChannel) {
   });
 }
 
+async function postVipChatIntro(ch: TextChannel) {
+  const existing = await ch.messages.fetch({ limit: 10 }).catch(() => null);
+  if (existing && existing.size > 0) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xE67E22)
+    .setTitle("👑 VIP Lounge & Priority Support")
+    .setDescription(
+      "Welcome to the exclusive **VIP Lounge**, reserved strictly for verified contributors with **5k+ Karma** and **10k+ Karma** accounts!\n\n" +
+      "### ⚡ 50% Task Cooldown Benefit\n" +
+      "Your task cooldown between submissions is automatically cut in half:\n" +
+      "• **Standard Cooldown:** 120 minutes (2 hours)\n" +
+      "• **5k+ & 10k+ VIP Cooldown:** **60 minutes (1 hour)**\n" +
+      "*Enjoy claiming up to double the tasks throughout every campaign drop!*\n\n" +
+      "### 🎫 Priority Support & Expedited Reviews\n" +
+      "Need assistance with a task, verification, payout, or proof query?\n" +
+      "• Drop a message directly in this channel or tag Mods/Admins.\n" +
+      "• Questions posted in this VIP channel receive **first-priority attention** before general support queues.\n\n" +
+      "### 💬 Elite Network\n" +
+      "Feel free to connect, exchange strategies, and discuss high-converting subreddits with other elite contributors and server leadership."
+    )
+    .setFooter({ text: "Reddit Microtasks VIP Tier • Coded with care" })
+    .setTimestamp();
+
+  const msg = await ch.send({ embeds: [embed] }).catch(() => null);
+  if (msg) {
+    await msg.pin().catch(() => {});
+    const fetched = await ch.messages.fetch({ limit: 5 }).catch(() => null);
+    const pinNotice = fetched?.find((m) => m.type === 6);
+    if (pinNotice) await pinNotice.delete().catch(() => {});
+  }
+}
+
 export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   const cached = setupCache.get(guild.id);
   if (cached && cached.expiry > Date.now()) return cached.setup;
@@ -400,18 +434,30 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     guild, CHANNELS.SUGGESTIONS, communityCategory
   );
 
+  const { channel: vipChatChannel, created: vipCreated } = await ensureTextChannel(
+    guild, CHANNELS.VIP_CHAT, communityCategory,
+    [
+      { id: everyoneId, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: karma5kRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.AddReactions] },
+      { id: karma10kRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.AddReactions] },
+      { id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageMessages] },
+      { id: modId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageMessages] },
+    ]
+  );
+
   if (startCreated) postStartHereContent(startHereChannel).catch(() => {});
   if (guideCreated) postGuideContent(guideChannel).catch(() => {});
   if (refCreated) postReferralEventsContent(referralEventsChannel).catch(() => {});
   if (updatesCreated) postUpdatesIntro(updatesChannel).catch(() => {});
   if (scamCreated) postScamAlertsContent(scamAlertsChannel).catch(() => {});
+  if (vipCreated) postVipChatIntro(vipChatChannel).catch(() => {});
 
   const setup: GuildSetup = {
     adminRole, modRole, verifiedRole, unverifiedRole, karma10kRole, karma5kRole,
     communityCategory, earnCategory, workspacesCategory,
     tasksChannel, verificationLogChannel, taskLogsChannel, withdrawalLogChannel, leaderboardChannel,
     startHereChannel, guideChannel, generalChannel, referralEventsChannel, announcementsChannel,
-    updatesChannel, rejectedTasksChannel, scamAlertsChannel, suggestionsChannel,
+    updatesChannel, rejectedTasksChannel, scamAlertsChannel, suggestionsChannel, vipChatChannel,
   };
 
   setupCache.set(guild.id, { setup, expiry: Date.now() + 5 * 60 * 1000 });

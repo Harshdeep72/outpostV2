@@ -15,6 +15,7 @@ export const CHANNELS = {
   // Created lazily by setupGuild on next bot boot or first setup() call.
   REJECTED_TASKS: "rejected-tasks",
   SUGGESTIONS: "suggestions",
+  VIP_CHAT: "vip-chat",
 } as const;
 
 export const CATEGORIES = {

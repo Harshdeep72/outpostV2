@@ -17,7 +17,7 @@ import { setupGuild, getOrCreateWorkspaceChannel } from "../setup.js";
 import { getUserByDiscordId, upsertUser, tryCompleteReferral, getTaskByIdCached, getClaimByIdCached, invalidateTask, invalidateClaim } from "../db.js";
 import { invalidateUser, invalidateLeaderboard, claimCache } from "../cache.js";
 import { makeEmbed, formatMoney, hasVerifiedRole, hasModRole, hasAdminRole } from "../util.js";
-import { COLORS, TASK_COOLDOWN_MINUTES, CLAIM_TIMEOUT_MINUTES, MAX_CONCURRENT_CLAIMS, isTwitterTask, isQuoraTask, getPlatformLabel, TASK_PING_DELAY_MS, ANTI_FRAUD } from "../constants.js";
+import { COLORS, TASK_COOLDOWN_MINUTES, CLAIM_TIMEOUT_MINUTES, MAX_CONCURRENT_CLAIMS, isTwitterTask, isQuoraTask, getPlatformLabel, TASK_PING_DELAY_MS, ANTI_FRAUD, ROLES } from "../constants.js";
 import { getCooldownConfig } from "../../lib/settings.js";
 import { safeSyncEarnerRoles } from "../earnerRoles.js";
 import { logger } from "../../lib/logger.js";
@@ -430,8 +430,8 @@ export async function handleTaskClaim(
     db.execute<{ id: number; status: string; expires_at: string | null }>(
       sql`SELECT id, status, expires_at FROM claims WHERE task_id = ${taskId} AND discord_id = ${discordId} AND status = 'claimed'`
     ),
-    db.execute<{ reddit_username: string; last_used_at: string | null }>(
-      sql`SELECT reddit_username, last_used_at
+    db.execute<{ reddit_username: string; last_used_at: string | null; post_karma: number | null; comment_karma: number | null }>(
+      sql`SELECT reddit_username, last_used_at, post_karma, comment_karma
             FROM reddit_accounts
            WHERE discord_id = ${discordId}`
     ),
@@ -572,6 +572,25 @@ export async function handleTaskClaim(
   const cooldownActive = cooldownCfg.enabled && taskCooldownEnabled && cooldownCfg.minutes > 0;
   if (cooldownActive) {
     const cooldownMs = cooldownCfg.minutes * 60 * 1000;
+
+    // VIP Karma Benefit: Accounts with >= 5,000 karma (5k+ and 10k+) get 50% cooldown (half cooldown).
+    const userKarma = (user.redditPostKarma ?? 0) + (user.redditCommentKarma ?? 0);
+    const hasVipKarmaRole = member && "roles" in member && (
+      (member.roles as any).cache?.some((r: any) =>
+        r.name === ROLES.KARMA_5K || r.name === ROLES.KARMA_10K ||
+        r.id === "1567143903323230240" || r.id === "1567143900135817298"
+      )
+    );
+
+    const getEffectiveCooldown = (postKarma: number | null | undefined, commentKarma: number | null | undefined) => {
+      const accKarma = (postKarma ?? 0) + (commentKarma ?? 0);
+      const isVip = accKarma >= 5000 || userKarma >= 5000 || hasVipKarmaRole;
+      return {
+        ms: isVip ? Math.floor(cooldownMs / 2) : cooldownMs,
+        isVip,
+      };
+    };
+
     if (isRedditTask) {
       // Look at every Reddit account this Discord user has linked. The claim
       // is allowed if AT LEAST ONE account is off cooldown (last_used_at is
@@ -582,11 +601,13 @@ export async function handleTaskClaim(
         // cooldown so the gate still applies.
         if (user.lastTaskCompletedAt) {
           const msSinceLast = Date.now() - new Date(user.lastTaskCompletedAt).getTime();
-          if (msSinceLast < cooldownMs) {
-            const readyAt = new Date(new Date(user.lastTaskCompletedAt).getTime() + cooldownMs);
+          const { ms: effectiveCooldownMs, isVip } = getEffectiveCooldown(user.redditPostKarma, user.redditCommentKarma);
+          if (msSinceLast < effectiveCooldownMs) {
+            const readyAt = new Date(new Date(user.lastTaskCompletedAt).getTime() + effectiveCooldownMs);
             const unixReady = Math.floor(readyAt.getTime() / 1000);
+            const vipBadge = isVip ? " *(⚡ 50% VIP cooldown applied)*" : "";
             return interaction.editReply({
-              embeds: [makeEmbed(COLORS.WARNING).setDescription(`⏳ Task cooldown active. You can claim again <t:${unixReady}:R>.`)],
+              embeds: [makeEmbed(COLORS.WARNING).setDescription(`⏳ Task cooldown active. You can claim again <t:${unixReady}:R>.${vipBadge}`)],
             });
           }
         }
@@ -603,7 +624,8 @@ export async function handleTaskClaim(
             lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
           }
           if (!lastUsed) return true;
-          return now - lastUsed >= cooldownMs;
+          const { ms: effectiveCooldownMs } = getEffectiveCooldown(r.post_karma, r.comment_karma);
+          return now - lastUsed >= effectiveCooldownMs;
         });
         if (available.length === 0) {
           // All accounts on cooldown → block; show earliest readyAt AND which
@@ -615,19 +637,22 @@ export async function handleTaskClaim(
               if (rowsToCheck.length === 1 && user.lastTaskCompletedAt) {
                 lastUsed = Math.max(lastUsed, new Date(user.lastTaskCompletedAt).getTime());
               }
+              const { ms: effectiveCooldownMs, isVip } = getEffectiveCooldown(r.post_karma, r.comment_karma);
               return {
                 name: r.reddit_username,
-                readyAt: lastUsed + cooldownMs,
+                readyAt: lastUsed + effectiveCooldownMs,
+                isVip,
               };
             })
             .sort((a, b) => a.readyAt - b.readyAt);
           const next = sorted[0]!;
           const unixReady = Math.floor(next.readyAt / 1000);
+          const vipBadge = next.isVip ? " *(⚡ 50% VIP cooldown applied)*" : "";
           return interaction.editReply({
             embeds: [makeEmbed(COLORS.WARNING).setDescription(
               rowsToCheck.length === 1
-                ? `⏳ Your Reddit account (**u/${next.name}**) is on cooldown.\n\nYou can claim again: <t:${unixReady}:R>`
-                : `⏳ All your Reddit accounts (${rowsToCheck.length}) are on cooldown.\n\nNext to free up: **u/${next.name}** — <t:${unixReady}:R>`
+                ? `⏳ Your Reddit account (**u/${next.name}**) is on cooldown.\n\nYou can claim again: <t:${unixReady}:R>${vipBadge}`
+                : `⏳ All your Reddit accounts (${rowsToCheck.length}) are on cooldown.\n\nNext to free up: **u/${next.name}** — <t:${unixReady}:R>${vipBadge}`
             )],
           });
         }
@@ -638,11 +663,13 @@ export async function handleTaskClaim(
       // Non-Reddit task → user-level cooldown.
       if (user.lastTaskCompletedAt) {
         const msSinceLast = Date.now() - new Date(user.lastTaskCompletedAt).getTime();
-        if (msSinceLast < cooldownMs) {
-          const readyAt = new Date(new Date(user.lastTaskCompletedAt).getTime() + cooldownMs);
+        const { ms: effectiveCooldownMs, isVip } = getEffectiveCooldown(user.redditPostKarma, user.redditCommentKarma);
+        if (msSinceLast < effectiveCooldownMs) {
+          const readyAt = new Date(new Date(user.lastTaskCompletedAt).getTime() + effectiveCooldownMs);
           const unixReady = Math.floor(readyAt.getTime() / 1000);
+          const vipBadge = isVip ? " *(⚡ 50% VIP cooldown applied)*" : "";
           return interaction.editReply({
-            embeds: [makeEmbed(COLORS.WARNING).setDescription(`⏳ Task cooldown active. You can claim again <t:${unixReady}:R>.`)],
+            embeds: [makeEmbed(COLORS.WARNING).setDescription(`⏳ Task cooldown active. You can claim again <t:${unixReady}:R>.${vipBadge}`)],
           });
         }
       }

@@ -174,6 +174,19 @@ export async function startBot() {
       startServerStatsUpdater(client);
       startUnverifiedPruner(client);
       startSheetDropWatcher(client);
+
+      // Keep Hugging Face Reddit API Space awake so it never goes to sleep / suffers cold-start timeouts
+      const osintUrl = process.env.REDDIT_OSINT_URL;
+      if (osintUrl) {
+        const pingHfSpace = async () => {
+          try {
+            const { fetch: undiciFetch } = await import("undici");
+            await undiciFetch(`${osintUrl}/docs`, { method: "GET" }).catch(() => {});
+          } catch {}
+        };
+        pingHfSpace();
+        setInterval(pingHfSpace, 8 * 60 * 1000).unref(); // Ping every 8 mins (HF sleep threshold is ~15-20 min)
+      }
       initInviteTracker(client).catch((err) =>
         logger.warn({ err }, "Failed initializing invite tracker")
       );

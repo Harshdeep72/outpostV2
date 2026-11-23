@@ -32,7 +32,7 @@ async function fetchDirectText(url: string, timeoutMs = 8000): Promise<string | 
  *
  * Returns the resolved URL string, or null on failure.
  */
-export async function resolveShareLink(shareUrl: string, timeoutMs = 8000): Promise<string | null> {
+export async function resolveShareLink(shareUrl: string, timeoutMs = 12000): Promise<string | null> {
   // ── Strategy 0: Resolve via remote Hugging Face API ─────────────────────
   const osintUrl = process.env.REDDIT_OSINT_URL;
   if (osintUrl) {

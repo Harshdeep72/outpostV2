@@ -437,39 +437,47 @@ export function parseHtmlComment(html: string, commentId: string): ParsedHtmlCom
 
 
 async function fetchCommentViaRedditOsint(url: string): Promise<any> {
-  try {
-    const osintUrl = process.env.REDDIT_OSINT_URL;
-    if (!osintUrl) return null;
+  const osintUrl = process.env.REDDIT_OSINT_URL;
+  if (!osintUrl) return null;
 
-    const { fetch: undiciFetch } = await import("undici");
+  const { fetch: undiciFetch } = await import("undici");
 
-    // 15-second hard timeout — liveness checks must never queue behind a slow
-    // or saturated HF Space (e.g. when Reddit Inspector is doing a bulk run).
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 15_000);
-    let res: Response;
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
-        headers: { "Accept": "application/json" },
-        signal: ac.signal,
-      }) as Response;
-    } finally {
-      clearTimeout(timer);
-    }
+      const ac = new AbortController();
+      // Allow 20s on attempt 1 (handles HF space cold starts), 15s on attempt 2
+      const timeoutMs = attempt === 1 ? 20_000 : 15_000;
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
+      let res: Response;
+      try {
+        res = (await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
+          headers: { "Accept": "application/json" },
+          signal: ac.signal,
+        })) as Response;
+      } finally {
+        clearTimeout(timer);
+      }
 
-    const json = await res.json().catch(() => null) as any;
-    
-    if (json && json.success === true && json.data) {
-      return json.data;
-    }
+      const json = (await res.json().catch(() => null)) as any;
 
-    // Do NOT treat external API 404/errors as "not_found" (which falsely treats live comments as deleted).
-    // Return null so the checker falls back to Python curl_cffi, direct JSON, or api_unreachable.
-    return null;
-  } catch (err: any) {
-    logger.warn({ err, url }, "fetchCommentViaRedditOsint failed");
-    return null;
+      if (json && json.success === true && json.data) {
+        return json.data;
+      }
+
+      // If HF Space returned temporary 429 or error from Reddit, wait 2.5s and retry once
+      if (attempt === 1) {
+        logger.info({ url, status: json?.status, error: json?.error }, "fetchCommentViaRedditOsint: attempt 1 non-success, retrying in 2.5s");
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+    } catch (err: any) {
+      logger.warn({ err: err?.message, url, attempt }, "fetchCommentViaRedditOsint: attempt failed");
+      if (attempt === 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
   }
+
+  return null;
 }
 
 export async function deepCheckComment(

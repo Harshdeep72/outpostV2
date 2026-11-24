@@ -387,6 +387,7 @@ export async function runPendingProcessorNow(client: Client, forceAggressive = f
             LEFT JOIN tasks t ON t.id = s.task_id
             WHERE s.review_status = 'pending_hold'
               AND s.available_at <= ${now}
+              AND (s.last_checked_at IS NULL OR s.last_checked_at < NOW() - INTERVAL '15 minutes')
             ORDER BY s.last_checked_at ASC NULLS FIRST
             LIMIT 20`
       );

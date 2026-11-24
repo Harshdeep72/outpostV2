@@ -1134,18 +1134,20 @@ export async function handleProcessHolds(interaction: ChatInputCommandInteractio
 
   try {
     const { runPendingProcessorNow } = await import("../pendingProcessor.js");
-    const { runPendingSweepNow } = await import("../pendingReviewSweeper.js");
+    const { runPendingSlowSweepNow } = await import("../pendingReviewSweeper.js");
 
     const processorResult = await runPendingProcessorNow(interaction.client, true);
-    const sweeperResult = await runPendingSweepNow(true);
+    // Use slow sweep (5 items, polite delay) instead of bursting 100 items to protect Reddit rate limit quota (100 req / 10 min)
+    const sweeperResult = await runPendingSlowSweepNow(false);
 
     const lines = [
-      `**10-Min / Configured Holds (Pending Processor):**`,
+      `**Hold Releases (Pending Processor):**`,
       `• Processed to Available: ${processorResult.acceptedProcessed}`,
       `• Re-checked Reddit Liveness: ${processorResult.holdProcessed}`,
       ``,
       `**24h Sweeper (Pending Review):**`,
-      `• Triggered 1 batch of 100 submissions (check logs for results).`,
+      `• Backlog Decided: ${sweeperResult.decided}`,
+      `• Remaining in Backlog: ${sweeperResult.remainingCount}`,
     ];
 
     await interaction.editReply({

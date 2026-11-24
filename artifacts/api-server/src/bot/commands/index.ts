@@ -2,6 +2,7 @@ import {
   SlashCommandBuilder,
   ContextMenuCommandBuilder,
   ApplicationCommandType,
+  ChannelType,
 } from "discord.js";
 import { TASK_TYPES, COIN_CHOICES } from "../constants.js";
 
@@ -681,6 +682,50 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
       o.setName("username").setDescription("Optional Reddit username to check (leave blank to check your linked accounts)").setRequired(false)
     );
 
+  const cleartasks = new SlashCommandBuilder()
+    .setName("cleartasks")
+    .setDescription("Clear all messages in #tasks to declutter the channel (Staff only)")
+    .addIntegerOption((o) =>
+      o.setName("amount")
+        .setDescription("Number of messages to delete (leave blank to clear all)")
+        .setMinValue(1)
+        .setMaxValue(500)
+        .setRequired(false)
+    )
+    .addChannelOption((o) =>
+      o.setName("channel")
+        .setDescription("Target channel to clear (defaults to #tasks)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false)
+    )
+    .addBooleanOption((o) =>
+      o.setName("keep_pins")
+        .setDescription("Keep pinned messages (default: true)")
+        .setRequired(false)
+    );
+
+  const purgetasks = new SlashCommandBuilder()
+    .setName("purgetasks")
+    .setDescription("Alias for /cleartasks — clear messages in #tasks (Staff only)")
+    .addIntegerOption((o) =>
+      o.setName("amount")
+        .setDescription("Number of messages to delete (leave blank to clear all)")
+        .setMinValue(1)
+        .setMaxValue(500)
+        .setRequired(false)
+    )
+    .addChannelOption((o) =>
+      o.setName("channel")
+        .setDescription("Target channel to clear (defaults to #tasks)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false)
+    )
+    .addBooleanOption((o) =>
+      o.setName("keep_pins")
+        .setDescription("Keep pinned messages (default: true)")
+        .setRequired(false)
+    );
+
   const openWorkspaceContext = new ContextMenuCommandBuilder()
     .setName("Open Workspace")
     .setType(ApplicationCommandType.User);
@@ -698,7 +743,7 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
     adminsetupi, adminsetgcash, adminsetwallet, adminsetpaypal, verifiedlist,
     flair, sendflairpicker,
     syncsheet, dropsheet, setmastersheet,
-    workspace, ws, checkreddit, openWorkspaceContext,
+    workspace, ws, checkreddit, cleartasks, purgetasks, openWorkspaceContext,
     buildDigest(),
   ] as unknown as (SlashCommandBuilder | ContextMenuCommandBuilder)[];
 }

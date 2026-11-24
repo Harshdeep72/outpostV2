@@ -9,7 +9,7 @@ import { logger } from "../lib/logger.js";
 import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleAssignTaskCommand, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet, handleAdminSetPaypal, handleMyPaymentCommand } from "./handlers/wallet.js";
-import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand, handleVerifiedListCommand } from "./handlers/admin.js";
+import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand, handleVerifiedListCommand, handleClearTasksCommand } from "./handlers/admin.js";
 import { handleMyStatusCommand } from "./handlers/mystatus.js";
 import { handleDropsCommand } from "./handlers/drops.js";
 import { handleLeaderboardCommand, handleResetLeaderboard, handleLeaderboardPageButton } from "./handlers/leaderboard.js";
@@ -122,6 +122,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "sendflairpicker") return await timed(name, () => handleSendFlairPickerCommand(interaction));
         if (name === "workspace" || name === "ws") return await timed(name, () => handleWorkspaceCommand(interaction));
         if (name === "checkreddit" || name === "checkaccount") return await timed(name, () => handleCheckRedditCommand(interaction));
+        if (name === "cleartasks" || name === "purgetasks") return await timed(name, () => handleClearTasksCommand(interaction));
         logger.warn({ name }, "Unknown command");
         return;
       }

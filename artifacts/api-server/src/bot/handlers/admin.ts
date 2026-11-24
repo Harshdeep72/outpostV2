@@ -13,7 +13,7 @@ import { setupGuild, invalidateSetupCache } from "../setup.js";
 import { upsertUser, getUserByDiscordId, tryCompleteReferral } from "../db.js";
 import { invalidateUser } from "../cache.js";
 import { makeEmbed, formatMoney, hasAdminRole, hasModRole } from "../util.js";
-import { COLORS } from "../constants.js";
+import { COLORS, CHANNELS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { checkSubmissionNow } from "../redditLivenessChecker.js";
 import { runWeeklyPayouts } from "./weeklyPayouts.js";
@@ -1767,4 +1767,112 @@ export async function handleVerifiedListCommand(interaction: ChatInputCommandInt
     .setFooter({ text: `${guild.name} • Verified Directory` });
 
   return interaction.editReply({ embeds: [embed] });
+}
+
+export async function handleClearTasksCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild!;
+  const actingMember = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(actingMember, guild) && !hasAdminRole(actingMember, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only Mods and Admins can clear channel messages.")],
+    });
+  }
+
+  // 1. Resolve target channel (defaults to #tasks)
+  let targetChannel = interaction.options.getChannel("channel") as TextChannel | null;
+  if (!targetChannel) {
+    const setup = await setupGuild(guild);
+    targetChannel = setup.tasksChannel;
+    if (!targetChannel) {
+      targetChannel = guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === CHANNELS.TASKS
+      ) as TextChannel | null;
+    }
+  }
+
+  if (!targetChannel || targetChannel.type !== ChannelType.GuildText) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Could not locate the target channel to clear.")],
+    });
+  }
+
+  const requestedAmount = interaction.options.getInteger("amount");
+  const keepPins = interaction.options.getBoolean("keep_pins") ?? true;
+
+  let totalDeleted = 0;
+  // If amount is not specified, default to clearing all messages (up to 500 for safety)
+  const maxToDelete = requestedAmount && requestedAmount > 0 ? requestedAmount : 500;
+
+  try {
+    while (totalDeleted < maxToDelete) {
+      const fetchLimit = Math.min(100, maxToDelete - totalDeleted);
+      const fetched = await targetChannel.messages.fetch({ limit: fetchLimit }).catch(() => null);
+      if (!fetched || fetched.size === 0) break;
+
+      const toDelete = fetched.filter((m) => {
+        if (keepPins && m.pinned) return false;
+        return true;
+      });
+
+      if (toDelete.size === 0) break;
+
+      // Messages under 14 days can be bulk-deleted; older messages must be deleted individually
+      const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000 + 60_000;
+      const recent = toDelete.filter((m) => m.createdTimestamp > fourteenDaysAgo);
+      const old = toDelete.filter((m) => m.createdTimestamp <= fourteenDaysAgo);
+
+      let batchDeletedCount = 0;
+
+      if (recent.size > 0) {
+        if (recent.size === 1) {
+          const m = recent.first()!;
+          await m.delete().catch(() => {});
+          batchDeletedCount += 1;
+        } else {
+          const deleted = await targetChannel.bulkDelete(recent, true).catch((err) => {
+            logger.warn({ err }, "bulkDelete failed in cleartasks");
+            return null;
+          });
+          batchDeletedCount += deleted?.size ?? 0;
+        }
+      }
+
+      if (old.size > 0) {
+        for (const msg of old.values()) {
+          if (totalDeleted + batchDeletedCount >= maxToDelete) break;
+          await msg.delete().catch(() => {});
+          batchDeletedCount += 1;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+
+      totalDeleted += batchDeletedCount;
+
+      if (batchDeletedCount === 0 || fetched.size < fetchLimit) {
+        break;
+      }
+    }
+
+    logger.info(
+      { staff: interaction.user.tag, channel: targetChannel.name, deleted: totalDeleted },
+      "Staff cleared channel messages"
+    );
+
+    const embed = makeEmbed(COLORS.SUCCESS)
+      .setTitle("🧹 Channel Cleared")
+      .setDescription(
+        totalDeleted > 0
+          ? `Successfully deleted **${totalDeleted}** message${totalDeleted === 1 ? "" : "s"} from <#${targetChannel.id}>.\n\nThe tasks channel is now clean and uncluttered for workers!`
+          : `No messages found to delete in <#${targetChannel.id}>.`
+      );
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (err: any) {
+    logger.error({ err, channel: targetChannel.name }, "handleClearTasksCommand failed");
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Failed to clear messages: ${err?.message || "Unknown error"}`)],
+    });
+  }
 }

@@ -74,6 +74,7 @@ export async function checkRedditAccountHealth(
     }
   }
 
+  let shouldTryPythonFallback = true;
   // 1. Primary Check: REDDIT_OSINT_URL
   const osintUrl = process.env.REDDIT_OSINT_URL || "https://harrry953489-redditapi.hf.space";
   try {
@@ -85,6 +86,11 @@ export async function checkRedditAccountHealth(
       signal: controller.signal,
     });
     clearTimeout(timeout);
+
+    // If Reddit is actively rate-limiting or blocking (403/429), avoid firing Python fallback immediately
+    if (res.status === 403 || res.status === 429) {
+      shouldTryPythonFallback = false;
+    }
 
     const data = (await res.json().catch(() => null)) as any;
     if (data) {
@@ -148,88 +154,91 @@ export async function checkRedditAccountHealth(
   }
 
   // 2. Fallback Check: Python curl_cffi client (/user/:name/about.json)
-  try {
-    let pyRes = await executePythonRedditClient({
-      url: `https://www.reddit.com/user/${encodeURIComponent(clean)}/about.json`,
-      isJson: true,
-      useProxy: false,
-      timeout: 8,
-    }).catch(() => null);
-
-    if (!pyRes || (!pyRes.ok && pyRes.status !== 404)) {
-      // Retry with proxy if direct was blocked (e.g. Cloudflare / 403)
-      pyRes = await executePythonRedditClient({
+  if (shouldTryPythonFallback) {
+    try {
+      let pyRes = await executePythonRedditClient({
         url: `https://www.reddit.com/user/${encodeURIComponent(clean)}/about.json`,
         isJson: true,
-        useProxy: true,
-        timeout: 10,
+        useProxy: false,
+        timeout: 8,
       }).catch(() => null);
+
+      if (!pyRes || (!pyRes.ok && pyRes.status !== 404)) {
+        // Retry with proxy if direct was blocked (e.g. Cloudflare / 403)
+        pyRes = await executePythonRedditClient({
+          url: `https://www.reddit.com/user/${encodeURIComponent(clean)}/about.json`,
+          isJson: true,
+          useProxy: true,
+          timeout: 10,
+        }).catch(() => null);
+      }
+
+      if (pyRes) {
+        if (
+          pyRes.status === 404 ||
+          pyRes.body?.error === 404 ||
+          pyRes.body?.message === "Not Found"
+        ) {
+          const result: RedditAccountHealth = {
+            username: clean,
+            isHealthy: false,
+            isShadowbanned: true,
+            isSuspended: false,
+            exists: false,
+            reason: "Profile returns 404 Not Found on Reddit (Shadowbanned)",
+            checkedVia: "python",
+          };
+          healthCache.set(cacheKey, { result, expiresAt: now + UNHEALTHY_CACHE_TTL_MS });
+          return result;
+        }
+
+        if (pyRes.body?.data?.is_suspended || pyRes.body?.data?.is_banned) {
+          const result: RedditAccountHealth = {
+            username: clean,
+            isHealthy: false,
+            isShadowbanned: false,
+            isSuspended: true,
+            exists: false,
+            reason: "Profile is suspended/banned on Reddit",
+            checkedVia: "python",
+          };
+          healthCache.set(cacheKey, { result, expiresAt: now + UNHEALTHY_CACHE_TTL_MS });
+          return result;
+        }
+
+        if (pyRes.status === 200 && pyRes.body?.kind === "t2" && pyRes.body?.data?.name) {
+          const d = pyRes.body.data;
+          const totalKarma =
+            typeof d.total_karma === "number"
+              ? d.total_karma
+              : (d.link_karma ?? 0) + (d.comment_karma ?? 0);
+
+          const createdUtc: number = typeof d.created_utc === "number" ? d.created_utc : 0;
+          const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
+
+          const result: RedditAccountHealth = {
+            username: clean,
+            isHealthy: true,
+            isShadowbanned: false,
+            isSuspended: false,
+            exists: true,
+            karma: totalKarma,
+            accountAgeDays: ageDays,
+            checkedVia: "python",
+          };
+          healthCache.set(cacheKey, { result, expiresAt: now + HEALTHY_CACHE_TTL_MS });
+          return result;
+        }
+      }
+    } catch (err: any) {
+      logger.warn({ err: err?.message, username: clean }, "Python fallback health check failed");
     }
-
-    if (pyRes) {
-      if (
-        pyRes.status === 404 ||
-        pyRes.body?.error === 404 ||
-        pyRes.body?.message === "Not Found"
-      ) {
-        const result: RedditAccountHealth = {
-          username: clean,
-          isHealthy: false,
-          isShadowbanned: true,
-          isSuspended: false,
-          exists: false,
-          reason: "Profile returns 404 Not Found on Reddit (Shadowbanned)",
-          checkedVia: "python",
-        };
-        healthCache.set(cacheKey, { result, expiresAt: now + UNHEALTHY_CACHE_TTL_MS });
-        return result;
-      }
-
-      if (pyRes.body?.data?.is_suspended || pyRes.body?.data?.is_banned) {
-        const result: RedditAccountHealth = {
-          username: clean,
-          isHealthy: false,
-          isShadowbanned: false,
-          isSuspended: true,
-          exists: false,
-          reason: "Profile is suspended/banned on Reddit",
-          checkedVia: "python",
-        };
-        healthCache.set(cacheKey, { result, expiresAt: now + UNHEALTHY_CACHE_TTL_MS });
-        return result;
-      }
-
-      if (pyRes.status === 200 && pyRes.body?.kind === "t2" && pyRes.body?.data?.name) {
-        const d = pyRes.body.data;
-        const totalKarma =
-          typeof d.total_karma === "number"
-            ? d.total_karma
-            : (d.link_karma ?? 0) + (d.comment_karma ?? 0);
-
-        const createdUtc: number = typeof d.created_utc === "number" ? d.created_utc : 0;
-        const ageDays = createdUtc ? Math.floor((Date.now() / 1000 - createdUtc) / 86400) : 0;
-
-        const result: RedditAccountHealth = {
-          username: clean,
-          isHealthy: true,
-          isShadowbanned: false,
-          isSuspended: false,
-          exists: true,
-          karma: totalKarma,
-          accountAgeDays: ageDays,
-          checkedVia: "python",
-        };
-        healthCache.set(cacheKey, { result, expiresAt: now + HEALTHY_CACHE_TTL_MS });
-        return result;
-      }
-    }
-  } catch (err: any) {
-    logger.warn({ err: err?.message, username: clean }, "Python fallback health check failed");
   }
 
-  // 3. Fail-open fallback: if both methods failed due to network issues, do not block the worker
-  logger.warn({ username: clean }, "Reddit account health check inconclusive due to network — failing open");
-  return {
+  // 3. Fail-open fallback: if both methods failed due to network issues, do not block the worker,
+  // and cache the inconclusive result for 5 minutes to prevent spamming Reddit on every click.
+  logger.warn({ username: clean }, "Reddit account health check inconclusive due to network — failing open and caching for 5m");
+  const fallbackResult: RedditAccountHealth = {
     username: clean,
     isHealthy: true,
     isShadowbanned: false,
@@ -238,4 +247,6 @@ export async function checkRedditAccountHealth(
     reason: "Health check inconclusive (network timeout)",
     checkedVia: "error",
   };
+  healthCache.set(cacheKey, { result: fallbackResult, expiresAt: now + UNHEALTHY_CACHE_TTL_MS });
+  return fallbackResult;
 }

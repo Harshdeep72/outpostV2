@@ -52,3 +52,4 @@ Thumbs.db
 *.sql
 scratch/
 .env
+cookie.txt

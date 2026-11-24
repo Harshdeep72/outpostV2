@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,10 +123,20 @@ async function doRefresh() {
  * Falls back to REDDIT_SESSION_COOKIE env var if auto-refresh is unavailable.
  */
 export function initRedditCookieManager() {
-  const envCookie = process.env.REDDIT_SESSION_COOKIE;
-  if (envCookie) {
-    state = { value: envCookie, fetchedAt: Date.now(), source: "env" };
-    logger.info("redditCookieManager: using REDDIT_SESSION_COOKIE from env (will also attempt auto-refresh)");
+  let cookieVal = process.env.REDDIT_SESSION_COOKIE;
+  if (!cookieVal) {
+    const cookieFile = findWorkspaceFile("cookie.txt");
+    if (existsSync(cookieFile)) {
+      try {
+        cookieVal = readFileSync(cookieFile, "utf-8").trim();
+      } catch {}
+    }
+  }
+
+  if (cookieVal) {
+    state = { value: cookieVal, fetchedAt: Date.now(), source: "env" };
+    process.env.REDDIT_SESSION_COOKIE = cookieVal;
+    logger.info("redditCookieManager: using Reddit session cookie (will also attempt auto-refresh)");
   }
 
   void doRefresh();
@@ -137,13 +147,21 @@ export function initRedditCookieManager() {
  *
  * Priority:
  *   1. Auto-refreshed cookie (if available and not stale).
- *   2. REDDIT_SESSION_COOKIE env var.
+ *   2. REDDIT_SESSION_COOKIE env var / cookie.txt.
  *   3. null — callers should proceed without cookies.
  */
 export function getRedditSessionCookie(): string | null {
   if (state) return state.value;
-  const env = process.env.REDDIT_SESSION_COOKIE;
-  return env || null;
+  let cookieVal = process.env.REDDIT_SESSION_COOKIE;
+  if (!cookieVal) {
+    const cookieFile = findWorkspaceFile("cookie.txt");
+    if (existsSync(cookieFile)) {
+      try {
+        cookieVal = readFileSync(cookieFile, "utf-8").trim();
+      } catch {}
+    }
+  }
+  return cookieVal || null;
 }
 
 /**

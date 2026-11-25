@@ -386,6 +386,21 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
         .setMaxLength(20)
     );
 
+  const unlinkreddit = new SlashCommandBuilder()
+    .setName("unlinkreddit")
+    .setDescription("Unlink a Reddit account from a Discord user (Staff only)")
+    .setDefaultMemberPermissions(0x20) // MANAGE_GUILD
+    .addUserOption((o) =>
+      o.setName("user").setDescription("The Discord user to unlink the Reddit account from").setRequired(true)
+    )
+    .addStringOption((o) =>
+      o.setName("reddit_username")
+        .setDescription("Reddit username to unlink (optional if user only has 1 account)")
+        .setRequired(false)
+        .setAutocomplete(true)
+        .setMaxLength(30)
+    );
+
   const ping = new SlashCommandBuilder()
     .setName("ping")
     .setDescription("Show bot latency, DB speed, proxy status, and cache stats")
@@ -736,7 +751,7 @@ export function getCommandBuilders(): (SlashCommandBuilder | ContextMenuCommandB
     addmod, removemod, addadmin, flag, unflag,
     disableclaim, enableclaim, blockclaim, unblockclaim,
     profile, massdm, sendstats, notifywalletmigration, taskhistory, payouthistory, adminpayouthistory,
-    canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser,
+    canceltask, cancelcampaign, campaignstatus, assigntask, joinerguide, verifyuser, unlinkreddit,
     ping, stats, health, testurl, addbalance, removebalance,
     checksubmission, submission, approvesubmission, reopenslot, mystatus, myhold, drops, processholds, earlypayout, forcepayout, requeue,
     mypayment, paymentmethod,

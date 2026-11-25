@@ -1,4 +1,5 @@
 import {
+  type AutocompleteInteraction,
   type ChatInputCommandInteraction,
   type ButtonInteraction,
   type ModalSubmitInteraction,
@@ -1362,7 +1363,7 @@ export async function unlinkRedditAccount(opts: {
   const userRow = await db.execute<{ reddit_username: string | null }>(
     sql`SELECT reddit_username FROM users WHERE discord_id = ${discordId} LIMIT 1`
   );
-  if (userRow.rows[0]?.reddit_username === redditUsernameLower) {
+  if (userRow.rows[0]?.reddit_username?.toLowerCase() === redditUsernameLower) {
     const nextAcc = await db.execute<{ reddit_username: string }>(
       sql`SELECT reddit_username FROM reddit_accounts WHERE discord_id = ${discordId} ORDER BY created_at ASC LIMIT 1`
     );
@@ -1500,6 +1501,146 @@ export async function handleVerifyUnlinkAccount(
     logger.error({ err, discordId, redditUsernameLower }, "handleVerifyUnlinkAccount failed");
     return interaction.editReply({
       embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Could not unlink account: ${err?.message ?? "unknown error"}`)],
+    });
+  }
+}
+
+async function getAllLinkedRedditAccounts(discordId: string): Promise<string[]> {
+  const linked = await fetchLinkedRedditUsernames(discordId);
+  const existingUser = await getUserByDiscordId(discordId);
+  const set = new Set(linked.map((u) => u.toLowerCase()));
+  if (existingUser?.redditUsername) {
+    set.add(existingUser.redditUsername.toLowerCase());
+  }
+  return Array.from(set);
+}
+
+export async function handleUnlinkRedditAutocomplete(interaction: AutocompleteInteraction) {
+  try {
+    const guild = interaction.guild;
+    if (!guild || !interaction.member || typeof interaction.member === "string" || !("roles" in interaction.member)) {
+      return interaction.respond([]);
+    }
+    if (!hasModRole(interaction.member as any, guild)) {
+      return interaction.respond([]);
+    }
+
+    const targetUserId = interaction.options.get("user")?.value as string | undefined;
+    if (!targetUserId) {
+      return interaction.respond([]);
+    }
+
+    const accounts = await getAllLinkedRedditAccounts(targetUserId);
+    const focused = interaction.options.getFocused().trim().toLowerCase().replace(/^\/?u\//i, "");
+    const filtered = accounts
+      .filter((u) => !focused || u.includes(focused))
+      .slice(0, 25)
+      .map((u) => ({ name: `u/${u}`, value: u }));
+
+    return interaction.respond(filtered);
+  } catch (err) {
+    logger.debug({ err }, "handleUnlinkRedditAutocomplete failed");
+    return interaction.respond([]).catch(() => {});
+  }
+}
+
+export async function handleUnlinkRedditCommand(interaction: ChatInputCommandInteraction) {
+  if (!interaction.guild) {
+    return interaction.reply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ This command can only be used inside a server.")],
+      flags: 64,
+    });
+  }
+
+  await interaction.deferReply({ flags: 64 });
+
+  const guild = interaction.guild;
+  const member = await guild.members.fetch(interaction.user.id);
+  if (!hasModRole(member, guild)) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription("❌ Only server staff (Admins/Mods) can use `/unlinkreddit`.")],
+    });
+  }
+
+  const targetUser = interaction.options.getUser("user", true);
+  const rawReddit = (interaction.options.getString("reddit_username") ?? "").trim();
+  const discordId = targetUser.id;
+
+  const linked = await getAllLinkedRedditAccounts(discordId);
+  if (linked.length === 0) {
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.WARNING).setDescription(`ℹ️ <@${discordId}> does not have any Reddit accounts linked.`)],
+    });
+  }
+
+  let targetRedditLower: string;
+  if (rawReddit) {
+    targetRedditLower = rawReddit.replace(/^\/?u\//i, "").trim().toLowerCase();
+    if (!linked.includes(targetRedditLower)) {
+      return interaction.editReply({
+        embeds: [
+          makeEmbed(COLORS.DANGER).setDescription(
+            `❌ **u/${targetRedditLower}** is not linked to <@${discordId}>.\n\n` +
+            `**Currently linked accounts:**\n${linked.map((u) => `• u/${u}`).join("\n")}`
+          ),
+        ],
+      });
+    }
+  } else if (linked.length === 1) {
+    targetRedditLower = linked[0];
+  } else {
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.WARNING).setDescription(
+          `⚠️ <@${discordId}> has **${linked.length}** Reddit accounts linked. Please specify which one using \`reddit_username:\`:\n\n` +
+          linked.map((u) => `• \`u/${u}\``).join("\n")
+        ),
+      ],
+    });
+  }
+
+  try {
+    const result = await unlinkRedditAccount({
+      discordId,
+      redditUsernameLower: targetRedditLower,
+      guild,
+      actorLabel: `@${interaction.user.username}`,
+    });
+
+    // Post an audit log entry in #verification-log
+    try {
+      const setup = await setupGuild(guild);
+      await setup.verificationLogChannel.send({
+        embeds: [
+          makeEmbed(result.unverified ? COLORS.DANGER : COLORS.WARNING)
+            .setTitle("🗑️ Reddit Account Unlinked (Staff Command)")
+            .addFields(
+              { name: "Discord User", value: `<@${discordId}> (${targetUser.username})`, inline: true },
+              { name: "Unlinked Reddit", value: `[u/${targetRedditLower}](https://www.reddit.com/user/${encodeURIComponent(targetRedditLower)})`, inline: true },
+              { name: "Staff Member", value: `<@${interaction.user.id}>`, inline: true },
+              { name: "Remaining Accounts", value: result.unverified ? "0 (Verification Reset)" : `${result.remainingCount}`, inline: true },
+            )
+            .setTimestamp(),
+        ],
+      });
+    } catch (logErr) {
+      logger.warn({ logErr, discordId }, "Could not post unlink audit log to #verification-log");
+    }
+
+    return interaction.editReply({
+      embeds: [
+        makeEmbed(COLORS.SUCCESS).setDescription(
+          `✅ Unlinked **u/${targetRedditLower}** from <@${discordId}>.\n\n` +
+          (result.unverified
+            ? `That was their last linked account — user has been **unverified** and the Verified role was removed.`
+            : `User still has **${result.remainingCount}** other linked account${result.remainingCount === 1 ? "" : "s"}.`)
+        ),
+      ],
+    });
+  } catch (err: any) {
+    logger.error({ err, discordId, targetRedditLower }, "handleUnlinkRedditCommand failed");
+    return interaction.editReply({
+      embeds: [makeEmbed(COLORS.DANGER).setDescription(`❌ Failed to unlink account: ${err?.message ?? "unknown error"}`)],
     });
   }
 }

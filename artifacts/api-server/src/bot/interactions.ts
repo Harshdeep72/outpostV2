@@ -6,7 +6,7 @@ import {
 import { upsertUserSmart } from "./db.js";
 import { logger } from "../lib/logger.js";
 
-import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand } from "./handlers/verification.js";
+import { handleVerifyCommand, handleVerifyStart, handleVerifyModal, handleVerifyAccept, handleVerifyReject, handleVerifyRejectReason, handleVerifyRevoke, handleVerifyDismiss, handleVerifyUnlinkAccount, handleAdminVerifyCommand, handleUnlinkRedditCommand, handleUnlinkRedditAutocomplete } from "./handlers/verification.js";
 import { handleCreateTaskCommand, handleTaskCreateModal, handleTaskClaim, handleTaskDetails, handleAssignTaskCommand, handleClaimSubmit, handleClaimCopy, handleClaimReject, handleClaimRejectModal, handleClaimSubmitModal, handleSubAccept, handleSubReject, handleSubFlag, handleSubReviewReason, handleCampaignClaimNext, handleSubEdit, handleSubEditModal } from "./handlers/tasks.js";
 import { handleWalletCommand, handleSetupI, handleSetGcash, handleSetWallet, handleSetPaypal, handleAdminSetUpi, handleAdminSetGcash, handleAdminSetWallet, handleAdminSetPaypal, handleMyPaymentCommand } from "./handlers/wallet.js";
 import { handleSetupCommand, handleAddMod, handleRemoveMod, handleAddAdmin, handleFlagUser, handleUnflagUser, handleDisableClaim, handleEnableClaim, handleAddBalance, handleRemoveBalance, handleNotifyWalletMigration, handleCheckSubmission, handleSubmissionCommand, handleSubmissionSelect, handleApproveSubmission, handleReopenSlot, handleProcessHolds, handleEarlyPayout, handleForcePayout, handleRequeueCommand, handleVerifiedListCommand, handleClearTasksCommand } from "./handlers/admin.js";
@@ -60,6 +60,7 @@ export function registerInteractionHandler(client: Client) {
         if (name === "ping") return await timed(name, () => handlePingCommand(interaction));
         if (name === "verify") return await timed(name, () => handleVerifyCommand(interaction));
         if (name === "verifyuser") return await timed(name, () => handleAdminVerifyCommand(interaction));
+        if (name === "unlinkreddit") return await timed(name, () => handleUnlinkRedditCommand(interaction));
         if (name === "setup") return await timed(name, () => handleSetupCommand(interaction));
         if (name === "createtask") return await timed(name, () => handleCreateTaskCommand(interaction));
         if (name === "bulktask") return await timed(name, () => handleBulkTaskCommand(interaction));
@@ -137,6 +138,9 @@ export function registerInteractionHandler(client: Client) {
         const name = interaction.commandName;
         if (name === "workspace" || name === "ws") {
           return await handleWorkspaceAutocomplete(interaction);
+        }
+        if (name === "unlinkreddit") {
+          return await handleUnlinkRedditAutocomplete(interaction);
         }
         return;
       }

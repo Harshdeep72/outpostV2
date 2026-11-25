@@ -48,8 +48,10 @@ export async function handleSetupCommand(interaction: ChatInputCommandInteractio
               setup.startHereChannel,
               setup.guideChannel,
               setup.generalChannel,
+              setup.karmaTipsChannel,
+              setup.vipChatChannel,
               setup.referralEventsChannel,
-            ].map((c) => c.toString()).join("\n"),
+            ].filter(Boolean).map((c) => c!.toString()).join("\n"),
           },
           {
             name: "💼 Earn Channels",

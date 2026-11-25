@@ -16,6 +16,7 @@ export const CHANNELS = {
   REJECTED_TASKS: "rejected-tasks",
   SUGGESTIONS: "suggestions",
   VIP_CHAT: "vip-chat",
+  KARMA_TIPS: "karma-tips",
 } as const;
 
 export const CATEGORIES = {

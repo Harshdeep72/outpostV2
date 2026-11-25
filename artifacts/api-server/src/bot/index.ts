@@ -149,8 +149,14 @@ export async function startBot() {
       startAutoBumper(client);
       startUnclaimedNotifier(client);
 
-      // Auto-create earner-tier roles in every guild on boot (idempotent).
+      // Auto-create earner-tier roles and verify guild channels in every guild on boot (idempotent).
       for (const guild of client.guilds.cache.values()) {
+        try {
+          const { setupGuild } = await import("./setup.js");
+          await setupGuild(guild);
+        } catch (err) {
+          logger.warn({ err, guildId: guild.id }, "setupGuild failed on boot");
+        }
         ensureEarnerRoles(guild).catch((err) =>
           logger.warn({ err, guildId: guild.id }, "ensureEarnerRoles failed on boot")
         );

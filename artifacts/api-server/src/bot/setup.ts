@@ -49,6 +49,7 @@ export interface GuildSetup {
   scamAlertsChannel: TextChannel;
   suggestionsChannel?: TextChannel;
   vipChatChannel?: TextChannel;
+  karmaTipsChannel?: TextChannel;
 }
 
 const setupCache = new Map<string, { setup: GuildSetup; expiry: number }>();
@@ -338,6 +339,39 @@ async function postVipChatIntro(ch: TextChannel) {
   }
 }
 
+async function postKarmaTipsIntro(ch: TextChannel) {
+  const existing = await ch.messages.fetch({ limit: 10 }).catch(() => null);
+  if (existing && existing.size > 0) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2ECC71)
+    .setTitle("🌾 Reddit Karma Farming Tips & Strategies")
+    .setDescription(
+      "Welcome to **#karma-tips**! This channel is dedicated for members to share, discover, and discuss safe, effective strategies for growing Reddit karma and building high-trust accounts.\n\n" +
+      "### ⚡ Why Higher Karma Matters in Reddit Microtasks\n" +
+      "• **50% Shorter Task Cooldown:** Accounts with **5k+** and **10k+ Karma** enjoy a 60-minute task cooldown instead of 120 minutes — double your earning capacity!\n" +
+      "• **VIP Lounge Access:** Exclusive access to `#vip-chat` with priority support from admins and mods.\n" +
+      "• **Zero AutoMod Removals:** Higher-karma accounts bypass strict subreddit karma gates, keeping your submissions live and approved.\n\n" +
+      "### 🛡️ Golden Rules for Safe Karma Growth (Anti-Ban)\n" +
+      "1. **Target Rising Posts in Large Subreddits:** Browse `r/AskReddit`, `r/mildlyinteresting`, `r/aww`, `r/Showerthoughts`, `r/NoStupidQuestions`, or `r/me_irl` sorted by **Rising** or **New**. Leaving thoughtful, funny, or relatable comments early gives you the best chance of thousands of upvotes when the post trends.\n" +
+      "2. **Helpful & Authentic Answers:** Niche subreddits (hobbies, gaming, tech, pets, local city subreddits) appreciate genuine help. A well-formatted, detailed guide or answer consistently gains steady upvotes.\n" +
+      "3. **AVOID Free Karma Subreddits:** **NEVER** use `r/FreeKarma4U` or mutual-upvote exchange groups! Reddit's spam filter automatically flags and shadowbans accounts that participate in them.\n" +
+      "4. **Human Pacing:** Do not mass-post comments in rapid succession. Blend in, upvote other posts, scroll naturally, and leave comfortable time between comments.\n\n" +
+      "### 💬 Drop Your Tips Below!\n" +
+      "Found an easy subreddit for building karma? Have a strategy that worked for you? Share your advice, ask questions, and help your fellow earners rank up!"
+    )
+    .setFooter({ text: "Reddit Microtasks Community • Help each other grow" })
+    .setTimestamp();
+
+  const msg = await ch.send({ embeds: [embed] }).catch(() => null);
+  if (msg) {
+    await msg.pin().catch(() => {});
+    const fetched = await ch.messages.fetch({ limit: 5 }).catch(() => null);
+    const pinNotice = fetched?.find((m) => m.type === 6);
+    if (pinNotice) await pinNotice.delete().catch(() => {});
+  }
+}
+
 export async function setupGuild(guild: Guild): Promise<GuildSetup> {
   const cached = setupCache.get(guild.id);
   if (cached && cached.expiry > Date.now()) return cached.setup;
@@ -445,12 +479,54 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     ]
   );
 
+  const { channel: karmaTipsChannel, created: karmaCreated } = await ensureTextChannel(
+    guild, CHANNELS.KARMA_TIPS, communityCategory,
+    [
+      {
+        id: everyoneId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AddReactions,
+        ],
+      },
+      {
+        id: adminId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AddReactions,
+          PermissionFlagsBits.ManageMessages,
+        ],
+      },
+      {
+        id: modId,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AddReactions,
+          PermissionFlagsBits.ManageMessages,
+        ],
+      },
+    ]
+  );
+
   if (startCreated) postStartHereContent(startHereChannel).catch(() => {});
   if (guideCreated) postGuideContent(guideChannel).catch(() => {});
   if (refCreated) postReferralEventsContent(referralEventsChannel).catch(() => {});
   if (updatesCreated) postUpdatesIntro(updatesChannel).catch(() => {});
   if (scamCreated) postScamAlertsContent(scamAlertsChannel).catch(() => {});
   if (vipCreated) postVipChatIntro(vipChatChannel).catch(() => {});
+  postKarmaTipsIntro(karmaTipsChannel).catch(() => {});
 
   const setup: GuildSetup = {
     adminRole, modRole, verifiedRole, unverifiedRole, karma10kRole, karma5kRole,
@@ -458,6 +534,7 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     tasksChannel, verificationLogChannel, taskLogsChannel, withdrawalLogChannel, leaderboardChannel,
     startHereChannel, guideChannel, generalChannel, referralEventsChannel, announcementsChannel,
     updatesChannel, rejectedTasksChannel, scamAlertsChannel, suggestionsChannel, vipChatChannel,
+    karmaTipsChannel,
   };
 
   setupCache.set(guild.id, { setup, expiry: Date.now() + 5 * 60 * 1000 });

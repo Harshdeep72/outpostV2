@@ -484,6 +484,21 @@ export async function setupGuild(guild: Guild): Promise<GuildSetup> {
     [
       {
         id: everyoneId,
+        deny: [PermissionFlagsBits.ViewChannel],
+      },
+      {
+        id: verifiedRole.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AddReactions,
+        ],
+      },
+      {
+        id: unverifiedRole.id,
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,

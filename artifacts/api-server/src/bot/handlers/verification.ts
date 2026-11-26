@@ -28,7 +28,7 @@ import { COLORS } from "../constants.js";
 import { logger } from "../../lib/logger.js";
 import { getMaxRedditAccounts } from "../../lib/settings.js";
 
-const MIN_KARMA = 100;
+const MIN_KARMA = 20;
 
 async function sendWorkspaceWelcome(workspaceCh: any, discordId: string, guild: Guild): Promise<void> {
   let tasksMention = "the active task channels";
@@ -203,7 +203,7 @@ export async function handleVerifyCommand(interaction: ChatInputCommandInteracti
     .setDescription(
       "Welcome! To earn on this server you need to link your Reddit account.\n\n" +
       "**Click the button below to start.** Your verification is private — only you will see your modal and result.\n\n" +
-      "**Requirements:** ≥100 karma, ≥30 days old account.\n" +
+      `**Requirements:** ≥${MIN_KARMA} karma, ≥${MIN_AGE_DAYS} days old account.\n` +
       "Already verified? Clicking again will tell you so — nothing breaks."
     )
     .setFooter({ text: `Posted by ${interaction.user.username}` });

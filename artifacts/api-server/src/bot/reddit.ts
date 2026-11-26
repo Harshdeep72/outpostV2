@@ -187,9 +187,9 @@ async function fetchViaOAuth(name: string): Promise<RedditFetchResult | null> {
  *
  * Strategy:
  *   - Sum all archived post + comment scores as a karma FLOOR (real karma ≥ this).
- *   - If the floor meets the ≥100 karma requirement, karmaVerified=true → auto-approve.
+ *   - If the floor meets the ≥20 karma requirement, karmaVerified=true → auto-approve.
  *     (Real Reddit karma is always ≥ the sum of archived scores, so this is a safe lower bound.)
- *   - If below 100, karmaVerified=false → manual review.
+ *   - If below 20, karmaVerified=false → manual review.
  *   - The oldest archived created_utc gives an account age lower bound.
  *
  * Returns null only if the archive has zero entries for this user (new/unknown user).
@@ -233,7 +233,7 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
     //   1. Reddit only archives posts/comments that received votes.
     //   2. The archive may be incomplete (not every post is indexed).
     // Therefore: sum(archived scores) ≤ actual karma ≤ ∞.
-    // If this floor ≥ MIN_KARMA (100), the user definitely qualifies.
+    // If this floor ≥ MIN_KARMA (20), the user definitely qualifies.
     //
     // Note: score=1 is the author's own upvote and contributes 0 net karma.
     // We subtract 1 from each item's score to account for this, giving a
@@ -250,7 +250,7 @@ async function fetchViaArcticShift(name: string): Promise<RedditFetchResult | nu
 
     // If the karma floor meets the requirement, auto-verify.
     // Otherwise route to manual review (mods can check old.reddit.com).
-    const karmaVerified = karmaFloor >= 100;
+    const karmaVerified = karmaFloor >= 20;
 
     logger.info(
       { name, posts: posts.length, comments: comments.length, karmaFloor, karmaVerified, ageDays },
@@ -985,7 +985,7 @@ async function fetchFresh(name: string): Promise<RedditFetchResult> {
   // ── 2. Arctic Shift public archive API (no auth, no proxy, works from Render) ─
   // arctic-shift.photon-reddit.com indexes Reddit posts/comments publicly and is
   // reachable from datacenter IPs without auth. We use archived score sum as a
-  // karma FLOOR: if floor ≥ 100, the user definitely has ≥ 100 karma → auto-verify.
+  // karma FLOOR: if floor ≥ 20, the user definitely has ≥ 20 karma → auto-verify.
   // If below, we fall through and try other methods before routing to manual review.
   logger.info({ name }, "Python client unavailable — trying Arctic Shift karma floor");
   const arcticResult = await fetchViaArcticShift(name);

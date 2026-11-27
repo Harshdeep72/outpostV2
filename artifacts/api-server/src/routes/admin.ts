@@ -2495,65 +2495,84 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
       }
 
       const parsed = parseRedditProofUrl(url);
-      if (parsed && !parsed.commentId) {
-        return {
-          ...base, url, liveStatus: "no_comment",
-          error: "Post URL — no comment ID. A valid comment proof URL should contain the comment ID.",
-        };
-      }
+      const isPostOnly = Boolean(parsed && !parsed.commentId);
 
       const osintUrl = process.env.REDDIT_OSINT_URL;
-      if (!osintUrl) throw new Error("REDDIT_OSINT_URL not configured");
+      if (osintUrl) {
+        const { fetch: undiciFetch } = await import("undici");
+        const endpoint = isPostOnly ? "check/post" : "check/comment";
+        const res = await undiciFetch(`${osintUrl}/api/external/${endpoint}?url=${encodeURIComponent(url)}`, {
+          headers: { "Accept": "application/json" }
+        }).catch(() => null);
 
-      const { fetch: undiciFetch } = await import("undici");
-      const res = await undiciFetch(`${osintUrl}/api/external/check/comment?url=${encodeURIComponent(url)}`, {
-        headers: { "Accept": "application/json" }
-      });
-      const json = await res.json().catch(() => null) as any;
+        if (res) {
+          const json = await res.json().catch(() => null) as any;
 
-      if (!res.ok) {
-        if (res.status === 404 || (json && (json.message?.includes("not found") || json.status === "not_found"))) {
-          const apiErr = json?.error || json?.message || "Not found (404)";
-          const extraInfo = json?.post_status ? ` (Post: ${json.post_status})` : "";
-          return { ...base, liveStatus: "not_found", error: apiErr + extraInfo };
+          if (res.ok && json?.data) {
+            const data = json.data;
+            const liveStatus = data.liveness === "live" ? "live"
+              : data.liveness === "removed" ? "removed"
+              : data.liveness === "deleted" ? "deleted"
+              : data.liveness === "not_found" ? "not_found" : "error";
+
+            if (liveStatus !== "error") {
+              const isRemoved = liveStatus === "removed" || liveStatus === "deleted";
+              const removalReason = isRemoved ? (data.removal_reason ?? null) : null;
+              const removalBy = isRemoved ? (data.removal_type ?? null) : null;
+              const createdAtStr = data.createdAt ? new Date(data.createdAt * 1000).toISOString() : null;
+
+              return {
+                url,
+                ok: true,
+                liveStatus,
+                author: data.author || null,
+                authorStatus: null,
+                authorKarma: null,
+                authorAgeDays: null,
+                subreddit: data.subreddit || null,
+                title: data.title || null,
+                createdAt: createdAtStr,
+                removalReason,
+                removalBy,
+                error: null,
+                score: typeof data.score === "number" ? data.score : null,
+                depth: typeof data.depth === "number" ? data.depth : null,
+                bodyPreview: data.body_snippet || null,
+              };
+            }
+          } else if (res.status === 404 || (json && (json.message?.includes("not found") || json.status === "not_found"))) {
+            const apiErr = json?.error || json?.message || "Not found (404)";
+            const extraInfo = json?.post_status ? ` (Post: ${json.post_status})` : "";
+            return { ...base, liveStatus: "not_found", error: apiErr + extraInfo };
+          }
         }
-        return { ...base, liveStatus: "error", error: json?.error ?? json?.message ?? "API Error" };
       }
 
-      const data = json?.data;
-      if (!data) return { ...base, liveStatus: "error", error: "No data from API" };
-
-      const liveStatus = data.liveness === "live" ? "live"
-        : data.liveness === "removed" ? "removed"
-        : data.liveness === "deleted" ? "deleted"
-        : data.liveness === "not_found" ? "not_found" : "error";
-
-      const isRemoved = liveStatus === "removed" || liveStatus === "deleted";
-      const removalReason = isRemoved ? (data.removal_reason ?? null) : null;
-      const removalBy = isRemoved ? (data.removal_type ?? null) : null;
-
-      let createdAtStr = null;
-      if (data.createdAt) {
-        createdAtStr = new Date(data.createdAt * 1000).toISOString();
-      }
+      // Fallback: use validateRedditProof (includes curl_cffi + session cookie)
+      const val = await validateRedditProof(url, [], "");
+      const mappedStatus: Row["liveStatus"] = val.passed ? "live"
+        : val.status === "deleted_by_author" || val.status === "comment_deleted" ? "deleted"
+        : val.status === "removed_by_mod" || val.status === "removed_by_reddit" || val.status === "removed_by_automod" ? "removed"
+        : val.status === "not_found" || val.status === "comment_missing" ? "not_found"
+        : "error";
 
       return {
         url,
-        ok: true,
-        liveStatus,
-        author: data.author || null,
+        ok: mappedStatus !== "error",
+        liveStatus: mappedStatus,
+        author: val.authorFound ?? null,
         authorStatus: null,
         authorKarma: null,
         authorAgeDays: null,
-        subreddit: data.subreddit || null,
-        title: null,
-        createdAt: createdAtStr,
-        removalReason,
-        removalBy,
-        error: null,
-        score: typeof data.score === 'number' ? data.score : null,
-        depth: typeof data.depth === 'number' ? data.depth : null,
-        bodyPreview: data.body_snippet || null,
+        subreddit: val.subredditFound ?? null,
+        title: val.title ?? null,
+        createdAt: val.createdAt ?? null,
+        removalReason: mappedStatus === "removed" || mappedStatus === "deleted" ? (val.failures.join("; ") || null) : null,
+        removalBy: REMOVAL_BY_LABEL[val.status] ?? null,
+        error: mappedStatus === "error" ? (val.failures.join("; ") || "Check failed") : null,
+        score: null,
+        depth: null,
+        bodyPreview: null,
       };
     } catch (err) {
       const msg = (err as Error)?.message ?? String(err);

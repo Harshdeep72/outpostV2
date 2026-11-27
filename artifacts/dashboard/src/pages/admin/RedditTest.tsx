@@ -11,10 +11,26 @@ interface RedditTestResult {
   error: string | null;
 }
 
+interface BulkRow {
+  url: string;
+  ok: boolean;
+  liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
+  author: string | null;
+  subreddit: string | null;
+  title: string | null;
+  score: number | null;
+  error: string | null;
+}
+
+interface BulkResult {
+  results: BulkRow[];
+}
+
 export default function RedditTest() {
   const [url, setUrl] = useState("");
   const [expectedAuthor, setExpectedAuthor] = useState("");
   const [expectedSubreddit, setExpectedSubreddit] = useState("");
+  const [bulkText, setBulkText] = useState("");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -23,6 +39,16 @@ export default function RedditTest() {
         expectedAuthor: expectedAuthor || undefined,
         expectedSubreddit: expectedSubreddit || undefined,
       }),
+  });
+
+  const bulkMutation = useMutation({
+    mutationFn: () => {
+      const urls = bulkText
+        .split(/\r?\n/)
+        .map(s => s.trim())
+        .filter(Boolean);
+      return post<BulkResult>("/admin/reddit-bulk-check", { urls });
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -127,10 +153,10 @@ export default function RedditTest() {
             </div>
           )}
 
-          {mutation.data.title && (
+          {(mutation.data.title || mutation.data.author || mutation.data.subreddit) && (
             <div className="grid grid-cols-1 gap-2 text-sm">
               {[
-                ["Title", mutation.data.title],
+                ...(mutation.data.title ? [["Title", mutation.data.title]] : []),
                 ["Author", mutation.data.author ? `u/${mutation.data.author}` : "—"],
                 ["Subreddit", mutation.data.subreddit ? `r/${mutation.data.subreddit}` : "—"],
               ].map(([label, value]) => (
@@ -149,6 +175,81 @@ export default function RedditTest() {
           {(mutation.error as Error)?.message ?? "Request failed"}
         </div>
       )}
+
+      <div className="pt-4 border-t border-border space-y-4">
+        <div>
+          <h2 className="text-lg font-bold text-foreground">Bulk URL Check (Posts & Comments)</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Paste up to 100 Reddit post or comment URLs (one per line) to check live/removed status
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+          <textarea
+            value={bulkText}
+            onChange={e => setBulkText(e.target.value)}
+            rows={6}
+            placeholder={"https://www.reddit.com/r/.../s/...\nhttps://www.reddit.com/r/.../comments/..."}
+            className="w-full px-3 py-2.5 rounded-lg bg-background border border-input text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+          />
+          <button
+            type="button"
+            onClick={() => bulkMutation.mutate()}
+            disabled={bulkMutation.isPending || !bulkText.trim()}
+            className={cn(
+              "px-5 py-2.5 rounded-lg font-semibold text-sm transition-all",
+              "bg-primary text-primary-foreground hover:bg-primary/90",
+              "disabled:opacity-60 disabled:cursor-not-allowed"
+            )}
+          >
+            {bulkMutation.isPending ? "Checking..." : "Bulk Check URLs"}
+          </button>
+        </div>
+
+        {bulkMutation.data?.results && (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-muted/50 text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">#</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Author</th>
+                    <th className="px-3 py-2">Subreddit</th>
+                    <th className="px-3 py-2">URL / Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {bulkMutation.data.results.map((r, i) => (
+                    <tr key={i}>
+                      <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-2 font-semibold">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full",
+                          r.liveStatus === "live" ? "bg-green-500/15 text-green-400"
+                            : r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "not_found"
+                              ? "bg-destructive/15 text-destructive"
+                              : "bg-yellow-500/15 text-yellow-400"
+                        )}>
+                          {r.liveStatus}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">{r.author ? `u/${r.author}` : "—"}</td>
+                      <td className="px-3 py-2">{r.subreddit ? `r/${r.subreddit}` : "—"}</td>
+                      <td className="px-3 py-2 max-w-xs truncate">
+                        <a href={r.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                          {r.url}
+                        </a>
+                        {r.error && <div className="text-destructive mt-0.5">{r.error}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

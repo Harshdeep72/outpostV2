@@ -881,7 +881,7 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
 
   // ── 0.75. Python curl_cffi + session cookie (JSON then old.reddit HTML) ───
   try {
-    const pyJsonUrl = `https://old.reddit.com/${sub}/comments/${parsed.postId}/.json?limit=1&raw_json=1`;
+    const pyJsonUrl = `https://www.reddit.com/${sub}/comments/${parsed.postId}/.json?limit=1&raw_json=1`;
     const pyJsonRes = await executePythonRedditClient({ url: pyJsonUrl, isJson: true, useProxy: false, timeout: 12 });
     if (pyJsonRes?.ok && Array.isArray(pyJsonRes.body)) {
       const postData = (pyJsonRes.body[0] as any)?.data?.children?.[0]?.data;

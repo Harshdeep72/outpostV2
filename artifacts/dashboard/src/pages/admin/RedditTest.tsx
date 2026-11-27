@@ -68,7 +68,7 @@ export default function RedditTest() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl">
+    <div className="p-6 space-y-6 max-w-6xl">
       <div>
         <h1 className="text-xl font-bold text-foreground">Reddit URL Test</h1>
         <p className="text-sm text-muted-foreground mt-0.5">

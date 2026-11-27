@@ -879,6 +879,117 @@ async function fetchPostViaRedditOsint(url: string): Promise<ValidationResult | 
     }
   }
 
+  // ── 0.75. Python curl_cffi + session cookie (JSON then old.reddit HTML) ───
+  try {
+    const pyJsonUrl = `https://old.reddit.com/${sub}/comments/${parsed.postId}/.json?limit=1&raw_json=1`;
+    const pyJsonRes = await executePythonRedditClient({ url: pyJsonUrl, isJson: true, useProxy: false, timeout: 12 });
+    if (pyJsonRes?.ok && Array.isArray(pyJsonRes.body)) {
+      const postData = (pyJsonRes.body[0] as any)?.data?.children?.[0]?.data;
+      if (postData) {
+        const status = classifyPostOrComment(postData);
+        const postSubreddit = postData.subreddit?.toLowerCase() ?? parsed.subreddit;
+        if (status) {
+          return {
+            passed: false, autoApproved: false, status,
+            failures: [`Post is ${status.replace(/_/g, " ")}`],
+            authorFound: postData.author?.toLowerCase(), subredditFound: postSubreddit, postLive: false,
+            ...meta(status),
+          };
+        }
+        let authorFound = (postData.author ?? "").toLowerCase() || "unknown";
+        if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+          const expectedDisplay = expectedLowerList.length === 1 ? `u/${expectedLowerList[0]}` : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+          return {
+            passed: false, autoApproved: false, status: "author_mismatch",
+            failures: [`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`],
+            authorFound, subredditFound: postSubreddit, postLive: true,
+            ...meta("author_mismatch"),
+          };
+        }
+        if (taskSubreddit && postSubreddit !== taskSubreddit) {
+          return {
+            passed: false, autoApproved: false, status: "wrong_subreddit",
+            failures: [`Post is in r/${postSubreddit} but task requires r/${taskSubreddit}.`],
+            authorFound, subredditFound: postSubreddit, postLive: true,
+            ...meta("wrong_subreddit"),
+          };
+        }
+        return {
+          passed: true, autoApproved: true, status: "live",
+          failures: [],
+          authorFound, subredditFound: postSubreddit, postLive: true,
+          title: postData.title,
+          createdAt: postData.created_utc ? new Date(postData.created_utc * 1000).toISOString() : undefined,
+          verifiedVia: "json_proxy",
+          ...meta("live"),
+        };
+      }
+    }
+
+    // Fallback: old.reddit.com HTML via Python curl_cffi + session cookie
+    const pyHtmlUrl = `https://old.reddit.com/${sub}/comments/${parsed.postId}/`;
+    const pyHtmlRes = await executePythonRedditClient({ url: pyHtmlUrl, isJson: false, useProxy: false, timeout: 12 });
+    if (pyHtmlRes?.ok && typeof pyHtmlRes.body === "string" && pyHtmlRes.body.includes("data-author=")) {
+      const html = pyHtmlRes.body;
+      const thingMatch = html.match(new RegExp(`<div[^>]*id="thing_t3_${parsed.postId}"[^>]*>`, "i")) ?? html.match(/<div[^>]*id="thing_t3_[^"]*"[^>]*>/i);
+      const tag = thingMatch?.[0] ?? "";
+      const authorMatch = tag.match(/data-author="([^"]+)"/i) ?? html.match(/data-author="([^"]+)"/i);
+      const subMatch = tag.match(/data-subreddit="([^"]+)"/i) ?? html.match(/data-subreddit="([^"]+)"/i);
+      const titleMatch = html.match(/<title>(.*?)<\/title>/is);
+
+      const authorFound = (authorMatch?.[1] ?? "unknown").toLowerCase();
+      const postSubreddit = (subMatch?.[1] ?? parsed.subreddit).toLowerCase();
+      const titleText = titleMatch?.[1]?.trim();
+
+      const isRemoved = html.slice(0, 30000).includes("[removed]") || html.includes("Sorry, this post has been removed") || html.includes("Sorry, this post was removed by Reddit");
+      const isDeleted = authorFound === "[deleted]" || html.includes("Sorry, this post was deleted by the person who originally posted it");
+
+      if (isDeleted) {
+        return {
+          passed: false, autoApproved: false, status: "deleted_by_author",
+          failures: ["Post was deleted by author"],
+          authorFound, subredditFound: postSubreddit, postLive: false,
+          ...meta("deleted_by_author"),
+        };
+      }
+      if (isRemoved) {
+        return {
+          passed: false, autoApproved: false, status: "removed_by_mod",
+          failures: ["Post was removed"],
+          authorFound, subredditFound: postSubreddit, postLive: false,
+          ...meta("removed_by_mod"),
+        };
+      }
+      if (authorFound !== "unknown" && expectedLowerList.length > 0 && !expectedLowerList.includes(authorFound)) {
+        const expectedDisplay = expectedLowerList.length === 1 ? `u/${expectedLowerList[0]}` : expectedLowerList.map((u) => `u/${u}`).join(" or ");
+        return {
+          passed: false, autoApproved: false, status: "author_mismatch",
+          failures: [`Author mismatch: found u/${authorFound} but expected ${expectedDisplay}.`],
+          authorFound, subredditFound: postSubreddit, postLive: true,
+          ...meta("author_mismatch"),
+        };
+      }
+      if (taskSubreddit && postSubreddit !== taskSubreddit) {
+        return {
+          passed: false, autoApproved: false, status: "wrong_subreddit",
+          failures: [`Post is in r/${postSubreddit} but task requires r/${taskSubreddit}.`],
+          authorFound, subredditFound: postSubreddit, postLive: true,
+          ...meta("wrong_subreddit"),
+        };
+      }
+      return {
+        passed: true, autoApproved: true, status: "live",
+        failures: [],
+        authorFound, subredditFound: postSubreddit, postLive: true,
+        title: titleText,
+        verifiedVia: "json_proxy",
+        ...meta("live"),
+      };
+    }
+  } catch (err) {
+    logger.warn({ err, postId: parsed.postId }, "validateRedditProof: Python curl_cffi post fallback failed");
+  }
+
   // ── Fetch strategy ────────────────────────────────────────────────────────
   // Unauthenticated JSON is deprecated. RSS is the primary source.
   const rssUrl = parsed.isUserPost

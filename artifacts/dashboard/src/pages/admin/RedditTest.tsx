@@ -221,10 +221,16 @@ export default function RedditTest() {
           const rows = bulkMutation.data.results;
           const posts = rows.filter(r => inferRowType(r) === "post");
           const comments = rows.filter(r => inferRowType(r) === "comment");
+          const isDead = (r: BulkRow) => r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "not_found";
           const totalLive = rows.filter(r => r.liveStatus === "live").length;
+          const totalDead = rows.filter(isDead).length;
+          const totalErr = rows.length - totalLive - totalDead;
           const postsLive = posts.filter(r => r.liveStatus === "live").length;
+          const postsDead = posts.filter(isDead).length;
+          const postsErr = posts.length - postsLive - postsDead;
           const commentsLive = comments.filter(r => r.liveStatus === "live").length;
-          const totalDead = rows.length - totalLive;
+          const commentsDead = comments.filter(isDead).length;
+          const commentsErr = comments.length - commentsLive - commentsDead;
 
           return (
             <div className="space-y-4">
@@ -236,6 +242,7 @@ export default function RedditTest() {
                     <span className="text-green-400 font-medium">{totalLive} live</span>
                     {" · "}
                     <span className="text-destructive font-medium">{totalDead} removed/dead</span>
+                    {totalErr > 0 && <span className="text-yellow-400 font-medium"> · {totalErr} error</span>}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-card p-4">
@@ -244,8 +251,9 @@ export default function RedditTest() {
                     <span className="text-green-400">{postsLive}</span>
                     <span className="text-muted-foreground text-sm font-normal"> / {posts.length} live</span>
                   </div>
-                  <div className="text-xs text-destructive mt-1">
-                    {posts.length - postsLive} removed/dead
+                  <div className="text-xs mt-1">
+                    <span className="text-destructive">{postsDead} removed/dead</span>
+                    {postsErr > 0 && <span className="text-yellow-400"> · {postsErr} error</span>}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-card p-4">
@@ -254,8 +262,9 @@ export default function RedditTest() {
                     <span className="text-green-400">{commentsLive}</span>
                     <span className="text-muted-foreground text-sm font-normal"> / {comments.length} live</span>
                   </div>
-                  <div className="text-xs text-destructive mt-1">
-                    {comments.length - commentsLive} removed/dead
+                  <div className="text-xs mt-1">
+                    <span className="text-destructive">{commentsDead} removed/dead</span>
+                    {commentsErr > 0 && <span className="text-yellow-400"> · {commentsErr} error</span>}
                   </div>
                 </div>
               </div>

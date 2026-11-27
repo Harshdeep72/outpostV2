@@ -2584,9 +2584,9 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     }
   }
 
-  // Concurrency cap = 5 to avoid hammering Reddit and tripping rate limits.
+  // Concurrency cap = 2 with 250ms stagger to avoid tripping Reddit 429 rate limits.
   const results: Row[] = new Array(urls.length);
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 2;
   let cursor = 0;
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, urls.length) }, async () => {
@@ -2594,6 +2594,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
         const idx = cursor++;
         if (idx >= urls.length) return;
         results[idx] = await checkOne(urls[idx]!);
+        await new Promise((r) => setTimeout(r, 250));
       }
     }),
   );

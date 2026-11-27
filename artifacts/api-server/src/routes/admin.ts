@@ -2499,8 +2499,15 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
       const isPostOnly = Boolean(parsed && !parsed.commentId);
       const itemType: Row["type"] = parsed ? (parsed.commentId ? "comment" : "post") : "unknown";
 
-      const osintUrl = process.env.REDDIT_BULK_OSINT_URL || process.env.REDDIT_OSINT_URL;
-      if (osintUrl) {
+      const osintCandidates = Array.from(
+        new Set(
+          [process.env.REDDIT_BULK_OSINT_URL, process.env.REDDIT_OSINT_URL]
+            .filter((u): u is string => Boolean(u && u.trim()))
+            .map((u) => u.replace(/\/+$/, ""))
+        )
+      );
+
+      for (const osintUrl of osintCandidates) {
         const { fetch: undiciFetch } = await import("undici");
         const endpoint = isPostOnly ? "check/post" : "check/comment";
         const res = await undiciFetch(`${osintUrl}/api/external/${endpoint}?url=${encodeURIComponent(url)}`, {
@@ -2611,7 +2618,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
     uniqueAuthors: uniqueAuthors.length,
   };
   if (uniqueAuthors.length > 0) {
-    const osintUrl = process.env.REDDIT_OSINT_URL;
+    const osintUrl = process.env.REDDIT_BULK_OSINT_URL || process.env.REDDIT_OSINT_URL;
     if (osintUrl) {
       const { fetch: undiciFetch } = await import("undici");
       const authorDataMap = new Map<string, any>();
@@ -2808,7 +2815,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
     uniqueAuthors: uniqueAuthors.length,
   };
   if (uniqueAuthors.length > 0) {
-    const osintUrl = process.env.REDDIT_OSINT_URL;
+    const osintUrl = process.env.REDDIT_BULK_OSINT_URL || process.env.REDDIT_OSINT_URL;
     if (osintUrl) {
       const { fetch: undiciFetch } = await import("undici");
       const authorDataMap = new Map<string, any>();

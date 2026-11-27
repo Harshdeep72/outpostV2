@@ -2452,6 +2452,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
   type Row = {
     url: string;
+    type: "post" | "comment" | "unknown";
     ok: boolean;
     liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
     author: string | null;
@@ -2480,7 +2481,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
   async function checkOne(rawUrl: string): Promise<Row> {
     const base: Row = {
-      url: rawUrl, ok: false, liveStatus: "error",
+      url: rawUrl, type: "unknown", ok: false, liveStatus: "error",
       author: null, authorStatus: null, authorKarma: null, authorAgeDays: null,
       subreddit: null, title: null, createdAt: null,
       removalReason: null, removalBy: null, error: null,
@@ -2496,6 +2497,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
       const parsed = parseRedditProofUrl(url);
       const isPostOnly = Boolean(parsed && !parsed.commentId);
+      const itemType: Row["type"] = parsed ? (parsed.commentId ? "comment" : "post") : "unknown";
 
       const osintUrl = process.env.REDDIT_OSINT_URL;
       if (osintUrl) {
@@ -2523,6 +2525,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
               return {
                 url,
+                type: itemType,
                 ok: true,
                 liveStatus,
                 author: data.author || null,
@@ -2543,7 +2546,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
           } else if (res.status === 404 || (json && (json.message?.includes("not found") || json.status === "not_found"))) {
             const apiErr = json?.error || json?.message || "Not found (404)";
             const extraInfo = json?.post_status ? ` (Post: ${json.post_status})` : "";
-            return { ...base, liveStatus: "not_found", error: apiErr + extraInfo };
+            return { ...base, url, type: itemType, liveStatus: "not_found", error: apiErr + extraInfo };
           }
         }
       }
@@ -2558,6 +2561,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
 
       return {
         url,
+        type: itemType,
         ok: mappedStatus !== "error",
         liveStatus: mappedStatus,
         author: val.authorFound ?? null,

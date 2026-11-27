@@ -13,6 +13,7 @@ interface RedditTestResult {
 
 interface BulkRow {
   url: string;
+  type?: "post" | "comment" | "unknown";
   ok: boolean;
   liveStatus: "live" | "removed" | "deleted" | "not_found" | "error" | "no_comment";
   author: string | null;
@@ -20,6 +21,16 @@ interface BulkRow {
   title: string | null;
   score: number | null;
   error: string | null;
+}
+
+function inferRowType(r: BulkRow): "post" | "comment" | "unknown" {
+  if (r.type && r.type !== "unknown") return r.type;
+  try {
+    const parts = new URL(r.url).pathname.replace(/^\//, "").split("/").filter(Boolean);
+    if (parts[2] === "comments" && parts.length >= 6) return "comment";
+    if (parts[2] === "comments" && parts.length >= 4) return "post";
+  } catch {}
+  return "unknown";
 }
 
 interface BulkResult {
@@ -206,49 +217,98 @@ export default function RedditTest() {
           </button>
         </div>
 
-        {bulkMutation.data?.results && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-muted/50 text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2">#</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Author</th>
-                    <th className="px-3 py-2">Subreddit</th>
-                    <th className="px-3 py-2">URL / Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {bulkMutation.data.results.map((r, i) => (
-                    <tr key={i}>
-                      <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
-                      <td className="px-3 py-2 font-semibold">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-full",
-                          r.liveStatus === "live" ? "bg-green-500/15 text-green-400"
-                            : r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "not_found"
-                              ? "bg-destructive/15 text-destructive"
-                              : "bg-yellow-500/15 text-yellow-400"
-                        )}>
-                          {r.liveStatus}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">{r.author ? `u/${r.author}` : "—"}</td>
-                      <td className="px-3 py-2">{r.subreddit ? `r/${r.subreddit}` : "—"}</td>
-                      <td className="px-3 py-2 max-w-xs truncate">
-                        <a href={r.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                          {r.url}
-                        </a>
-                        {r.error && <div className="text-destructive mt-0.5">{r.error}</div>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {bulkMutation.data?.results && (() => {
+          const rows = bulkMutation.data.results;
+          const posts = rows.filter(r => inferRowType(r) === "post");
+          const comments = rows.filter(r => inferRowType(r) === "comment");
+          const totalLive = rows.filter(r => r.liveStatus === "live").length;
+          const postsLive = posts.filter(r => r.liveStatus === "live").length;
+          const commentsLive = comments.filter(r => r.liveStatus === "live").length;
+          const totalDead = rows.length - totalLive;
+
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <div className="text-xs text-muted-foreground">Total Checked</div>
+                  <div className="text-xl font-bold text-foreground mt-1">{rows.length}</div>
+                  <div className="text-xs mt-1">
+                    <span className="text-green-400 font-medium">{totalLive} live</span>
+                    {" · "}
+                    <span className="text-destructive font-medium">{totalDead} removed/dead</span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <div className="text-xs text-muted-foreground">Posts</div>
+                  <div className="text-xl font-bold text-foreground mt-1">
+                    <span className="text-green-400">{postsLive}</span>
+                    <span className="text-muted-foreground text-sm font-normal"> / {posts.length} live</span>
+                  </div>
+                  <div className="text-xs text-destructive mt-1">
+                    {posts.length - postsLive} removed/dead
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <div className="text-xs text-muted-foreground">Comments</div>
+                  <div className="text-xl font-bold text-foreground mt-1">
+                    <span className="text-green-400">{commentsLive}</span>
+                    <span className="text-muted-foreground text-sm font-normal"> / {comments.length} live</span>
+                  </div>
+                  <div className="text-xs text-destructive mt-1">
+                    {comments.length - commentsLive} removed/dead
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-muted/50 text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2">#</th>
+                        <th className="px-3 py-2">Type</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2">Author</th>
+                        <th className="px-3 py-2">Subreddit</th>
+                        <th className="px-3 py-2">URL / Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {rows.map((r, i) => {
+                        const rowType = inferRowType(r);
+                        return (
+                          <tr key={i}>
+                            <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                            <td className="px-3 py-2 uppercase text-muted-foreground font-medium">{rowType}</td>
+                            <td className="px-3 py-2 font-semibold">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-full",
+                                r.liveStatus === "live" ? "bg-green-500/15 text-green-400"
+                                  : r.liveStatus === "removed" || r.liveStatus === "deleted" || r.liveStatus === "not_found"
+                                    ? "bg-destructive/15 text-destructive"
+                                    : "bg-yellow-500/15 text-yellow-400"
+                              )}>
+                                {r.liveStatus}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">{r.author ? `u/${r.author}` : "—"}</td>
+                            <td className="px-3 py-2">{r.subreddit ? `r/${r.subreddit}` : "—"}</td>
+                            <td className="px-3 py-2 max-w-xs truncate">
+                              <a href={r.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                                {r.url}
+                              </a>
+                              {r.error && <div className="text-destructive mt-0.5">{r.error}</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

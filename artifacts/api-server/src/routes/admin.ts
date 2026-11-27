@@ -2499,7 +2499,7 @@ router.post("/reddit-bulk-check", requireAuth, async (req, res) => {
       const isPostOnly = Boolean(parsed && !parsed.commentId);
       const itemType: Row["type"] = parsed ? (parsed.commentId ? "comment" : "post") : "unknown";
 
-      const osintUrl = process.env.REDDIT_OSINT_URL;
+      const osintUrl = process.env.REDDIT_BULK_OSINT_URL || process.env.REDDIT_OSINT_URL;
       if (osintUrl) {
         const { fetch: undiciFetch } = await import("undici");
         const endpoint = isPostOnly ? "check/post" : "check/comment";
@@ -2721,7 +2721,7 @@ router.post("/reddit-post-check", requireAuth, async (req, res) => {
       // If this is actually a comment URL, strip the comment part and check the post itself.
       const postUrl = `https://www.reddit.com/r/${parsed.subreddit}/comments/${parsed.postId}/`;
 
-      const osintUrl = process.env.REDDIT_OSINT_URL;
+      const osintUrl = process.env.REDDIT_BULK_OSINT_URL || process.env.REDDIT_OSINT_URL;
       if (!osintUrl) throw new Error("REDDIT_OSINT_URL not configured");
 
       const { fetch: undiciFetch } = await import("undici");
